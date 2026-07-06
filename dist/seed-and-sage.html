@@ -375,6 +375,212 @@ function heroHearts(){
 
 </script>
 <script>
+/* ==== inlined from js/tiles.js ==== */
+'use strict';
+/* ============================================================
+   SEED & SAGE — tiles.js
+   TileGen: the shared terrain tile generator (field-based
+   seamless autotiling + procedural surface texture), used by
+   BOTH the Understory dungeons and the surface garden.
+
+   The old dungeon engine varied only HUE and a noise seed
+   between floors, so every world read as the same speckle in
+   a new colour. TileGen instead derives a whole TEXTURE STYLE
+   per world — grain, density, a surface treatment (speckle /
+   mottle / striate / cracked / woven), macro blotching, and
+   edge roundness — so regenerations actually look different.
+   ============================================================ */
+const TileGen = (function(){
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
+  let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
+  return((t^t>>>14)>>>0)/4294967296;}}
+const hashStr=U.hashStr, hexToRgb=U.hexToRgb, rgbToHsl=U.rgbToHsl, hslToHex=U.hslToHex, shade=U.shadeHex;
+const clamp=U.clamp;
+
+/* ---------- integer-lattice value noise (varies cleanly with seed) ---------- */
+function ihash(x,y,seed){
+  let h = Math.imul((x|0)*374761393 + (y|0)*668265263 ^ (seed|0)*1274126177, 1|0);
+  h = Math.imul(h ^ (h>>>13), 1274126177);
+  h ^= h>>>16;
+  return (h>>>0)/4294967296;
+}
+function vnoise(x,y,seed){
+  const xi=Math.floor(x), yi=Math.floor(y);
+  const xf=x-xi, yf=y-yi;
+  const sm=t=>t*t*(3-2*t);
+  const u=sm(xf), v=sm(yf);
+  const a=ihash(xi,yi,seed), b=ihash(xi+1,yi,seed), c=ihash(xi,yi+1,seed), d=ihash(xi+1,yi+1,seed);
+  return a*(1-u)*(1-v)+b*u*(1-v)+c*(1-u)*v+d*u*v;
+}
+function mix(a,b,t){ return [Math.round(a[0]+(b[0]-a[0])*t),Math.round(a[1]+(b[1]-a[1])*t),Math.round(a[2]+(b[2]-a[2])*t)]; }
+
+/* ---------- autotile geometry ---------- */
+const diskCache={};
+function diskOffsets(r){ if(diskCache[r])return diskCache[r];
+  const offs=[]; const r2=r*r;
+  for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++) if(dx*dx+dy*dy<=r2) offs.push([dx,dy]);
+  return diskCache[r]=offs; }
+function cornersFromIndex(i){ return {NW:!!(i&8),NE:!!(i&4),SW:!!(i&2),SE:!!(i&1)}; }
+function cornerIndex(c){ return (c.NW?8:0)|(c.NE?4:0)|(c.SW?2:0)|(c.SE?1:0); }
+function cellCorners(vg,x,y){ return {NW:vg[y][x],NE:vg[y][x+1],SW:vg[y+1][x],SE:vg[y+1][x+1]}; }
+function fieldCornerIndex(c){ return cornerIndex(c); }
+function computeVertexGrid(field, rows, cols){
+  const get=(y,x)=> (y<0||y>=rows||x<0||x>=cols)?false:field[y][x];
+  const vg=Array.from({length:rows+1},()=>Array(cols+1).fill(false));
+  for(let vy=0;vy<=rows;vy++)for(let vx=0;vx<=cols;vx++){
+    const n=(get(vy-1,vx-1)?1:0)+(get(vy-1,vx)?1:0)+(get(vy,vx-1)?1:0)+(get(vy,vx)?1:0);
+    vg[vy][vx]=n>=3;
+  }
+  return vg;
+}
+function generateCAField(rows, cols, fillProb, steps, rng){
+  const rnd=rng||Math.random;
+  let field=Array.from({length:rows},()=>Array.from({length:cols},()=>rnd()<fillProb));
+  for(let s=0;s<steps;s++){
+    const next=Array.from({length:rows},()=>Array(cols).fill(false));
+    for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+      let c=0;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){ if(!dx&&!dy)continue;
+        const ny=y+dy,nx=x+dx;
+        if(ny<0||ny>=rows||nx<0||nx>=cols||field[ny][nx])c++; }
+      next[y][x]=c>=5;
+    }
+    field=next;
+  }
+  return field;
+}
+function sampleQuadrant(px,py,res,c){
+  const left=px<res/2, top=py<res/2;
+  return (top?(left?c.NW:c.NE):(left?c.SW:c.SE))?1:0;
+}
+function roundedFieldMask(res, corners, radius){
+  const base=new Uint8Array(res*res);
+  for(let y=0;y<res;y++)for(let x=0;x<res;x++) base[y*res+x]=sampleQuadrant(x,y,res,corners);
+  if(radius<=0)return base;
+  const offs=diskOffsets(radius);
+  const samp=(arr,x,y)=>(x>=0&&x<res&&y>=0&&y<res)?arr[y*res+x]:sampleQuadrant(x,y,res,corners);
+  const erode=arr=>{const o=new Uint8Array(res*res);
+    for(let y=0;y<res;y++)for(let x=0;x<res;x++){let a=1;for(const[dx,dy]of offs){if(!samp(arr,x+dx,y+dy)){a=0;break}}o[y*res+x]=a}return o;};
+  const dil=arr=>{const o=new Uint8Array(res*res);
+    for(let y=0;y<res;y++)for(let x=0;x<res;x++){let a=0;for(const[dx,dy]of offs){if(samp(arr,x+dx,y+dy)){a=1;break}}o[y*res+x]=a}return o;};
+  let m=dil(erode(base)); m=erode(dil(m)); return m;
+}
+
+/* ---------- palettes from a grass + dirt hex ---------- */
+function makePalettes(grassHex, dirtHex){
+  const low={ grassBase:hexToRgb(grassHex), grassLight:shade(grassHex,0.22), grassDark:shade(grassHex,-0.32),
+              dirtBase:hexToRgb(dirtHex),  dirtLight:shade(dirtHex,0.24),  dirtDark:shade(dirtHex,-0.42) };
+  const gh2=shade(grassHex,0.20); const ghHex='#'+gh2.map(v=>v.toString(16).padStart(2,'0')).join('');
+  const high={ grassBase:gh2, grassLight:shade(ghHex,0.20), grassDark:shade(ghHex,-0.22),
+               dirtBase:hexToRgb(dirtHex), dirtLight:shade(dirtHex,0.24), dirtDark:shade(dirtHex,-0.42) };
+  const [dr,dg,db]=hexToRgb(dirtHex); const [dhh,ds,dl]=rgbToHsl(dr,dg,db);
+  const [gr,gg,gb]=hexToRgb(grassHex); const [gh]=rgbToHsl(gr,gg,gb);
+  const hue=dhh+(((gh-dhh+1.5)%1)-0.5)*0.15;
+  const rockBase=hslToHex((hue+1)%1, Math.max(0.08,ds*0.55), Math.min(0.44,dl+0.18));
+  const rock={ base:hexToRgb(rockBase), dark:shade(rockBase,-0.30), light:shade(rockBase,0.20), deep:shade(rockBase,-0.5) };
+  return {low, high, rock};
+}
+
+/* ---------- STYLE: the per-world texture personality ---------- */
+const STYLE_NAMES=['speckle','mottle','striate','cracked','woven','pebbled'];
+function deriveStyle(seedStr){
+  const rng=mulberry32(hashStr(String(seedStr))^0x7A11E5);
+  return {
+    name: STYLE_NAMES[(rng()*STYLE_NAMES.length)|0],
+    texScale: 3.0 + rng()*7.0,          // grain size
+    texDensity: 0.26 + rng()*0.42,      // how much light/dark detail
+    macroScale: 7.0 + rng()*16.0,       // big soft blotches
+    macroAmt: 0.18 + rng()*0.3,         // blotch strength
+    sx: 0.4 + rng()*0.9, sy: 0.4 + rng()*0.9,   // striation direction
+    roundRadius: 1 + ((rng()*3)|0),     // 1..3 edge roundness
+    grainSeed: (rng()*1e6)|0,
+  };
+}
+
+/* ---------- the textured tile ---------- */
+function detail(name, x, y, seed, ts, td, sx, sy){
+  // returns -1 (dark), 0 (base), 1 (light)
+  const n=vnoise(x/ts+seed*0.013, y/ts+seed*0.017, seed);
+  if(name==='speckle'){ return n<td*0.5?-1 : n>1-td*0.5?1 : 0; }
+  if(name==='pebbled'){ const b=vnoise(x/(ts*1.6)+seed*0.02, y/(ts*1.6)+seed*0.03, seed^0x33);
+    return b<0.30?-1 : b>0.74?1 : (n>0.86?1:0); }
+  if(name==='mottle'){ const b=vnoise(x/(ts*2.0)+seed*0.023, y/(ts*2.0)+seed*0.017, seed^0x55);
+    return b<0.38?-1 : b>0.72?1 : 0; }
+  if(name==='striate'){ const s=(Math.sin((x*sx+y*sy)/Math.max(1.2,ts)*3.14159 + n*2.2)+1)/2;
+    return s<td*0.55?-1 : s>1-td*0.4?1 : 0; }
+  if(name==='woven'){ const a=Math.sin(x/Math.max(1.4,ts)*3.14159*1.2), b=Math.sin(y/Math.max(1.4,ts)*3.14159*1.2);
+    const w=(a*b+1)/2; return w<td*0.5?-1 : w>1-td*0.5?1 : (n<0.14?-1:0); }
+  if(name==='cracked'){ const w=vnoise(x/ts*1.25+seed*0.03+n*0.8, y/ts*1.25+seed*0.02, seed^0xAB);
+    if(Math.abs(w-0.5)<0.055*(0.6+td)) return -1;
+    return n>1-td*0.4?1:0; }
+  return 0;
+}
+function paintTile(res, mask, seed, pal, style){
+  const cv=document.createElement('canvas'); cv.width=res; cv.height=res;
+  const c=cv.getContext('2d'); const img=c.createImageData(res,res);
+  const st=style, ts=st.texScale, td=st.texDensity, ms=st.macroScale, gs=st.grainSeed;
+  for(let y=0;y<res;y++)for(let x=0;x<res;x++){
+    const idx=y*res+x, g=mask[idx];
+    const base=g?pal.grassBase:pal.dirtBase, light=g?pal.grassLight:pal.dirtLight, dark=g?pal.grassDark:pal.dirtDark;
+    let col=base;
+    const d=detail(st.name, x, y, seed+gs, ts, td, st.sx, st.sy);
+    if(d<0) col=dark; else if(d>0) col=light;
+    // macro blotch: shift whole regions lighter/darker so tiles aren't flat
+    const macro=vnoise(x/ms+seed*0.019, y/ms+seed*0.011, (seed^0x9E37)|0);
+    if(macro<0.5-st.macroAmt) col=mix(col,dark,0.4);
+    else if(macro>0.5+st.macroAmt) col=mix(col,light,0.32);
+    const p=idx*4; img.data[p]=col[0]; img.data[p+1]=col[1]; img.data[p+2]=col[2]; img.data[p+3]=255;
+  }
+  c.putImageData(img,0,0); return cv;
+}
+// rock overlay: rock speckle where mask=1, transparent elsewhere
+function paintCliff(res, mask, seed, rock, style){
+  const cv=document.createElement('canvas'); cv.width=res; cv.height=res;
+  const c=cv.getContext('2d'); const img=c.createImageData(res,res);
+  const st=style, ts=st.texScale, td=st.texDensity, gs=st.grainSeed;
+  for(let y=0;y<res;y++)for(let x=0;x<res;x++){
+    const idx=y*res+x; if(!mask[idx])continue;
+    let col=rock.base;
+    const d=detail(st.name, x, y, seed+gs+911, ts, td, st.sx, st.sy);
+    if(d<0)col=rock.dark; else if(d>0)col=rock.light;
+    const macro=vnoise(x/st.macroScale+seed*0.02, y/st.macroScale+seed*0.03, (seed^0x1234)|0);
+    if(macro<0.34)col=mix(col,rock.deep,0.4); else if(macro>0.72)col=mix(col,rock.light,0.3);
+    const p=idx*4; img.data[p]=col[0]; img.data[p+1]=col[1]; img.data[p+2]=col[2]; img.data[p+3]=255;
+  }
+  c.putImageData(img,0,0); return cv;
+}
+
+/* ---------- build a whole 16-corner tileset ---------- */
+function makeTileset(opts){
+  const res=opts.res||24, variants=opts.variants||5;
+  const seed=(opts.seed>>>0)||1337;
+  const style=opts.style||deriveStyle('ts-'+seed);
+  const pals=makePalettes(opts.grassHex, opts.dirtHex);
+  const field=[], high=[], cliff=[], coll=new Array(16);
+  for(let i=0;i<16;i++){
+    const mask=roundedFieldMask(res, cornersFromIndex(i), style.roundRadius);
+    coll[i]=mask;
+    field[i]=[]; high[i]=[]; cliff[i]=[];
+    const base=seed + i*7919 + 500000;
+    for(let v=0;v<variants;v++){
+      field[i].push(paintTile(res, mask, base+v*104729, pals.low, style));
+      high[i].push(paintTile(res, mask, base+v*104729+333, pals.high, style));
+      cliff[i].push(paintCliff(res, mask, base+v*104729+4000, pals.rock, style));
+    }
+  }
+  return {res, variants, field, high, cliff, coll, style, pals, grassHex:opts.grassHex, dirtHex:opts.dirtHex};
+}
+
+return {
+  mulberry32, vnoise, ihash, mix,
+  diskOffsets, cornersFromIndex, cornerIndex, cellCorners, fieldCornerIndex,
+  computeVertexGrid, generateCAField, sampleQuadrant, roundedFieldMask,
+  makePalettes, deriveStyle, STYLE_NAMES, paintTile, paintCliff, makeTileset,
+};
+})();
+
+</script>
+<script>
 /* ==== inlined from js/forge.js ==== */
 'use strict';
 /* ============================================================
@@ -1041,7 +1247,7 @@ const CFHelp = (function(){
       };
     },
     // small monsters bumped to native 44 so they render close to the player's 48
-    slime: (rng)=>({ size:44,
+    slime: (rng)=>({ size:48,
       bodyW:4.5, bodyH:5.5, taper:-.15, bodyRound:.72, headSize:-0.9, headRound:.78,
       earType:'none', hornType:'none', tailType: pick(rng,['none','stub']),
       armLen:4, legLen:6, legThick:1.6, footSize:2.0,
@@ -1049,7 +1255,7 @@ const CFHelp = (function(){
       tex: pick(rng,['smooth','dither']), texAmt:.5, spots: rng()<0.5,
       snout:0, attackStyle:'stab', walkFrames:4, outline:true, belt:false, belly:true,
     }),
-    wisp: (rng)=>({ size:44,
+    wisp: (rng)=>({ size:48,
       bodyW:2.6, bodyH:6.5, taper:-.2, bodyRound:.6, headSize:-0.6, headRound:.72,
       earType: pick(rng,['fin','pointed']), earSize:3.5, hornType:'none',
       tailType: pick(rng,['spike','long','fluff']), tailSize:6,
@@ -1087,7 +1293,7 @@ const CFHelp = (function(){
   function villagerParams(lookSeed, opts){
     opts = opts||{};
     const rng = CF.mulberry32(hashSeed(lookSeed)^0xF01C);
-    const P = { ...CF.PRESETS.Villager, size:32, walkFrames:4, outline:true, seed:lookSeed };
+    const P = { ...CF.PRESETS.Villager, size:48, walkFrames:4, outline:true, seed:lookSeed };
     P.cloth = pick(rng,['shirt','tunic','tunic','robe']);
     P.hairType = pick(rng,['bowl','swept','curly','ponytail','topknot','long','tuft','spiky']);
     P.hairHue = Math.round(rng()*360);
@@ -1986,7 +2192,7 @@ function processBakeQueue(){
   if(job.kind==='person'){
    if(job.p.dead)return;
    const params=CFHelp.villagerParams(job.p.lookSeed,{elder:job.p.age>=56});
-   job.p.sprite=CFHelp.bakeCreature(params,34,['walk','talk']);
+   job.p.sprite=CFHelp.bakeCreature(params,48,['walk','talk']);
   }else if(job.kind==='hero'){
    const hrng=CF.mulberry32(U.hashStr(Hero.lookSeed)^0xC0DE);
    const arch=CFHelp.ARCHETYPES.player(hrng);
@@ -1995,9 +2201,9 @@ function processBakeQueue(){
     hue2:Math.round(hrng()*360),accent:Math.round(hrng()*360),
     hairHue:Math.round(hrng()*360),clothHue:Math.round(hrng()*360),metalHue:210,
     seed:Hero.lookSeed};
-   hero.sprite=CFHelp.bakeCreature(params,44);
+   hero.sprite=CFHelp.bakeCreature(params,48);
   }else if(job.kind==='mon'){
-   const sizes={grub:46,lurker:44,horror:58};
+   const sizes={grub:48,lurker:48,horror:48};
    surfMon[job.type]=CFHelp.bakeCreature(surfMonsterParams(job.type),sizes[job.type],['walk','attack']);
   }
  }catch(e){/* a failed bake falls back to the painted sprite */}
@@ -3645,46 +3851,44 @@ function resize(){
 }
 window.addEventListener('resize',resize);resize();
 let tcv=null,dynCanvas=null,dctx=null;
+// the surface now uses the shared TileGen engine: a per-world garden palette +
+// texture style, autotiled with organic rounded edges (grass over bramble-rock).
+let surfTS=null;
+function bakeSurfaceTiles(){
+ const gr=U.mulberry32((seed^0x5A17C0DE)>>>0);
+ const gh=0.24+gr()*0.20;                                  // garden greens → teal
+ const grassHex=U.hslToHex(gh,0.30+gr()*0.20,0.32+gr()*0.10);
+ const dirtHex=U.hslToHex((gh+0.42+gr()*0.16)%1,0.22+gr()*0.16,0.09+gr()*0.05);
+ const style=TileGen.deriveStyle('surface-'+seed);
+ surfTS=TileGen.makeTileset({seed:(seed>>>0)||1, res:TILE, grassHex, dirtHex, variants:6, style});
+}
+function tileVariant(x,y){ return ((x*13+y*7)>>>0)%(surfTS?surfTS.variants:1); }
 function paintFloorTile(c,x,y){
+ if(surfTS){ c.drawImage(surfTS.field[15][tileVariant(x,y)], x*TILE, y*TILE); return; }
  const h=hash2(x,y),v=h*16;
  c.fillStyle='rgb('+(56+v)+','+(92+v*0.9)+','+(50+v*0.6)+')';
  c.fillRect(x*TILE,y*TILE,TILE,TILE);
- if(h>0.9){c.fillStyle='rgba(255,255,220,0.07)';c.fillRect(x*TILE+((h*97)%12|0),y*TILE+((h*53)%12|0),2,2)}
-}
-function paintRockTile(c,x,y){
- const h=hash2(x,y),shade=h*10;
- c.fillStyle='rgb('+(22+shade*0.8)+','+(38+shade)+','+(24+shade*0.7)+')';
- c.fillRect(x*TILE,y*TILE,TILE,TILE);
 }
 function buildTerrainLayer(){
+ bakeSurfaceTiles();
  tcv=document.createElement('canvas');
  tcv.width=W*TILE;tcv.height=H*TILE;
- const c=tcv.getContext('2d');
+ const c=tcv.getContext('2d');c.imageSmoothingEnabled=false;
+ // vertex grids for the grass field (open) and the rock field (solid)
+ const openF=[],solidF=[];
+ for(let y=0;y<H;y++){openF[y]=[];solidF[y]=[];for(let x=0;x<W;x++){const o=walkable(x,y);openF[y][x]=o;solidF[y][x]=!o}}
+ const vgO=TileGen.computeVertexGrid(openF,H,W);
+ const vgS=TileGen.computeVertexGrid(solidF,H,W);
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const h=hash2(x,y);
+  const v=tileVariant(x,y);
+  const gi=TileGen.fieldCornerIndex(TileGen.cellCorners(vgO,x,y));
+  c.drawImage(surfTS.field[gi][v],x*TILE,y*TILE);
   if(map[idx(x,y)]===1){
-   paintRockTile(c,x,y);
-   // tangle texture
-   if(h>0.6){c.fillStyle='rgba(70,110,60,0.25)';c.fillRect(x*TILE+((h*89)%10|0),y*TILE+((h*41)%10|0),3,2)}
-   if(h<0.15){c.fillStyle='rgba(0,0,0,0.25)';c.fillRect(x*TILE+((h*997)%11|0),y*TILE+((h*631)%11|0),3,2)}
-   let openN=false;
-   if(walkable(x,y+1)||walkable(x,y-1)||walkable(x+1,y)||walkable(x-1,y))openN=true;
-   if(openN){
-    c.fillStyle='rgba(120,170,90,0.30)';
-    if(walkable(x,y+1))c.fillRect(x*TILE,y*TILE+TILE-3,TILE,3);
-    if(walkable(x,y-1))c.fillRect(x*TILE,y*TILE,TILE,2);
-    if(walkable(x+1,y))c.fillRect(x*TILE+TILE-2,y*TILE,2,TILE);
-    if(walkable(x-1,y))c.fillRect(x*TILE,y*TILE,2,TILE);
-   }
+   // overlay rock texture with organic rounded edges where the bramble sits
+   const si=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
+   c.drawImage(surfTS.cliff[si][v],x*TILE,y*TILE);
   }else{
-   const v=h*16;
-   let nw=0;
-   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&!walkable(x+dx,y+dy))nw++;
-   const dark=nw*3;
-   c.fillStyle='rgb('+(56+v-dark)+','+(92+v*0.9-dark)+','+(50+v*0.6-dark)+')';
-   c.fillRect(x*TILE,y*TILE,TILE,TILE);
-   if(h>0.9){c.fillStyle='rgba(255,255,220,0.07)';c.fillRect(x*TILE+((h*97)%12|0),y*TILE+((h*53)%12|0),2,2)}
-   if(h<0.06){c.fillStyle='rgba(0,0,0,0.13)';c.fillRect(x*TILE+((h*997)%11|0),y*TILE+((h*631)%11|0),3,2)}
+   const h=hash2(x,y);
    // Plant Forge meadow decor, stamped static into the terrain
    if(flora&&h>0.30&&h<0.40&&!nodeAt.has(idx(x,y))){
     const dvi=(x*7+y*13)%flora.decor.length;
@@ -4956,6 +5160,9 @@ function applyWorldPalette(seedStr){
   T.grassColor = hslToHex(hue, grassS, grassL);
   const dHue = (hue + 0.45 + rng()*0.1) % 1;
   T.dirtColor = hslToHex(dHue, 0.30+rng()*0.18, 0.05+rng()*0.05); // black water
+  // each floor gets its own TEXTURE STYLE (grain/density/treatment/edge), not
+  // just a new hue — so regenerated floors read as genuinely different places
+  T.style = TileGen.deriveStyle(seedStr);
   renderTileset();
 }
 function diskOffsets(r){
@@ -5038,7 +5245,7 @@ const T = {
   res: 24, roundRadius: 2, texScale: 6, texDensity: 0.40,
   grassColor: '#2e4a30', dirtColor: '#0a1512', seed: 1337,
 };
-const NUM_VARIANTS = 4;
+const NUM_VARIANTS = 6;
 function palette(){
   const g=T.grassColor, d=T.dirtColor;
   return {
@@ -5101,19 +5308,21 @@ const highTiles  = Array.from({length:16},(_,i)=>({ variants:[], seedOffset:i*79
 const cliffTiles = Array.from({length:16},()=>[]);
 const collMasks = new Array(16);
 function renderTileset(){
-  const lowPal=palette(), hiPal=highPalette();
+  const lowPal=palette(), hiPal=highPalette(), rockPal=rockPalette();
+  const style=T.style||(T.style=TileGen.deriveStyle('floor-'+T.seed));
   for(let i=0;i<16;i++){
     const corners = fieldCornersFromIndex(i);
-    const mask = roundedFieldMask(T.res, corners, T.roundRadius);
+    // edge roundness now comes from the floor's derived style, not a constant
+    const mask = roundedFieldMask(T.res, corners, style.roundRadius);
     collMasks[i] = mask;
     const base = T.seed + fieldTiles[i].seedOffset;
     fieldTiles[i].variants = [];
     highTiles[i].variants = [];
     cliffTiles[i] = [];
     for(let v=0;v<NUM_VARIANTS;v++){
-      fieldTiles[i].variants.push(buildTileCanvas(T.res, mask, base+v*7919, lowPal));
-      highTiles[i].variants.push(buildTileCanvas(T.res, mask, base+v*7919+333, hiPal));
-      cliffTiles[i].push(buildCliffMaskTile(T.res, mask, base+v*7919+4000));
+      fieldTiles[i].variants.push(TileGen.paintTile(T.res, mask, base+v*104729, lowPal, style));
+      highTiles[i].variants.push(TileGen.paintTile(T.res, mask, base+v*104729+333, hiPal, style));
+      cliffTiles[i].push(TileGen.paintCliff(T.res, mask, base+v*104729+4000, rockPal, style));
     }
   }
 }
@@ -5160,7 +5369,7 @@ function playerPalette(rng){
 }
 let CREATURES = null;
 function generateCreatures(seedStr){
-  const drawSizes = { slime:46, wisp:44, brute:64, boss:96, player:44 };
+  const drawSizes = { slime:48, wisp:48, brute:48, boss:96, player:48 };
   const out = {};
   for(const kind of ['player','slime','wisp','brute','boss']){
     // the player's SHAPE follows the Hero between worlds; only the colours

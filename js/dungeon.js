@@ -55,6 +55,9 @@ function applyWorldPalette(seedStr){
   T.grassColor = hslToHex(hue, grassS, grassL);
   const dHue = (hue + 0.45 + rng()*0.1) % 1;
   T.dirtColor = hslToHex(dHue, 0.30+rng()*0.18, 0.05+rng()*0.05); // black water
+  // each floor gets its own TEXTURE STYLE (grain/density/treatment/edge), not
+  // just a new hue — so regenerated floors read as genuinely different places
+  T.style = TileGen.deriveStyle(seedStr);
   renderTileset();
 }
 function diskOffsets(r){
@@ -137,7 +140,7 @@ const T = {
   res: 24, roundRadius: 2, texScale: 6, texDensity: 0.40,
   grassColor: '#2e4a30', dirtColor: '#0a1512', seed: 1337,
 };
-const NUM_VARIANTS = 4;
+const NUM_VARIANTS = 6;
 function palette(){
   const g=T.grassColor, d=T.dirtColor;
   return {
@@ -200,19 +203,21 @@ const highTiles  = Array.from({length:16},(_,i)=>({ variants:[], seedOffset:i*79
 const cliffTiles = Array.from({length:16},()=>[]);
 const collMasks = new Array(16);
 function renderTileset(){
-  const lowPal=palette(), hiPal=highPalette();
+  const lowPal=palette(), hiPal=highPalette(), rockPal=rockPalette();
+  const style=T.style||(T.style=TileGen.deriveStyle('floor-'+T.seed));
   for(let i=0;i<16;i++){
     const corners = fieldCornersFromIndex(i);
-    const mask = roundedFieldMask(T.res, corners, T.roundRadius);
+    // edge roundness now comes from the floor's derived style, not a constant
+    const mask = roundedFieldMask(T.res, corners, style.roundRadius);
     collMasks[i] = mask;
     const base = T.seed + fieldTiles[i].seedOffset;
     fieldTiles[i].variants = [];
     highTiles[i].variants = [];
     cliffTiles[i] = [];
     for(let v=0;v<NUM_VARIANTS;v++){
-      fieldTiles[i].variants.push(buildTileCanvas(T.res, mask, base+v*7919, lowPal));
-      highTiles[i].variants.push(buildTileCanvas(T.res, mask, base+v*7919+333, hiPal));
-      cliffTiles[i].push(buildCliffMaskTile(T.res, mask, base+v*7919+4000));
+      fieldTiles[i].variants.push(TileGen.paintTile(T.res, mask, base+v*104729, lowPal, style));
+      highTiles[i].variants.push(TileGen.paintTile(T.res, mask, base+v*104729+333, hiPal, style));
+      cliffTiles[i].push(TileGen.paintCliff(T.res, mask, base+v*104729+4000, rockPal, style));
     }
   }
 }
@@ -259,7 +264,7 @@ function playerPalette(rng){
 }
 let CREATURES = null;
 function generateCreatures(seedStr){
-  const drawSizes = { slime:46, wisp:44, brute:64, boss:96, player:44 };
+  const drawSizes = { slime:48, wisp:48, brute:48, boss:96, player:48 };
   const out = {};
   for(const kind of ['player','slime','wisp','brute','boss']){
     // the player's SHAPE follows the Hero between worlds; only the colours

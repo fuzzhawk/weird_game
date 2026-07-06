@@ -300,7 +300,7 @@ function processBakeQueue(){
   if(job.kind==='person'){
    if(job.p.dead)return;
    const params=CFHelp.villagerParams(job.p.lookSeed,{elder:job.p.age>=56});
-   job.p.sprite=CFHelp.bakeCreature(params,34,['walk','talk']);
+   job.p.sprite=CFHelp.bakeCreature(params,48,['walk','talk']);
   }else if(job.kind==='hero'){
    const hrng=CF.mulberry32(U.hashStr(Hero.lookSeed)^0xC0DE);
    const arch=CFHelp.ARCHETYPES.player(hrng);
@@ -309,9 +309,9 @@ function processBakeQueue(){
     hue2:Math.round(hrng()*360),accent:Math.round(hrng()*360),
     hairHue:Math.round(hrng()*360),clothHue:Math.round(hrng()*360),metalHue:210,
     seed:Hero.lookSeed};
-   hero.sprite=CFHelp.bakeCreature(params,44);
+   hero.sprite=CFHelp.bakeCreature(params,48);
   }else if(job.kind==='mon'){
-   const sizes={grub:46,lurker:44,horror:58};
+   const sizes={grub:48,lurker:48,horror:48};
    surfMon[job.type]=CFHelp.bakeCreature(surfMonsterParams(job.type),sizes[job.type],['walk','attack']);
   }
  }catch(e){/* a failed bake falls back to the painted sprite */}
@@ -1959,46 +1959,44 @@ function resize(){
 }
 window.addEventListener('resize',resize);resize();
 let tcv=null,dynCanvas=null,dctx=null;
+// the surface now uses the shared TileGen engine: a per-world garden palette +
+// texture style, autotiled with organic rounded edges (grass over bramble-rock).
+let surfTS=null;
+function bakeSurfaceTiles(){
+ const gr=U.mulberry32((seed^0x5A17C0DE)>>>0);
+ const gh=0.24+gr()*0.20;                                  // garden greens → teal
+ const grassHex=U.hslToHex(gh,0.30+gr()*0.20,0.32+gr()*0.10);
+ const dirtHex=U.hslToHex((gh+0.42+gr()*0.16)%1,0.22+gr()*0.16,0.09+gr()*0.05);
+ const style=TileGen.deriveStyle('surface-'+seed);
+ surfTS=TileGen.makeTileset({seed:(seed>>>0)||1, res:TILE, grassHex, dirtHex, variants:6, style});
+}
+function tileVariant(x,y){ return ((x*13+y*7)>>>0)%(surfTS?surfTS.variants:1); }
 function paintFloorTile(c,x,y){
+ if(surfTS){ c.drawImage(surfTS.field[15][tileVariant(x,y)], x*TILE, y*TILE); return; }
  const h=hash2(x,y),v=h*16;
  c.fillStyle='rgb('+(56+v)+','+(92+v*0.9)+','+(50+v*0.6)+')';
  c.fillRect(x*TILE,y*TILE,TILE,TILE);
- if(h>0.9){c.fillStyle='rgba(255,255,220,0.07)';c.fillRect(x*TILE+((h*97)%12|0),y*TILE+((h*53)%12|0),2,2)}
-}
-function paintRockTile(c,x,y){
- const h=hash2(x,y),shade=h*10;
- c.fillStyle='rgb('+(22+shade*0.8)+','+(38+shade)+','+(24+shade*0.7)+')';
- c.fillRect(x*TILE,y*TILE,TILE,TILE);
 }
 function buildTerrainLayer(){
+ bakeSurfaceTiles();
  tcv=document.createElement('canvas');
  tcv.width=W*TILE;tcv.height=H*TILE;
- const c=tcv.getContext('2d');
+ const c=tcv.getContext('2d');c.imageSmoothingEnabled=false;
+ // vertex grids for the grass field (open) and the rock field (solid)
+ const openF=[],solidF=[];
+ for(let y=0;y<H;y++){openF[y]=[];solidF[y]=[];for(let x=0;x<W;x++){const o=walkable(x,y);openF[y][x]=o;solidF[y][x]=!o}}
+ const vgO=TileGen.computeVertexGrid(openF,H,W);
+ const vgS=TileGen.computeVertexGrid(solidF,H,W);
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const h=hash2(x,y);
+  const v=tileVariant(x,y);
+  const gi=TileGen.fieldCornerIndex(TileGen.cellCorners(vgO,x,y));
+  c.drawImage(surfTS.field[gi][v],x*TILE,y*TILE);
   if(map[idx(x,y)]===1){
-   paintRockTile(c,x,y);
-   // tangle texture
-   if(h>0.6){c.fillStyle='rgba(70,110,60,0.25)';c.fillRect(x*TILE+((h*89)%10|0),y*TILE+((h*41)%10|0),3,2)}
-   if(h<0.15){c.fillStyle='rgba(0,0,0,0.25)';c.fillRect(x*TILE+((h*997)%11|0),y*TILE+((h*631)%11|0),3,2)}
-   let openN=false;
-   if(walkable(x,y+1)||walkable(x,y-1)||walkable(x+1,y)||walkable(x-1,y))openN=true;
-   if(openN){
-    c.fillStyle='rgba(120,170,90,0.30)';
-    if(walkable(x,y+1))c.fillRect(x*TILE,y*TILE+TILE-3,TILE,3);
-    if(walkable(x,y-1))c.fillRect(x*TILE,y*TILE,TILE,2);
-    if(walkable(x+1,y))c.fillRect(x*TILE+TILE-2,y*TILE,2,TILE);
-    if(walkable(x-1,y))c.fillRect(x*TILE,y*TILE,2,TILE);
-   }
+   // overlay rock texture with organic rounded edges where the bramble sits
+   const si=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
+   c.drawImage(surfTS.cliff[si][v],x*TILE,y*TILE);
   }else{
-   const v=h*16;
-   let nw=0;
-   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&!walkable(x+dx,y+dy))nw++;
-   const dark=nw*3;
-   c.fillStyle='rgb('+(56+v-dark)+','+(92+v*0.9-dark)+','+(50+v*0.6-dark)+')';
-   c.fillRect(x*TILE,y*TILE,TILE,TILE);
-   if(h>0.9){c.fillStyle='rgba(255,255,220,0.07)';c.fillRect(x*TILE+((h*97)%12|0),y*TILE+((h*53)%12|0),2,2)}
-   if(h<0.06){c.fillStyle='rgba(0,0,0,0.13)';c.fillRect(x*TILE+((h*997)%11|0),y*TILE+((h*631)%11|0),3,2)}
+   const h=hash2(x,y);
    // Plant Forge meadow decor, stamped static into the terrain
    if(flora&&h>0.30&&h<0.40&&!nodeAt.has(idx(x,y))){
     const dvi=(x*7+y*13)%flora.decor.length;

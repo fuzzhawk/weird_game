@@ -55,6 +55,7 @@ village granary.
 |---|---|
 | `index.html` | shell: DOM + CSS for both worlds and the editor, loads the modules |
 | `js/core.js` | shared utils + the persistent Hero (incl. installed relics) |
+| `js/tiles.js` | TileGen — shared terrain tile generator (autotiling + per-world texture styles), used by both worlds |
 | `js/forge.js` | Creature Forge sprite engine + baking bridge (CFHelp) |
 | `js/plants.js` | Plant Forge flora engine + baking helper |
 | `js/relics.js` | Tech Forge — procedural tech-relic sprite generator + relic catalog |

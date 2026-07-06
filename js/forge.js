@@ -663,7 +663,7 @@ const CFHelp = (function(){
       };
     },
     // small monsters bumped to native 44 so they render close to the player's 48
-    slime: (rng)=>({ size:44,
+    slime: (rng)=>({ size:48,
       bodyW:4.5, bodyH:5.5, taper:-.15, bodyRound:.72, headSize:-0.9, headRound:.78,
       earType:'none', hornType:'none', tailType: pick(rng,['none','stub']),
       armLen:4, legLen:6, legThick:1.6, footSize:2.0,
@@ -671,7 +671,7 @@ const CFHelp = (function(){
       tex: pick(rng,['smooth','dither']), texAmt:.5, spots: rng()<0.5,
       snout:0, attackStyle:'stab', walkFrames:4, outline:true, belt:false, belly:true,
     }),
-    wisp: (rng)=>({ size:44,
+    wisp: (rng)=>({ size:48,
       bodyW:2.6, bodyH:6.5, taper:-.2, bodyRound:.6, headSize:-0.6, headRound:.72,
       earType: pick(rng,['fin','pointed']), earSize:3.5, hornType:'none',
       tailType: pick(rng,['spike','long','fluff']), tailSize:6,
@@ -709,7 +709,7 @@ const CFHelp = (function(){
   function villagerParams(lookSeed, opts){
     opts = opts||{};
     const rng = CF.mulberry32(hashSeed(lookSeed)^0xF01C);
-    const P = { ...CF.PRESETS.Villager, size:32, walkFrames:4, outline:true, seed:lookSeed };
+    const P = { ...CF.PRESETS.Villager, size:48, walkFrames:4, outline:true, seed:lookSeed };
     P.cloth = pick(rng,['shirt','tunic','tunic','robe']);
     P.hairType = pick(rng,['bowl','swept','curly','ponytail','topknot','long','tuft','spiky']);
     P.hairHue = Math.round(rng()*360);
