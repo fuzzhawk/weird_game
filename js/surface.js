@@ -61,7 +61,8 @@ function phase(){const t=tod();return t<0.24?'Night':t<0.32?'Dawn':t<0.48?'Morni
 
 /* ================= the wandering Sage (the player) ================= */
 const hero={x:0,y:0,face:0,dir:0,anim:'walk',animClock:0,atkClock:0,atkT:0,moving:false,
-  ifr:0,down:false,downT:0,sprite:null,spawnX:0,spawnY:0,hurtFlash:0};
+  ifr:0,down:false,downT:0,sprite:null,spawnX:0,spawnY:0,hurtFlash:0,get relics(){return Hero.relics}};
+let salvage=[];   // surface tech-salvage caches the Sage can pick up for a relic
 const HERO_T={isHero:true,get x(){return hero.x},get y(){return hero.y},get dead(){return hero.down}};
 function heroTargetable(){return !hero.down&&speedIdx<=1}
 let heroSlashes=[],heroSlashCd=0;
@@ -421,7 +422,18 @@ function genWorld(){
   Hero.hp=Hero.maxHp;
   queueHeroBake();
  }
+ salvage=[];
+ for(let i=0;i<5;i++)spawnSalvage();
  refreshChron();
+}
+function spawnSalvage(){
+ for(let t=0;t<40;t++){
+  const[x,y]=randOpenTile();
+  if(bld[idx(x,y)]>=0||nodeAt.has(idx(x,y))||dungeonAt(x,y))continue;
+  if(dist2(x*TILE,y*TILE,hero.x,hero.y)<12*TILE*12*TILE)continue;
+  salvage.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,t:R()*6.28,relic:pick(RELICS)});
+  return;
+ }
 }
 function randOpenTile(){return pick(openTiles)}
 function nearOpen(tx,ty){
@@ -1235,6 +1247,17 @@ function dailyTick(){
  }
  if(people.length<10&&chance(.4))arrive();
  else if(people.length<26&&chance(.08))arrive();
+ // tech relics pay out their treasure trickle to whoever carries them
+ for(const p of people){
+  if(p.dead)continue;
+  for(const r of p.relics)if(r.treasure){
+   if(p.home&&!p.home.gone&&p.home.stock)p.home.stock[r.treasure.res]+=r.treasure.amt;
+   else p.inv[r.treasure.res]=(p.inv[r.treasure.res]||0)+r.treasure.amt;
+  }
+ }
+ for(const id of Hero.relics){const r=TF.byId[id];if(r&&r.treasure)depositResource(r.treasure.res,r.treasure.amt,hero.x,hero.y)}
+ // the garden keeps seeding fresh salvage for the Sage to find
+ if(salvage.length<5&&chance(.3))spawnSalvage();
  villageTick();
  upkeepTick();
 }
@@ -1289,16 +1312,54 @@ function updatePerson(p,dt){
 /* ================= the Understories (dungeon mouths) ================= */
 const DUN_ADJ=['Weeping','Sunless','Drowned','Gnawed','Whispering','Forgotten','Overclocked','Hungry','Corrupted','Broken','Endless','Unspoken'];
 const DUN_NOUN=['Understory','Rootcellar','Tanglewell','Descent','Datavault','Mycelium','Server-Vault','Compost','Fissure','Substrate','Labyrinth','Rot'];
-const RELICS=[
- {g:'💎',n:'Heart of the Loam',k:'luck',v:.15,d:'a seed-stone that pings when danger nears'},
- {g:'🗡',n:'Grafted Thorn-Blade',k:'work',v:.2,d:'an old argument, edged in chrome'},
- {g:'📿',n:'Beads of Fallen Data',k:'charm',v:.2,d:'left by someone who never surfaced'},
- {g:'🔋',n:'Everlit Spore-Cell',k:'luck',v:.1,d:'its charge has never once run flat'},
- {g:'🎭',n:'Bark-and-Circuit Mask',k:'social',v:.2,d:'faces sleep in the grain'},
- {g:'💍',n:'Ring of Grafted Hearts',k:'romance',v:.25,d:'two stems soldered into one'},
- {g:'🧭',n:'Tap-Root Compass',k:'speed',v:.2,d:'it points only downward, into the net'},
- {g:'🪬',n:'Warding Bulb',k:'luck',v:.12,d:'the dark leans politely away from it'}
-];
+// Tech Forge relics: generated icons + a granted SKILL and (sometimes) a
+// TREASURE trickle, for the Sage and for NPCs alike.
+function relicObj(c){return {g:c.glyph,n:c.name,k:c.k,v:c.v,d:c.d,id:c.id,skill:c.skill,treasure:c.treasure,heroStat:c.heroStat}}
+const RELICS=TF.CATALOG.map(relicObj);
+const relicIconCache=new Map();
+function iconFromBase(base,px){
+ const cv=document.createElement('canvas');cv.width=px;cv.height=px;
+ const c=cv.getContext('2d');c.imageSmoothingEnabled=false;
+ c.drawImage(base,0,0,px,px);
+ return cv;  // a fresh node every call (safe to insert into the DOM)
+}
+function relicIcon(id,px){
+ px=px||24;
+ let base=relicIconCache.get(id);
+ if(!base){base=TF.bakeCatalog(id,32,0.5);relicIconCache.set(id,base)}
+ return iconFromBase(base,px);
+}
+// build a fully generated relic (random look + a real payload) for the Tech Forge
+function forgeRelic(){
+ const base=pick(RELICS);
+ const preset=pick(TF.PRESET_KEYS),palette=pick(TF.PALETTE_KEYS);
+ const params={...TF.PRESETS[preset],palette,size:32,grime:0.2+R()*0.4,seed:'relic-'+((R()*1e9)|0)};
+ const iconBase=TF.bakeParams(params,32,0.5);
+ return {g:base.g,n:base.n,k:base.k,v:base.v,d:base.d,id:base.id,skill:base.skill,
+   treasure:base.treasure,heroStat:base.heroStat,_iconBase:iconBase,_params:params};
+}
+// deposit a relic's treasure yield for a person or the Sage
+function depositResource(res,amt,x,y){
+ const v=nearestVillage({x,y})||villages[0];
+ if((res==='food'||res==='stone')&&v){v.stock[res]+=amt;return}
+ const homes=buildings.filter(b=>!b.gone&&!b.ruined&&b.done&&b.stock);
+ if(homes.length){let best=homes[0],bd=1e18;for(const b of homes){const d=dist2(x,y,(b.x+1)*TILE,(b.y+1)*TILE);if(d<bd){bd=d;best=b}}best.stock[res]+=amt}
+}
+function heroStatApply(rel){
+ const s=rel.heroStat;
+ if(s==='dmg')Hero.dmg+=0.25;
+ else if(s==='speed')Hero.speedMul*=1.12;
+ else if(s==='range')Hero.rangeMul*=1.15;
+ else if(s==='arc')Hero.arcMul*=1.15;
+ else if(s==='hp'){Hero.maxHp++;Hero.hp=Math.min(Hero.maxHp,Hero.hp+1)}
+}
+function grantHeroRelic(rel){
+ if(!rel)return;
+ Hero.relics.push(rel.id);
+ heroStatApply(rel);
+ toast('🔩 '+rel.n+' online — '+rel.skill);
+ tale([],'The Sage jacked in '+rel.n+' — the '+rel.skill+' skill. '+rel.d+'.',true);
+}
 function dangerWord(d){return d<.28?'uneasy':d<.45?'dangerous':d<.62?'deadly':d<.8?'a death-trap':'a legend of ruin'}
 function makeDungeon(x,y){
  let nm='The '+pick(DUN_ADJ)+' '+pick(DUN_NOUN),tr=0;
@@ -2011,6 +2072,21 @@ function mkGlow(col){
 }
 const GLOW_WARM=mkGlow('rgba(255,190,90,0.55)'),GLOW_CYAN=mkGlow('rgba(150,230,150,0.35)');
 const GLOW_RED=mkGlow('rgba(210,60,70,0.5)'),GLOW_GREEN=mkGlow('rgba(90,220,140,0.45)');
+const GLOW_PINK=mkGlow('rgba(255,70,200,0.5)'),GLOW_BLUE=mkGlow('rgba(70,150,255,0.5)');
+function drawSalvage(c,sv,t){
+ const px=sv.x,py=sv.y,bob=Math.sin(sv.t)*1.5;
+ const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+ c.drawImage(GLOW_BLUE,px-14,py-16,28,28);c.globalCompositeOperation=go;
+ c.save();c.translate(px,py+bob);
+ // a battered supply crate with a blinking beacon
+ c.fillStyle='#2a2f36';c.fillRect(-6,-6,12,10);
+ c.fillStyle='#48525e';c.fillRect(-6,-6,12,3);
+ c.fillStyle='#37e6ff';c.fillRect(-6,-2,12,1);
+ c.fillStyle=(t%900<450)?'#7df9ff':'#243a5a';c.fillRect(-1,-9,2,2);
+ c.fillStyle='rgba(0,0,0,0.4)';c.fillRect(-6,3,12,1);
+ c.restore();
+ if(cam.z>1.05){c.font='6px system-ui';c.textAlign='center';c.fillStyle='rgba(150,220,255,0.85)';c.fillText('salvage',px,py+13)}
+}
 function nodeStage(n){return n.amt<=0?0:clamp(Math.ceil(n.amt/n.max*3)-1,0,2)}
 function drawNode(c,n,t){
  const px=n.x*TILE+TILE/2,py=n.y*TILE+TILE/2;
@@ -2056,6 +2132,9 @@ function drawBuilding(c,b,nf){
  }
  c.fillStyle='#1b1626';c.fillRect(px+w/2-2,py+h-4,4,4);
  if(b.tp==='biz'){
+  // neon storefront sign
+  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+  c.drawImage(GLOW_PINK,px+w-14,py-18,18,18);c.globalCompositeOperation=go;
   c.fillStyle='#3d3554';c.fillRect(px+w-6,py-8,2,8);
   c.font='8px system-ui';c.textAlign='center';
   c.fillText(b.sub[1],px+w-5,py-9);
@@ -2172,9 +2251,19 @@ function draw(t){
  for(const v of villages){
   const vx=v.cx*TILE,vy=v.cy*TILE;
   if(v.cx<vx0||v.cx>vx1||v.cy<vy0||v.cy>vy1)continue;
-  ctx.fillStyle='#3d3554';ctx.fillRect(vx-1,vy-18,2,14);
-  ctx.fillStyle='#e8c065';ctx.beginPath();ctx.moveTo(vx+1,vy-18);ctx.lineTo(vx+11,vy-15);ctx.lineTo(vx+1,vy-12);ctx.closePath();ctx.fill();
-  if(z>1.1){ctx.font='7px system-ui';ctx.textAlign='center';ctx.fillStyle='rgba(232,220,180,0.85)';ctx.fillText(v.name,vx,vy-20)}
+  // a holographic beacon: mast + flickering neon flag
+  ctx.fillStyle='#243a5a';ctx.fillRect(vx-1,vy-19,2,15);
+  const fl=0.55+0.45*Math.sin(t*0.008+v.id);
+  const go=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';
+  ctx.drawImage(GLOW_CYAN,vx-10,vy-28,20,20);ctx.globalCompositeOperation=go;
+  ctx.fillStyle='rgba(80,220,255,'+(0.5+fl*0.4)+')';
+  ctx.beginPath();ctx.moveTo(vx+1,vy-19);ctx.lineTo(vx+11,vy-16);ctx.lineTo(vx+1,vy-13);ctx.closePath();ctx.fill();
+  if(z>1.1){ctx.font='7px system-ui';ctx.textAlign='center';ctx.fillStyle='rgba(150,235,255,0.9)';ctx.fillText(v.name,vx,vy-21)}
+ }
+ // salvage caches
+ for(const sv of salvage){
+  if(sv.x/TILE<vx0-1||sv.x/TILE>vx1+1||sv.y/TILE<vy0-1||sv.y/TILE>vy1+1)continue;
+  drawSalvage(ctx,sv,t);
  }
  for(const m of monsters){
   if(m.x/TILE<vx0-2||m.x/TILE>vx1+2||m.y/TILE<vy0-2||m.y/TILE>vy1+2)continue;
@@ -2413,6 +2502,16 @@ function updateHero(rdt){
   }
  }
  heroSlashes=heroSlashes.filter(s=>s.t<0.25);
+ // salvage caches: walk over to install a tech relic
+ for(const sv of salvage){
+  sv.t+=rdt*1.5;
+  if(!sv.got&&!hero.down&&dist2(sv.x,sv.y,hero.x,hero.y)<(TILE*0.9)**2){
+   sv.got=true;
+   grantHeroRelic(sv.relic);
+   if(navigator.vibrate)navigator.vibrate(20);
+  }
+ }
+ salvage=salvage.filter(s=>!s.got);
  // context buttons: talk & descend
  uiProxT-=rdt;
  if(uiProxT<=0){uiProxT=0.2;updateContextButtons()}
@@ -2782,7 +2881,13 @@ function renderPanelFull(p){
  $('relhead').classList.toggle('hidden',!p.relics.length);
  for(const r of p.relics){
   const div=document.createElement('div');div.className='relic';
-  div.innerHTML='<span class="g">'+r.g+'</span><span class="nm">'+esc(r.n)+'</span><span class="ef">+'+Math.round(r.v*100)+'% '+r.k+'</span>';
+  if(r._iconBase){const ic=iconFromBase(r._iconBase,22);ic.className='ricon';div.appendChild(ic);}
+  else if(r.id&&TF.byId[r.id]){const ic=relicIcon(r.id,22);ic.className='ricon';div.appendChild(ic);}
+  else{const g=document.createElement('span');g.className='g';g.textContent=r.g;div.appendChild(g)}
+  const nm=document.createElement('span');nm.className='nm';nm.textContent=r.n;div.appendChild(nm);
+  const ef=document.createElement('span');ef.className='ef';
+  ef.textContent=(r.skill?r.skill:'')+(r.treasure?' · +'+r.treasure.amt+' '+r.treasure.res+'/day':(r.k?' · +'+Math.round(r.v*100)+'% '+r.k:''));
+  div.appendChild(ef);
   div.title=r.d;rb.appendChild(div);
  }
  renderRels(p);
@@ -2957,7 +3062,7 @@ function frame(t){
   uiT=t;
   $('clock').textContent='Day '+cday()+' · '+phase();
   $('pop').textContent='👥 '+people.length+(monsters.length?' · 👹'+monsters.length:'');
-  $('hearts').textContent=speedIdx>=2?'🧘 the Sage meditates':heroHearts()+'  ·  lv '+Hero.level;
+  $('hearts').textContent=speedIdx>=2?'🧘 the Sage meditates':heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
   if(cine&&selected)updateCine();
   if(selected&&!$('charPanel').classList.contains('hidden')){
    renderPanelLive(selected);
@@ -3002,6 +3107,7 @@ function returnFromDungeon(results){
   Hero.cleansed++;Hero.maxHp++;Hero.hp=Hero.maxHp;
   tale([],'⭐ '+d.name+' has been put to rest. The Sage refuted its final argument, and the ground over it grows sweet. The garden will sleep easier.',true);
   toast('⭐ '+d.name+' put to rest · +1 max ♥');
+  grantHeroRelic(pick(RELICS));   // the dead root process leaves its best chrome behind
  }else if(results.floors>0&&d){
   d.danger=clamp(d.danger-0.05*results.floors,0.1,0.95);
   d.loot=clamp(d.loot-0.08*results.floors,0.15,1.4);
@@ -3086,6 +3192,19 @@ return {
   demolishBuilding:(b)=>{demolish(b);toast('Unbuilt.')},
   replenishNode:(n)=>{n.amt=n.max;toast('Ripe again, ahead of schedule.')},
   fundVillage:(v)=>{v.stock.stone+=12;v.stock.food+=12;toast(v.name+' finds its granary mysteriously fuller.')},
+  // ---- Tech Forge relics ----
+  TF,                                     // the generator itself
+  heroRelics:()=>Hero.relics,
+  forgeRelic,                             // generate a fresh look+payload relic
+  giveHeroRelic:(rel)=>grantHeroRelic(rel),
+  givePersonRelic:(p,rel)=>{
+   if(!p||p.dead)return;
+   giveRelic(p,rel);
+   tale([p],p.name+' installed '+rel.n+' — the '+rel.skill+' skill.'+(rel.treasure?' It hums, and starts producing '+rel.treasure.res+'.':''),true);
+   if(selected===p)renderPanelFull(p);
+   toast('🔩 '+rel.n+' → '+p.name);
+  },
+  scatterSalvage:()=>{spawnSalvage();toast('Fresh salvage glints somewhere out in the grass.')},
   setSpeed,
  }
 };

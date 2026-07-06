@@ -30,13 +30,30 @@ function row(...btns){
   for(const b of btns)d.appendChild(b);
   return d;
 }
+let forgePreview=null;
+function drawForgePreview(){
+  const cv=$('edForgeCanvas'); if(!cv||!forgePreview) return;
+  const c=cv.getContext('2d'); c.imageSmoothingEnabled=false; c.clearRect(0,0,cv.width,cv.height);
+  if(forgePreview._params){
+    const tmp=A().TF.bakeParams(forgePreview._params,32,performance.now()*0.004);
+    c.drawImage(tmp,0,0,cv.width,cv.height);
+  }else if(forgePreview._iconBase){
+    c.drawImage(forgePreview._iconBase,0,0,cv.width,cv.height);
+  }
+  $('edForgeName').textContent=forgePreview.n;
+  $('edForgeSkill').textContent='skill: '+forgePreview.skill+(forgePreview.treasure?' · +'+forgePreview.treasure.amt+' '+forgePreview.treasure.res+'/day':'');
+  $('edForgeDesc').textContent=forgePreview.d;
+}
+function reforge(){ forgePreview=A().forgeRelic(); drawForgePreview(); }
 function refresh(){
   if(!open)return;
   // world line
   $('edWorldNote').textContent='seed '+A().seed+' · '+A().people().length+' folk · '
     +A().monsters().length+' risen · '+A().dungeons().length+' understories · '
-    +A().villages().length+' villages'+(A().peaceful?' · ☮ peace held':'');
+    +A().villages().length+' villages'+(A().peaceful?' · ☮ peace held':'')
+    +' · 🔩'+A().heroRelics().length+' sage augments';
   $('edPeaceBtn').textContent=A().peaceful?'☮ Peace: ON':'☮ Peace: off';
+  drawForgePreview();
   renderSelected();
 }
 function renderSelected(){
@@ -136,6 +153,23 @@ function init(){
     btn('🌿 Reroll flora',()=>A().rerollFlora()),
     btn('👾 Reroll monsters',()=>A().rerollMonsters())
   ));
+  // --- Tech Forge group ---
+  forgePreview=A().forgeRelic();
+  $('edForgeBtns').appendChild(row(
+    btn('🎲 Reforge',()=>reforge(),'big')
+  ));
+  $('edForgeBtns').appendChild(row(
+    btn('🦾 Install on Sage',()=>{A().giveHeroRelic(forgePreview);reforge()}),
+    btn('🧑 Give to selected',()=>{
+      const p=A().selected;
+      if(!p||p.dead){A().toast('Tap a living villager first.');return}
+      A().givePersonRelic(p,forgePreview);reforge();
+    })
+  ));
+  $('edForgeBtns').appendChild(row(
+    btn('📡 Scatter salvage in the world',()=>A().scatterSalvage())
+  ));
+  drawForgePreview();
 }
 return {init,setOpen,get open(){return open}};
 })();

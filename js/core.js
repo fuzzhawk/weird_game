@@ -67,6 +67,7 @@ const Hero = {
   level:1, xp:0, kills:0,
   dmg:1, rangeMul:1, arcMul:1, speedMul:1,
   cleansed:0,                                    // dungeons put to rest
+  relics:[],                                     // tech-relic ids installed (skills that persist)
   lookSeed:'sage-'+((Math.random()*1e9)|0),      // body shape seed (recolours per biome)
 };
 function heroXpNeed(){ return 5+(Hero.level-1)*4; }
