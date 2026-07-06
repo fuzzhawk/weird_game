@@ -17,6 +17,13 @@ A unified game built from the four prototypes in this repo:
 - **plant-forge.html** → bakes all surface flora: resource plants
   (thoughtfruit tangles, philosophercap clusters, whistling canes) and the
   decorative meadow undergrowth.
+- **Tech Forge** (`js/relics.js`, new) → a procedural generator for
+  **technology relics** — machined icons (cores, chips, drones, blades, keys)
+  with glowing neon cores. Each relic grants a **skill** (a stat/combat perk)
+  and sometimes a **treasure trickle** (daily resources) to whoever carries
+  it — the Sage *and* NPCs. Relics turn up as dungeon rewards, as surface
+  salvage caches the Sage walks over, and can be generated & gifted by hand
+  from the Gardener's Bench.
 
 ## Play
 
@@ -47,9 +54,10 @@ village granary.
 | file | contents |
 |---|---|
 | `index.html` | shell: DOM + CSS for both worlds and the editor, loads the modules |
-| `js/core.js` | shared utils + the persistent Hero |
+| `js/core.js` | shared utils + the persistent Hero (incl. installed relics) |
 | `js/forge.js` | Creature Forge sprite engine + baking bridge (CFHelp) |
 | `js/plants.js` | Plant Forge flora engine + baking helper |
+| `js/relics.js` | Tech Forge — procedural tech-relic sprite generator + relic catalog |
 | `js/surface.js` | the surface garden sim (Hollowlight adapted) |
 | `js/dungeon.js` | the Understory action floors (Grove & Blade adapted) |
 | `js/editor.js` | the Gardener's Bench (sim edit window) |

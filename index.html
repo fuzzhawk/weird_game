@@ -54,8 +54,9 @@ button:active{transform:translateY(1px)}
 #pstory{max-height:none}
 #sHint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:4;background:rgba(19,26,16,.85);border:1px solid #3c4f33;border-radius:99px;padding:7px 15px;font-size:12px;opacity:.9;pointer-events:none;transition:opacity 1s;text-align:center}
 #relbox{padding:0 14px}
-.relic{display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed #26331f;font-size:12.5px;align-items:baseline}
-.relic .g{font-size:15px}.relic .nm{color:#e8c065;font-weight:600}.relic .ef{opacity:.7;margin-left:auto;font-size:11px}
+.relic{display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed #26331f;font-size:12.5px;align-items:center}
+.relic .g{font-size:15px}.relic .nm{color:#37e6ff;font-weight:600}.relic .ef{opacity:.7;margin-left:auto;font-size:11px;text-align:right}
+.relic .ricon{width:22px;height:22px;image-rendering:pixelated;flex:0 0 auto;border-radius:4px;background:#0c150a}
 /* inspect */
 #inspect{position:fixed;left:0;right:0;bottom:0;z-index:11;background:rgba(19,26,16,.97);border-top:1px solid #3c4f33;border-radius:18px 18px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.5);padding-bottom:env(safe-area-inset-bottom);max-height:56vh;display:flex;flex-direction:column}
 #inspect .ihead{display:flex;gap:10px;align-items:center;padding:12px 14px 8px}
@@ -156,6 +157,12 @@ button:active{transform:translateY(1px)}
 #edPanel .worldnote{color:#7a9a6f;font-size:10.5px;margin:2px 0 10px;line-height:1.5;letter-spacing:.5px}
 #edScrim{position:fixed;inset:0;z-index:29;background:rgba(0,0,0,0);pointer-events:none;transition:background .28s}
 #edScrim.open{background:rgba(0,0,0,0.4);pointer-events:auto}
+.forgerow{display:flex;gap:12px;align-items:center;margin-bottom:9px}
+#edForgeCanvas{width:56px;height:56px;image-rendering:pixelated;background:#0c150a;border:1px solid #2c4022;border-radius:6px;flex:0 0 auto}
+.forgemeta{min-width:0}
+#edForgeName{color:#37e6ff;font-weight:bold;font-size:13px;letter-spacing:.5px}
+#edForgeSkill{color:#a6d46a;font-size:11px;margin-top:2px}
+#edForgeDesc{color:#7a9a6f;font-size:10px;margin-top:3px;line-height:1.4}
 </style>
 </head>
 <body>
@@ -261,12 +268,25 @@ button:active{transform:translateY(1px)}
   <div class="grp"><div class="grpTitle">World</div><div id="edWorldBtns"></div></div>
   <div class="grp"><div class="grpTitle">Conjure</div><div id="edSpawnBtns"></div></div>
   <div class="grp"><div class="grpTitle">Appearances (Creature &amp; Plant Forge)</div><div id="edLookBtns"></div></div>
+  <div class="grp" id="edForgeGroup">
+    <div class="grpTitle">Tech Forge — generate a relic</div>
+    <div class="forgerow">
+      <canvas id="edForgeCanvas" width="56" height="56"></canvas>
+      <div class="forgemeta">
+        <div id="edForgeName"></div>
+        <div id="edForgeSkill"></div>
+        <div id="edForgeDesc"></div>
+      </div>
+    </div>
+    <div id="edForgeBtns"></div>
+  </div>
   <div class="grp" id="edSelected"></div>
 </div>
 
 <script src="js/core.js"></script>
 <script src="js/forge.js"></script>
 <script src="js/plants.js"></script>
+<script src="js/relics.js"></script>
 <script src="js/surface.js"></script>
 <script src="js/dungeon.js"></script>
 <script src="js/editor.js"></script>
