@@ -172,6 +172,35 @@ function paintCliff(res, mask, seed, rock, style){
   c.putImageData(img,0,0); return cv;
 }
 
+/* ---------- CONTINUOUS (world-coordinate) sampling ----------
+   For large open areas (the surface), sampling the texture at WORLD
+   coordinates makes the ground flow seamlessly across tiles instead of
+   restarting inside every 16px cell. The autotile rounded masks are then
+   used only to decide grass-vs-rock per pixel, giving the same organic
+   edges as the dungeon but with a cohesive, un-patchy surface. */
+function fieldTexel(pal, isGrass, x, y, seed, st){
+  const ts=st.texScale, td=st.texDensity, gs=st.grainSeed;
+  const base=isGrass?pal.grassBase:pal.dirtBase, light=isGrass?pal.grassLight:pal.dirtLight, dark=isGrass?pal.grassDark:pal.dirtDark;
+  let col=base;
+  const d=detail(st.name, x, y, seed+gs, ts, td, st.sx, st.sy);
+  if(d<0)col=dark; else if(d>0)col=light;
+  const macro=vnoise(x/st.macroScale+seed*0.019, y/st.macroScale+seed*0.011, (seed^0x9E37)|0);
+  if(macro<0.5-st.macroAmt)col=mix(col,dark,0.40); else if(macro>0.5+st.macroAmt)col=mix(col,light,0.32);
+  return col;
+}
+function rockTexel(rock, x, y, seed, st){
+  const ts=st.texScale, td=st.texDensity, gs=st.grainSeed;
+  let col=rock.base;
+  const d=detail(st.name, x, y, seed+gs+911, ts, td, st.sx, st.sy);
+  if(d<0)col=rock.dark; else if(d>0)col=rock.light;
+  const macro=vnoise(x/st.macroScale+seed*0.02, y/st.macroScale+seed*0.03, (seed^0x1234)|0);
+  if(macro<0.34)col=mix(col,rock.deep,0.40); else if(macro>0.72)col=mix(col,rock.light,0.3);
+  return col;
+}
+function surfaceTexel(pals, solid, x, y, seed, st){
+  return solid ? rockTexel(pals.rock, x, y, seed, st) : fieldTexel(pals.low, true, x, y, seed, st);
+}
+
 /* ---------- build a whole 16-corner tileset ---------- */
 function makeTileset(opts){
   const res=opts.res||24, variants=opts.variants||5;
@@ -198,5 +227,6 @@ return {
   diskOffsets, cornersFromIndex, cornerIndex, cellCorners, fieldCornerIndex,
   computeVertexGrid, generateCAField, sampleQuadrant, roundedFieldMask,
   makePalettes, deriveStyle, STYLE_NAMES, paintTile, paintCliff, makeTileset,
+  fieldTexel, rockTexel, surfaceTexel,
 };
 })();
