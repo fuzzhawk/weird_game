@@ -1,0 +1,2786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Hollowlight — a cavern story engine</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+html,body{height:100%;overflow:hidden;background:#0d0b14;color:#e8e2d5;font-family:system-ui,-apple-system,sans-serif}
+#cv{position:fixed;inset:0;touch-action:none}
+#top{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:8px 10px;padding-top:calc(8px + env(safe-area-inset-top));background:linear-gradient(rgba(13,11,20,.9),rgba(13,11,20,0));z-index:5;pointer-events:none}
+#top>*{pointer-events:auto}
+#clock{font-weight:650;font-size:13px;letter-spacing:.02em}
+#pop{opacity:.75;font-size:12px}
+.sp{display:flex;gap:4px;margin-left:auto}
+button{background:rgba(36,31,51,.85);border:1px solid #3d3554;color:#e8e2d5;border-radius:10px;padding:7px 11px;font-size:13px;line-height:1;cursor:pointer}
+button:active{transform:translateY(1px)}
+.sp button.on{background:#e8c065;color:#1b1626;border-color:#e8c065;font-weight:700}
+#toasts{position:fixed;top:54px;left:50%;transform:translateX(-50%);z-index:20;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;width:min(92vw,440px)}
+.toast{background:rgba(23,19,34,.94);border:1px solid #4a4066;border-radius:12px;padding:8px 13px;font-size:12.5px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,.5);animation:tin .25s ease;max-width:100%}
+.toast.card{border-color:#8a76c2;color:#d9cff2}
+@keyframes tin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.panel{position:fixed;left:0;right:0;bottom:0;background:rgba(23,19,34,.97);border-top:1px solid #3d3554;border-radius:18px 18px 0 0;z-index:10;display:flex;flex-direction:column;box-shadow:0 -8px 30px rgba(0,0,0,.5);padding-bottom:env(safe-area-inset-bottom)}
+.hidden{display:none!important}
+.phead{display:flex;gap:10px;padding:10px 14px;align-items:center;border-bottom:1px solid #2b2440;flex:0 0 auto}
+.phead b{font-size:15px}
+.pbtns{margin-left:auto;display:flex;gap:6px}
+#logPanel{max-height:62vh}
+#charPanel{max-height:62vh}
+.plist{overflow-y:auto;padding:6px 14px 12px;font-family:Georgia,'Times New Roman',serif;font-size:13.5px;line-height:1.5;-webkit-overflow-scrolling:touch}
+.plist .e{padding:6px 0;border-bottom:1px dashed #2b2440;color:#cfc6b8}
+.plist .e .d{color:#8f85a8;font-family:system-ui;font-size:10.5px;font-weight:600;margin-right:7px;white-space:nowrap}
+.plist .e.maj{color:#e8c065}
+#charBody{overflow-y:auto;-webkit-overflow-scrolling:touch}
+#pcv{border-radius:12px;background:#241f33;flex:0 0 auto}
+.pinfo{min-width:0}
+#pname{font-size:16px;font-weight:700}
+#pmeta{font-size:12px;opacity:.8;margin-top:2px}
+#ptask{font-size:12px;color:#a8d8b0;margin-top:2px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;padding:9px 14px 0}
+.chip{background:#241f33;border:1px solid #3d3554;border-radius:99px;padding:4px 10px;font-size:12px;line-height:1.2}
+.chip.card{border-color:#6b5a8f;background:#2a2342;color:#d9cff2}
+.goal{padding:9px 14px 0;font-size:12.5px;color:#c9b98a}
+.shead{padding:11px 14px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#8f85a8;font-weight:700}
+#prels{padding:0 14px}
+.rel{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed #2b2440;font-size:13px}
+.rel .nm{color:#e8e2d5;font-weight:600}
+.rel .st{opacity:.85}
+#pstory{max-height:none}
+#hint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:4;background:rgba(23,19,34,.85);border:1px solid #3d3554;border-radius:99px;padding:7px 15px;font-size:12px;opacity:.9;pointer-events:none;transition:opacity 1s}
+#relbox{padding:0 14px}
+.relic{display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed #2b2440;font-size:12.5px;align-items:baseline}
+.relic .g{font-size:15px}.relic .nm{color:#e8c065;font-weight:600}.relic .ef{opacity:.7;margin-left:auto;font-size:11px}
+/* inspect */
+#inspect{position:fixed;left:0;right:0;bottom:0;z-index:11;background:rgba(23,19,34,.97);border-top:1px solid #3d3554;border-radius:18px 18px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.5);padding-bottom:env(safe-area-inset-bottom);max-height:56vh;display:flex;flex-direction:column}
+#inspect .ihead{display:flex;gap:10px;align-items:center;padding:12px 14px 8px}
+#inspect .iglyph{font-size:26px;line-height:1}
+#inspect .ititle{font-size:16px;font-weight:700}
+#inspect .isub{font-size:12px;opacity:.75;margin-top:1px}
+#inspect .ibody{overflow-y:auto;padding:2px 14px 16px;font-family:Georgia,serif;font-size:13.5px;line-height:1.55;color:#d6cdbe;-webkit-overflow-scrolling:touch}
+#inspect .irow{display:flex;justify-content:space-between;font-family:system-ui;font-size:12.5px;padding:5px 0;border-bottom:1px dashed #2b2440}
+#inspect .irow .k{opacity:.6}#inspect .irow .v{font-weight:600}
+#inspect .iname{color:#e8c065;cursor:pointer}
+#inspect .iclose{margin-left:auto}
+.bar{height:6px;border-radius:3px;background:#2b2440;overflow:hidden;margin-top:3px}
+.bar>i{display:block;height:100%;border-radius:3px}
+/* cinematic */
+#cine{position:fixed;inset:0;z-index:14;pointer-events:none;display:none}
+#cine.on{display:block}
+#cine .bar-t,#cine .bar-b{position:absolute;left:0;right:0;height:9vh;background:#000;transition:height .4s}
+#cine .bar-t{top:0}#cine .bar-b{bottom:0}
+#cine .vig{position:absolute;inset:0;background:radial-gradient(ellipse 78% 62% at 50% 46%,transparent 42%,rgba(6,5,14,.72) 100%)}
+#cine .plate{position:absolute;left:16px;top:calc(9vh + 12px);pointer-events:none}
+#cine .pn{font-size:20px;font-weight:750;letter-spacing:.01em;text-shadow:0 2px 10px #000}
+#cine .ps{font-size:12px;opacity:.85;margin-top:2px;text-shadow:0 1px 6px #000}
+#cine .cap{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(9vh + 16px);width:min(90vw,560px);text-align:center;font-family:Georgia,serif;font-size:15px;line-height:1.5;color:#f0e9da;text-shadow:0 2px 12px #000,0 0 24px rgba(0,0,0,.6);transition:opacity .5s}
+#cine .cx{position:absolute;top:calc(9vh + 12px);right:14px;pointer-events:auto}
+#cine .cspd{position:absolute;bottom:calc(9vh + 14px);right:14px;pointer-events:auto;display:flex;gap:5px}
+#cine .nav{position:absolute;bottom:calc(9vh + 14px);left:14px;pointer-events:auto;display:flex;gap:5px}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="top">
+  <div><div id="clock">Day 1</div><div id="pop">👥 0</div></div>
+  <div class="sp">
+    <button data-s="0">⏸</button><button data-s="1" class="on">1×</button><button data-s="2">16×</button><button data-s="3">500×</button>
+  </div>
+  <button id="logBtn">📜</button>
+  <button id="newBtn">↻</button>
+</div>
+<div id="toasts"></div>
+<div id="hint">drag to pan · pinch to zoom · tap anything to inspect</div>
+
+<div id="cine">
+  <div class="bar-t"></div><div class="bar-b"></div>
+  <div class="vig"></div>
+  <div class="plate"><div class="pn" id="cinName"></div><div class="ps" id="cinSub"></div></div>
+  <button class="cx" id="cinExit">✕ Exit</button>
+  <div class="nav"><button id="cinPrev">‹</button><button id="cinNext">›</button></div>
+  <div class="cspd">
+    <button data-s="1" class="on">1×</button><button data-s="2">16×</button><button data-s="3">500×</button>
+  </div>
+  <div class="cap" id="cinCap"></div>
+</div>
+
+<div id="inspect" class="hidden">
+  <div class="ihead"><div class="iglyph" id="iGlyph"></div><div><div class="ititle" id="iTitle"></div><div class="isub" id="iSub"></div></div><button class="iclose" id="iClose">✕</button></div>
+  <div class="ibody" id="iBody"></div>
+</div>
+
+<div id="logPanel" class="panel hidden">
+  <div class="phead"><b>Chronicle of the Cavern</b><div class="pbtns"><button id="logClose">✕</button></div></div>
+  <div id="logList" class="plist"></div>
+</div>
+
+<div id="charPanel" class="panel hidden">
+  <div class="phead">
+    <canvas id="pcv" width="64" height="64"></canvas>
+    <div class="pinfo"><div id="pname"></div><div id="pmeta"></div><div id="ptask"></div></div>
+    <div class="pbtns"><button id="cineBtn">🎬</button><button id="followBtn">🎯</button><button id="charClose">✕</button></div>
+  </div>
+  <div id="charBody">
+    <div id="ptraits" class="chips"></div>
+    <div id="pcards" class="chips"></div>
+    <div id="pgoal" class="goal"></div>
+    <div id="relhead" class="shead hidden">Relics won in the deep</div>
+    <div id="relbox"></div>
+    <div class="shead">Bonds</div>
+    <div id="prels"></div>
+    <div class="shead">Their story</div>
+    <div id="pstory" class="plist"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ================= utils ================= */
+const $=id=>document.getElementById(id);
+let seed=(Math.random()*2**31)|0;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+let rng=mulberry32(seed);
+const R=()=>rng(), rf=(a,b)=>a+R()*(b-a), ri=(a,b)=>Math.floor(rf(a,b+1)), pick=a=>a[Math.floor(R()*a.length)], chance=p=>R()<p;
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(R()*(i+1));const t=a[i];a[i]=a[j];a[j]=t}return a}
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const dist2=(ax,ay,bx,by)=>{const dx=ax-bx,dy=ay-by;return dx*dx+dy*dy};
+const hash2=(x,y)=>{let h=(x*73856093)^(y*19349663);h=Math.imul(h^(h>>>13),0x5bd1e995);return((h^(h>>>15))>>>0)/4294967296};
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* ================= config ================= */
+const W=112,H=112,TILE=16,DAY=1440,RATE=12,WALK=2.15;
+const SPEEDS=[0,1,16,500];
+const COST={shelter:{wood:5},home:{wood:10,stone:6},biz:{wood:12,stone:8}};
+const NEED={shelter:50,home:130,biz:150};
+const SZ={shelter:[1,1],home:[2,2],biz:[2,2],grave:[1,1]};
+const RUIN_DELAY=6*DAY,CRUMBLE_DELAY=10*DAY;   // abandoned home -> ruin -> dust
+const VILLAGE_MIN=4;                            // homes needed to spark a village mind
+const WALL_STONE=0;                             // walls are piled rubble — labour, not materials
+const FARM_RIPEN=1.4*DAY;
+// struct codes for solid/edited tiles: 0 natural rock, 1 house, 2 wall, 3 ruin, 4 carved floor
+const S_ROCK=0,S_HOUSE=1,S_WALL=2,S_RUIN=3,S_FLOOR=4;
+// monster archetypes
+const MONSTERS={
+ grub:{n:"cave grub",g:"🐛",hp:24,dmg:4,spd:.82,col:'#8fa85a',reward:'grub',rare:0},
+ lurker:{n:'pit lurker',g:'🦂',hp:50,dmg:10,spd:.95,col:'#b0623a',reward:'lurker',rare:.4},
+ horror:{n:'deep horror',g:'👹',hp:100,dmg:18,spd:.8,col:'#a23a5a',reward:'horror',rare:.75}
+};
+
+/* ================= state ================= */
+let map,bld,nodeAt,nodes,openTiles,openChunks;
+let struct,farmGrid,farmTimer;                 // parallel terrain-edit arrays
+let farmTiles=new Set();
+let region,regionsDirty=true;                  // connected-component id per walkable tile
+let people=[],allById=new Map(),buildings=[];
+let dungeons=[],expeditions=[],monsters=[],villages=[];
+let simMin=0,dayMark=1,speedIdx=1,nextId=1;
+let cam={x:W*TILE/2,y:H*TILE/2,z:1.4};
+let selected=null,follow=false,cine=false;
+let chron=[];
+let terrainDirty=true,modTiles=new Set();
+const idx=(x,y)=>y*W+x;
+const inB=(x,y)=>x>=0&&y>=0&&x<W&&y<H;
+const walkable=(x,y)=>inB(x,y)&&map[idx(x,y)]===0;
+const cday=()=>Math.floor(simMin/DAY)+1;
+const tod=()=>(simMin%DAY)/DAY;
+const isNight=()=>{const t=tod();return t<0.24||t>0.87};
+function phase(){const t=tod();return t<0.24?'Night':t<0.32?'Dawn':t<0.48?'Morning':t<0.58?'Midday':t<0.76?'Afternoon':t<0.87?'Dusk':'Night'}
+
+/* ================= terrain editing ================= */
+function markMod(i){modTiles.add(i);terrainDirty=true;regionsDirty=true}
+function setSolid(x,y,type){const i=idx(x,y);map[i]=1;struct[i]=type;farmGrid[i]=0;markMod(i)}
+function carveFloor(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_FLOOR;markMod(i)}
+function revertTile(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_ROCK;farmGrid[i]=0;markMod(i)}
+// connected-component labelling of walkable tiles — lets us reject impossible paths in O(1)
+function computeRegions(){
+ if(!region)region=new Int32Array(W*H);
+ region.fill(-1);
+ const q=new Int32Array(W*H);let rid=0;
+ for(let i=0;i<W*H;i++){
+  if(map[i]||region[i]>=0)continue;
+  let head=0,tail=0;q[tail++]=i;region[i]=rid;
+  while(head<tail){
+   const c=q[head++],cx=c%W,cy=(c/W)|0;
+   const nb=[c-1,c+1,c-W,c+W],ok=[cx>0,cx<W-1,cy>0,cy<H-1];
+   for(let k=0;k<4;k++)if(ok[k]&&!map[nb[k]]&&region[nb[k]]<0){region[nb[k]]=rid;q[tail++]=nb[k]}
+  }
+  rid++;
+ }
+ regionsDirty=false;
+}
+function reachable(ax,ay,bx,by){
+ if(regionsDirty)computeRegions();
+ const ra=region[idx(ax,ay)],rb=region[idx(bx,by)];
+ return ra>=0&&ra===rb;
+}
+function shoveOccupants(x,y){ // push anyone standing on a newly-solid tile to open ground
+ for(const p of people){
+  if(p.dead||p.inDungeon)continue;
+  if(((p.x/TILE)|0)===x&&((p.y/TILE)|0)===y){
+   const n=nearOpen(x,y);if(n){p.x=n[0]*TILE+TILE/2;p.y=n[1]*TILE+TILE/2;p.path=null;p.task=null}
+  }
+ }
+}
+
+/* ================= names ================= */
+const NAMES=['Wren','Bramble','Sorrel','Fen','Mab','Orla','Perrin','Rue','Tamsin','Ulric','Vesper','Yarrow','Zephyr','Cassia','Dovan','Elowen','Fable','Garnet','Hollis','Isolde','Juniper','Kestrel','Lark','Merrit','Nix','Oleander','Pip','Quill','Rowan','Sable','Thistle','Una','Violet','Willem','Alder','Briar','Cinder','Damson','Ember','Fern','Gale','Hazel','Ivo','Jessamine','Kit','Linden','Moss','Nettle','Onyx','Poppy','Reed','Saffron','Tansy','Umber','Vale','Wisteria','Ash','Birch','Clover','Dunn','Edda','Flint','Gorse','Heath','Iris','Jasper','Knox','Loam','Marlow','North','Opal','Petra','Quince','Rye','Slate','Teal','Ursa','Vann','Wick','Yew','Zora','Bryn','Cove','Dell','Eyre','Frost','Glen','Hale','Ida','Jute','Kell','Lune','Mira','Noor','Osier','Pike','Ren','Sunna','Tor','Verne','Wilde'];
+let usedNames=new Set(),usedBiz=new Set(),usedDun=new Set(),usedVil=new Set();
+function makeName(){let tries=0;while(tries++<80){const n=pick(NAMES);if(!usedNames.has(n)){usedNames.add(n);return n}}const n=pick(NAMES)+' '+pick(['II','III','the Younger','the Second']);usedNames.add(n);return n}
+
+/* ================= traits & goals ================= */
+const TRAITS={
+ unlucky:{a:'unlucky',luck:-.35},
+ lucky:{a:'lucky',luck:.3},
+ creative:{a:'creative',work:.15,charm:.1},
+ passionate:{a:'passionate',romance:.35,social:.1},
+ kind:{a:'kind',social:.25,charm:.15},
+ grumpy:{a:'grumpy',social:-.3},
+ brave:{a:'brave',luck:.05,work:.1},
+ timid:{a:'timid',social:-.15,romance:-.15},
+ ambitious:{a:'ambitious',work:.3,social:-.05},
+ lazy:{a:'lazy',work:-.3},
+ curious:{a:'curious',luck:.05},
+ loyal:{a:'loyal',social:.15},
+ jealous:{a:'jealous',social:-.2,romance:.05},
+ cheerful:{a:'cheerful',social:.3,charm:.1},
+ gloomy:{a:'gloomy',social:-.2,charm:-.05},
+ charming:{a:'charming',charm:.35,romance:.2},
+ awkward:{a:'awkward',charm:-.25},
+ hardworking:{a:'hardworking',work:.35},
+ dreamer:{a:'a dreamer',work:-.1,romance:.1,luck:.05},
+ stubborn:{a:'stubborn',social:-.1}
+};
+const TKEYS=Object.keys(TRAITS);
+const MODKEYS=['luck','social','work','romance','charm'];
+const CLASH=[['grumpy','cheerful'],['ambitious','lazy'],['timid','brave'],['gloomy','cheerful'],['jealous','charming'],['awkward','charming'],['stubborn','stubborn'],['grumpy','dreamer']];
+const KIN=[['creative','dreamer'],['kind','loyal'],['ambitious','hardworking'],['curious','brave'],['cheerful','kind'],['passionate','creative'],['gloomy','gloomy'],['curious','dreamer']];
+const GOALS={
+ love:{t:'to find true love'},
+ family:{t:'to raise a family'},
+ craft:{t:'to open a beloved business'},
+ wander:{t:'to chart every gallery of the cave'},
+ fellows:{t:'to be rich in friendships'},
+ quiet:{t:'to build a warm home and grow old in it'}
+};
+function pickGoal(p){
+ const w=[];
+ const has=t=>p.traits.includes(t);
+ if(has('passionate')||has('charming')||has('dreamer'))w.push('love','love');
+ if(has('kind')||has('loyal'))w.push('family','family');
+ if(has('ambitious')||has('creative')||has('hardworking'))w.push('craft','craft');
+ if(has('curious')||has('brave'))w.push('wander','wander');
+ if(has('cheerful'))w.push('fellows','fellows');
+ w.push('quiet','love','fellows');
+ const k=pick(w);
+ return{k,t:GOALS[k].t,done:false};
+}
+function traitPhrase(p){return p.traits.map(t=>TRAITS[t].a).join(' and ')}
+function applyTrait(p,t,s){const tr=TRAITS[t];for(const k of MODKEYS)if(tr[k])p.base[k]+=tr[k]*s}
+
+/* ================= tarot ================= */
+const TAROT=[
+ {n:'The Fool',g:'🃏',line:'A leap into the unknown.',fx:p=>{p.farUntil=simMin+2*DAY;buff(p,'luck',.05,2,'Fool');tale([p],p.name+' felt the pull of unexplored tunnels, and followed it.')}},
+ {n:'The Magician',g:'✨',line:'Skill sparks at their fingertips.',fx:p=>{buff(p,'work',.35,10,'Magician');tale([p],'For a while, everything '+p.name+' touched seemed to build itself.')}},
+ {n:'The High Priestess',g:'🌙',line:'They begin to hear the deep quiet.',fx:p=>{p.base.luck+=.08;tale([p],p.name+' learned to listen before stepping. The cave rewards that.')}},
+ {n:'The Empress',g:'🌾',line:'Abundance follows their hands.',fx:p=>{buff(p,'fert',.6,15,'Empress');buff(p,'work',.15,15,'Empress');tale([p],'Everything near '+p.name+' seemed to ripen and multiply.')}},
+ {n:'The Emperor',g:'👑',line:'A will to build something lasting.',fx:p=>{buff(p,'work',.25,15,'Emperor');p.wantsBiz=true;tale([p],p.name+' began sketching plans in the dust — something permanent, something theirs.')}},
+ {n:'The Hierophant',g:'🕯',line:'Old rites call for vows.',fx:p=>{if(p.partner&&!p.married){p.wedSoon=true;tale([p],p.name+' resolved to make it official.')}else{buff(p,'romance',.2,10,'Hierophant')}}},
+ {n:'The Lovers',g:'💞',line:'The heart will not be ignored.',major:true,fx:p=>{buff(p,'romance',.6,12,'Lovers');if(p.courting){const o=allById.get(p.courting);if(o&&!o.dead)becomePartners(p,o)}}},
+ {n:'The Chariot',g:'🐎',line:'Momentum, momentum.',fx:p=>{buff(p,'speed',.45,8,'Chariot');buff(p,'work',.1,8,'Chariot')}},
+ {n:'Strength',g:'🦁',line:'Gentle power, firmly held.',fx:p=>{buff(p,'charm',.15,10,'Strength');const[o]=worstRel(p);if(o)healRel(p,o,25)}},
+ {n:'The Hermit',g:'🏮',line:'The lantern turns inward.',fx:p=>{p.hermitUntil=simMin+5*DAY;p.farUntil=simMin+5*DAY;tale([p],p.name+' packed a small bag and walked toward the dark, alone.')}},
+ {n:'Wheel of Fortune',g:'🎡',line:'The wheel turns; hold on.',major:true,fx:p=>{if(chance(.5+mod(p,'luck')*.5)){p.inv.food+=6;p.inv.wood+=6;p.inv.stone+=4;tale([p],p.name+' stumbled on a forgotten cache — food, timber, cut stone, all theirs.',true)}else{p.inv.food=Math.floor(p.inv.food/2);p.inv.wood=Math.floor(p.inv.wood/2);if(p.home&&p.home.stock)p.home.stock.food=Math.floor(p.home.stock.food/2);tale([p],'Fortune turned on '+p.name+' — stores spoiled, tools lost, luck spent.',true)}}},
+ {n:'Justice',g:'⚖️',line:'The scales settle old accounts.',fx:p=>{const en=knownRels(p).filter(([o,r])=>r.a<=-25),fr=knownRels(p).filter(([o,r])=>r.a>=30);if(en.length>fr.length){for(const[o]of en)healRel(p,o,30);tale([p],'Old debts around '+p.name+' were quietly settled.')}else{for(const[o]of fr)healRel(p,o,10)}}},
+ {n:'The Hanged Man',g:'🙃',line:'Seen upside down, it all makes sense.',fx:p=>{buff(p,'work',-.25,4,'Hanged Man');p.base.luck+=.05;tale([p],p.name+' spent long hours doing nothing at all, and came back wiser for it.')}},
+ {n:'Death',g:'🦋',line:'Something old must end.',major:true,fx:p=>{rerollTrait(p);if(p.age>p.lifespan-6&&chance(.4)){p.doom=cday()+ri(3,8)}}},
+ {n:'Temperance',g:'🕊',line:'Everything in balance.',fx:p=>{p.gloomUntil=0;for(const[o]of knownRels(p))healRel(p,o,8)}},
+ {n:'The Devil',g:'😈',line:'A grudge takes root.',major:true,fx:p=>{const c=knownRels(p).filter(([o,r])=>!isFamily(p,o)&&p.partner!==o.id);if(c.length){const[o]=pick(c);applyAff(p,o,-55);applyAff(o,p,-55);tale([p,o],'A bitter grudge took root between '+p.name+' and '+o.name+', and neither could quite say why.',true)}}},
+ {n:'The Tower',g:'🌩',line:'What was built comes down.',major:true,fx:p=>{if(p.home&&!p.home.gone){const tp=p.home.tp;demolish(p.home);p.energy=Math.min(p.energy,15);p.gloomUntil=simMin+4*DAY;tale([p],'The Tower! A rockslide took '+p.name+"'s "+tp+' down to splinters.',true)}else{p.inv={food:0,wood:0,stone:0};p.energy=10;p.gloomUntil=simMin+3*DAY;tale([p],'A shelf of stone gave way under '+p.name+'. They crawled out with nothing but bruises.',true)}}},
+ {n:'The Star',g:'⭐',line:'A small light, enough.',fx:p=>{p.gloomUntil=0;buff(p,'luck',.25,12,'Star');const[o]=worstRel(p);if(o)healRel(p,o,30);tale([p],'Something eased in '+p.name+'. The dark felt less heavy.')}},
+ {n:'The Moon',g:'🌕',line:'Nothing is quite where it was.',fx:p=>{p.lostUntil=simMin+3*DAY;buff(p,'luck',-.1,3,'Moon');tale([p],p.name+' kept taking wrong turns in tunnels they knew by heart.')}},
+ {n:'The Sun',g:'☀️',line:'Days feel golden.',fx:p=>{buff(p,'social',.3,10,'Sun');buff(p,'luck',.2,10,'Sun')}},
+ {n:'Judgement',g:'📯',line:'A reckoning, and a hand extended.',major:true,fx:p=>{const[o,r]=worstRel(p);if(o&&r.a<-20){r.a=10;relOf(o,p).a=10;tale([p,o],p.name+' and '+o.name+' buried the hatchet at last.',true)}}},
+ {n:'The World',g:'🌍',line:'The whole of a life, aligned.',fx:p=>{buff(p,'luck',.2,10,'World');p.inv.wood+=4;p.inv.stone+=3;tale([p],p.name+' felt, for one long moment, that everything was exactly where it should be.')}}
+];
+let deck=[];
+function drawCard(p,occasion){
+ if(!deck.length)deck=shuffle(TAROT.map((c,i)=>i));
+ const ci=deck.pop(),c=TAROT[ci];
+ p.cards.push({i:ci,d:cday()});
+ emote(p,'🎴');
+ tale([p],'🎴 '+(occasion||'Fate stirred, and')+' dealt '+p.name+' '+c.n+'. '+c.line,!!c.major);
+ toast(c.g+' '+c.n+' — '+p.name,'card');
+ c.fx(p);
+}
+
+/* ================= story, toasts, buffs ================= */
+function tale(ps,text,major){
+ const d=cday(),pid=ps.length?ps[0].id:0;
+ chron.push({d,text,major:!!major,pid});
+ if(chron.length>700)chron.splice(0,chron.length-700);
+ if(!$('logPanel').classList.contains('hidden'))prependChron({d,text,major});
+ for(const p of ps){
+  p.story.push({d,text,major:!!major});
+  if(p.story.length>280)p.story.splice(0,p.story.length-280);
+  if(p===selected&&!$('charPanel').classList.contains('hidden'))prependStory({d,text,major});
+ }
+ if(major&&ps.includes(selected))toast(text);
+}
+function toast(text,cls){
+ const t=document.createElement('div');t.className='toast'+(cls?' '+cls:'');t.textContent=text;
+ const box=$('toasts');box.appendChild(t);
+ while(box.children.length>4)box.removeChild(box.firstChild);
+ setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .6s'},4200);
+ setTimeout(()=>{if(t.parentNode)t.parentNode.removeChild(t)},5000);
+}
+function emote(p,g){p.em={g,until:performance.now()+2200}}
+function buff(p,k,v,days,tag){p.buffs.push({k,v,until:simMin+days*DAY,tag})}
+function mod(p,k){let v=p.base[k]||0;for(const b of p.buffs)if(b.k===k&&b.until>simMin)v+=b.v;return v}
+function pruneBuffs(p){p.buffs=p.buffs.filter(b=>b.until>simMin)}
+
+/* ================= relationships helpers ================= */
+function relOf(p,o){let r=p.rel[o.id];if(!r){r=p.rel[o.id]={a:0,met:false,cN:0}}return r}
+function knownRels(p){const out=[];for(const id in p.rel){const o=allById.get(+id);if(o&&!o.dead&&p.rel[id].met)out.push([o,p.rel[id]])}return out}
+function worstRel(p){let bo=null,br=null;for(const[o,r]of knownRels(p))if(!br||r.a<br.a){bo=o;br=r}return[bo,br]}
+function healRel(p,o,amt){applyAff(p,o,amt);applyAff(o,p,amt)}
+function isFamily(p,o){
+ if(p.parents.includes(o.id)||o.parents.includes(p.id))return true;
+ for(const pa of p.parents)if(o.parents.includes(pa))return true;
+ return false;
+}
+function relLabel(p,o){
+ if(p.partner===o.id)return p.married?'💍 spouse':'💞 partner';
+ if(p.courting===o.id)return '💕 courting';
+ if(p.parents.includes(o.id))return '👪 parent';
+ if(o.parents.includes(p.id))return '👪 child';
+ if(isFamily(p,o))return '👪 sibling';
+ const r=p.rel[o.id];if(!r||!r.met)return '· stranger';
+ if(r.a>=70)return '💛 close friend';
+ if(r.a>=30)return '🤝 friend';
+ if(r.a<=-65)return '⚔️ enemy';
+ if(r.a<=-25)return '😠 rival';
+ return '· acquaintance';
+}
+let pairLog=new Set();
+function applyAff(p,o,d){
+ const before=relLabel(p,o);
+ const r=relOf(p,o);r.a=clamp(r.a+d,-100,100);
+ const after=relLabel(p,o);
+ if(before!==after&&!isFamily(p,o)&&p.partner!==o.id&&p.courting!==o.id){
+  const key=Math.min(p.id,o.id)+'-'+Math.max(p.id,o.id)+'-'+after;
+  if(pairLog.has(key))return;
+  pairLog.add(key);
+  if(after==='🤝 friend'&&d>0)tale([p,o],p.name+' and '+o.name+' became friends over '+pick(['shared mushrooms','a long walk','tall tales','a leaking roof','a joke that would not die'])+'.');
+  else if(after==='💛 close friend'&&d>0)tale([p,o],p.name+' and '+o.name+' grew as close as kin.');
+  else if(after==='😠 rival'&&d<0)tale([p,o],p.name+' and '+o.name+' began to grate on one another.');
+  else if(after==='⚔️ enemy'&&d<0)tale([p,o],'Bad blood turned to worse: '+p.name+' and '+o.name+' are now enemies.',true);
+ }
+}
+
+/* ================= world generation ================= */
+function genWorld(){
+ map=new Uint8Array(W*H);bld=new Int16Array(W*H).fill(-1);
+ struct=new Uint8Array(W*H);farmGrid=new Uint8Array(W*H);farmTimer=new Float32Array(W*H);farmTiles=new Set();
+ modTiles=new Set();terrainDirty=true;regionsDirty=true;
+ nodeAt=new Map();nodes=[];openTiles=[];
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];chron=[];usedNames=new Set();
+ simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
+ // cellular automata
+ let g=new Uint8Array(W*H);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++)g[idx(x,y)]=(x<2||y<2||x>=W-2||y>=H-2)?1:(R()<0.46?1:0);
+ for(let it=0;it<5;it++){
+  const n2=new Uint8Array(W*H);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+   let n=0;
+   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+    if(!dx&&!dy)continue;
+    const nx=x+dx,ny=y+dy;
+    if(nx<0||ny<0||nx>=W||ny>=H||g[idx(nx,ny)])n++;
+   }
+   n2[idx(x,y)]=(x<2||y<2||x>=W-2||y>=H-2)?1:(n>=5?1:(n<=3?0:g[idx(x,y)]));
+  }
+  g=n2;
+ }
+ // keep largest region
+ const reg=new Int32Array(W*H).fill(-1);let best=-1,bestN=0,rid=0;
+ const q=new Int32Array(W*H);
+ for(let i=0;i<W*H;i++){
+  if(g[i]||reg[i]>=0)continue;
+  let head=0,tail=0,n=0;q[tail++]=i;reg[i]=rid;
+  while(head<tail){
+   const c=q[head++];n++;
+   const cx=c%W,cy=(c/W)|0;
+   const nb=[c-1,c+1,c-W,c+W];
+   const ok=[cx>0,cx<W-1,cy>0,cy<H-1];
+   for(let k=0;k<4;k++)if(ok[k]&&!g[nb[k]]&&reg[nb[k]]<0){reg[nb[k]]=rid;q[tail++]=nb[k]}
+  }
+  if(n>bestN){bestN=n;best=rid}
+  rid++;
+ }
+ for(let i=0;i<W*H;i++){if(!g[i]&&reg[i]!==best)g[i]=1}
+ map=g;
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(!map[idx(x,y)])openTiles.push([x,y]);
+ // open chunks (for explorer goal)
+ openChunks=new Set();
+ for(const[x,y]of openTiles)openChunks.add(((x>>3))+','+((y>>3)));
+ // resource nodes
+ const REG={berry:520,mush:430,tree:950,rock:1500};
+ const YLD={berry:'food',mush:'food',tree:'wood',rock:'stone'};
+ const AMT={berry:4,mush:3,tree:5,rock:5};
+ for(const[x,y]of openTiles){
+  let nw=0;
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&!walkable(x+dx,y+dy))nw++;
+  let adj=false;
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(nodeAt.has(idx(x+dx,y+dy)))adj=true;
+  if(adj)continue;
+  const r=R();let t=null;
+  if(r<0.008+nw*0.003)t='tree';
+  else if(r<0.017+nw*0.005)t='berry';
+  else if(r<0.024+nw*0.006)t='mush';
+  else if(r<0.030+nw*0.004)t='rock';
+  if(t){
+   const nd={x,y,t,amt:AMT[t],max:AMT[t],reg:REG[t],rt:0,yield:YLD[t]};
+   nodes.push(nd);nodeAt.set(idx(x,y),nd);
+  }
+ }
+ // dungeons — deep tiles far from the map centre, against a wall
+ {
+  const cx=W/2,cy=H/2,want=ri(3,4);
+  const cand=openTiles.filter(([x,y])=>{
+   if(bld[idx(x,y)]>=0||nodeAt.has(idx(x,y)))return false;
+   let wall=false;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&!walkable(x+dx,y+dy))wall=true;
+   return wall&&dist2(x,y,cx,cy)>34*34;
+  });
+  shuffle(cand);
+  const placed=[];
+  for(const[x,y]of cand){
+   if(dungeons.length>=want)break;
+   if(placed.some(([px,py])=>dist2(x,y,px,py)<20*20))continue;
+   placed.push([x,y]);
+   makeDungeon(x,y);
+  }
+ }
+ // settlers
+ tale([], 'A handful of wanderers found their way into a vast glowing cavern, and decided to stay. Deeper galleries yawned in the dark, promising treasure — and worse.',true);
+ for(let i=0;i<12;i++)arrive(ri(18,34));
+ dayMark=cday();
+ buildTerrainLayer();
+ const c0=people.reduce((a,p)=>[a[0]+p.x,a[1]+p.y],[0,0]);
+ cam.x=c0[0]/people.length;cam.y=c0[1]/people.length;
+ refreshChron();
+}
+function randOpenTile(){return pick(openTiles)}
+function nearOpen(tx,ty){
+ for(let r=0;r<=6;r++)for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
+  if(Math.max(Math.abs(dx),Math.abs(dy))!==r)continue;
+  if(walkable(tx+dx,ty+dy))return[tx+dx,ty+dy];
+ }
+ return null;
+}
+
+/* ================= A* pathfinding ================= */
+const AG=new Float32Array(W*H),ACAME=new Int32Array(W*H),ASTAMP=new Int32Array(W*H);let AID=0;
+function hpush(h,f,v){h.push([f,v]);let i=h.length-1;while(i>0){const p=(i-1)>>1;if(h[p][0]<=h[i][0])break;const t=h[p];h[p]=h[i];h[i]=t;i=p}}
+function hpop(h){const top=h[0],l=h.pop();if(h.length){h[0]=l;let i=0;for(;;){let c=i*2+1;if(c>=h.length)break;if(c+1<h.length&&h[c+1][0]<h[c][0])c++;if(h[i][0]<=h[c][0])break;const t=h[i];h[i]=h[c];h[c]=t;i=c}}return top}
+function findPath(sx,sy,tx,ty){
+ if(!walkable(sx,sy)){const n=nearOpen(sx,sy);if(!n)return null;sx=n[0];sy=n[1]}
+ if(!walkable(tx,ty)){const n=nearOpen(tx,ty);if(!n)return null;tx=n[0];ty=n[1]}
+ const start=idx(sx,sy),goal=idx(tx,ty);
+ if(start===goal)return[{x:tx*TILE+TILE/2,y:ty*TILE+TILE/2}];
+ if(regionsDirty)computeRegions();
+ if(region[start]<0||region[start]!==region[goal])return null; // no route exists — don't waste a search
+ AID++;
+ const h=[];AG[start]=0;ASTAMP[start]=AID;ACAME[start]=-1;
+ hpush(h,0,start);
+ let pops=0;
+ while(h.length&&pops++<2200){
+  const[,cur]=hpop(h);
+  if(cur===goal){
+   const path=[];let c=goal;
+   while(c!==-1){path.push(c);c=ACAME[c]}
+   path.reverse();
+   return path.map(i=>({x:(i%W)*TILE+TILE/2,y:((i/W)|0)*TILE+TILE/2}));
+  }
+  const cx=cur%W,cy=(cur/W)|0,g=AG[cur];
+  const nbs=[[cx-1,cy],[cx+1,cy],[cx,cy-1],[cx,cy+1]];
+  for(const[nx,ny]of nbs){
+   if(!walkable(nx,ny))continue;
+   const ni=idx(nx,ny),ng=g+1;
+   if(ASTAMP[ni]!==AID||ng<AG[ni]){
+    ASTAMP[ni]=AID;AG[ni]=ng;ACAME[ni]=cur;
+    hpush(h,ng+1.8*(Math.abs(nx-tx)+Math.abs(ny-ty)),ni); // weighted heuristic — greedier, far fewer nodes explored
+   }
+  }
+ }
+ return null;
+}
+function goTo(p,tx,ty){
+ const path=findPath((p.x/TILE)|0,(p.y/TILE)|0,tx,ty);
+ if(!path)return false;
+ p.path=path;p.pi=0;return true;
+}
+function moveAlong(p,dt){
+ if(!p.path)return true;
+ let d=WALK*(1+mod(p,'speed'))*(p.age<12?0.72:p.age>=56?0.85:1)*dt;
+ p.moving=true;
+ while(d>0&&p.path&&p.pi<p.path.length){
+  const w=p.path[p.pi],dx=w.x-p.x,dy=w.y-p.y,L=Math.hypot(dx,dy);
+  if(L<1.2){p.pi++;continue}
+  if(Math.abs(dx)>0.5)p.fx=dx>0?1:-1;
+  const m=Math.min(d,L);
+  p.x+=dx/L*m;p.y+=dy/L*m;d-=m;
+ }
+ if(p.goal&&p.goal.k==='wander'&&!p.goal.done)p.visited.add((((p.x/TILE)|0)>>3)+','+(((p.y/TILE)|0)>>3));
+ if(p.path&&p.pi>=p.path.length){p.path=null;p.moving=false;return true}
+ return!p.path;
+}
+
+/* ================= people ================= */
+const PAL=['#c94f5e','#4fa3a5','#c98a3d','#8a63c9','#6fa04f','#5a7fc9','#c95f9d','#b0a04a','#7a6a55','#4fc98a','#9a4f3d','#5ac9c0'];
+const SKINS=['#e8c39e','#d1a074','#a9764c','#8a5a35','#6b4326','#f0d4b8'];
+function newPerson({x,y,age,traits,parents}){
+ const p={
+  id:nextId++,name:makeName(),x,y,fx:1,
+  col:pick(PAL),skin:pick(SKINS),
+  age,lifespan:ri(58,88),
+  traits:traits||[],
+  base:{luck:0,social:0,work:0,romance:0,charm:0,speed:0,fert:0},
+  buffs:[],
+  hunger:rf(15,45),energy:rf(60,100),socialN:rf(0,45),starv:0,
+  inv:{food:ri(1,3),wood:0,stone:0},
+  home:null,business:null,partner:null,married:false,courting:null,
+  parents:parents||[],kids:[],rel:{},cards:[],story:[],
+  goal:null,task:null,path:null,pi:0,thinkT:0,sleeping:false,dead:false,moving:false,
+  chatHold:0,gloomUntil:0,farUntil:0,lostUntil:0,hermitUntil:0,wedSoon:false,doom:0,wantsBiz:false,
+  visited:new Set(),cameOfAge:age>=16,bornDay:cday()-Math.floor(age*2),arrDay:cday(),em:null,
+  relics:[],inDungeon:false,nextQuestDay:cday()+ri(0,4),bubble:null,
+  hp:100,fleeUntil:0,fighting:null,vid:null,kills:0
+ };
+ if(!p.traits.length){
+  const t1=pick(TKEYS);let t2=pick(TKEYS);
+  while(t2===t1)t2=pick(TKEYS);
+  p.traits=[t1,t2];
+ }
+ for(const t of p.traits)applyTrait(p,t,1);
+ p.lifespan+=Math.round(p.base.luck*6);
+ if(p.age>=16)p.goal=pickGoal(p);
+ if(p.traits.includes('ambitious')||p.traits.includes('creative'))p.wantsBiz=true;
+ allById.set(p.id,p);people.push(p);
+ return p;
+}
+function describe(p){return Math.floor(p.age)+' summers old, '+traitPhrase(p)}
+function arrive(age){
+ // prefer tiles near map edges for arrivals
+ let spot=null;
+ for(let t=0;t<40&&!spot;t++){
+  const[x,y]=randOpenTile();
+  if(x<16||y<16||x>W-16||y>H-16)spot=[x,y];
+ }
+ if(!spot)spot=randOpenTile();
+ const p=newPerson({x:spot[0]*TILE+TILE/2,y:spot[1]*TILE+TILE/2,age:age||ri(18,36)});
+ tale([p],p.name+' wandered in from the surface tunnels — '+describe(p)+'.',true);
+ drawCard(p,'On their arrival, fate');
+ return p;
+}
+function stageOf(p){return p.age<6?'child':p.age<12?'kid':p.age<16?'youth':p.age<56?'adult':'elder'}
+function rerollTrait(p){
+ const i=ri(0,p.traits.length-1),old=p.traits[i];
+ let nt=pick(TKEYS);let tries=0;
+ while((p.traits.includes(nt))&&tries++<30)nt=pick(TKEYS);
+ applyTrait(p,old,-1);applyTrait(p,nt,1);
+ p.traits[i]=nt;
+ tale([p],'Death came not for '+p.name+"'s body, but for their old self. No longer "+TRAITS[old].a+', they emerged '+TRAITS[nt].a+'.',true);
+}
+
+/* ================= buildings & economy ================= */
+const BIZKINDS=[['tavern','🍺','a snug tavern'],['bakery','🥖','a warm bakery'],['bathhouse','♨️','a steamy bathhouse'],['trinkets','💍','a curious trinket shop'],['workshop','🔨','a busy workshop'],['teahouse','🍵','a quiet teahouse'],['apothecary','🧪','an apothecary of molds and mosses']];
+const BIZ_ADJ=['Gilded','Sleeping','Crooked','Glowing','Velvet','Umber','Wandering','Hollow','Silver','Merry','Patient','Second'];
+const BIZ_NOUN=['Mushroom','Lantern','Stalactite','Beetle','Ember','Root','Cavern','Toadstool','Echo','Vein','Moth','Kettle'];
+function homeTile(b){return[b.x+((b.w/2)|0),b.y+((b.h/2)|0)]}
+function findSpot(cx,cy,w,h,bounds){
+ for(let r=2;r<=22;r++){
+  const cand=[];
+  for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
+   if(Math.max(Math.abs(dx),Math.abs(dy))!==r)continue;
+   cand.push([cx+dx,cy+dy]);
+  }
+  shuffle(cand);
+  for(const[bx,by]of cand){
+   if(bounds&&(bx<bounds.x0+1||by<bounds.y0+1||bx+w>bounds.x1||by+h>bounds.y1))continue; // keep inside the walls
+   let ok=true;
+   for(let y=by-1;y<=by+h&&ok;y++)for(let x=bx-1;x<=bx+w&&ok;x++){
+    if(!inB(x,y)){ok=false;break}
+    if(bld[idx(x,y)]>=0)ok=false;
+   }
+   if(!ok)continue;
+   for(let y=by;y<by+h&&ok;y++)for(let x=bx;x<bx+w&&ok;x++){
+    if(!walkable(x,y)||nodeAt.has(idx(x,y))||dungeonAt(x,y)||struct[idx(x,y)]===S_WALL)ok=false;
+   }
+   if(ok)return[bx,by];
+  }
+ }
+ return bounds?findSpot(cx,cy,w,h,null):null; // fall back to anywhere if the walls are full
+}
+function totalMat(p,k){return p.inv[k]+(p.home&&!p.home.gone&&p.home.stock?p.home.stock[k]:0)}
+function canAfford(p,cost){for(const k in cost)if(totalMat(p,k)<cost[k])return false;return true}
+function takeMat(p,cost){
+ if(!canAfford(p,cost))return false;
+ for(const k in cost){
+  let need=cost[k];
+  const fromInv=Math.min(need,p.inv[k]);p.inv[k]-=fromInv;need-=fromInv;
+  if(need>0)p.home.stock[k]-=need;
+ }
+ return true;
+}
+function nearestVillage(p,maxTiles){
+ let best=null,bd=(maxTiles?maxTiles*TILE:1e9)**2;
+ for(const v of villages){const d=dist2(p.x,p.y,v.cx*TILE,v.cy*TILE);if(d<bd){bd=d;best=v}}
+ return best;
+}
+function townCentroid(){
+ const hs=buildings.filter(b=>!b.gone&&!b.ruined&&(b.tp==='home'||b.tp==='shelter'||b.tp==='biz'));
+ if(hs.length<2)return null;
+ let cx=0,cy=0;for(const b of hs){cx+=b.x+b.w/2;cy+=b.y+b.h/2}
+ return [Math.round(cx/hs.length),Math.round(cy/hs.length)];
+}
+function startBuild(p,tp,forP){
+ const cost=COST[tp];
+ if(!canAfford(p,cost))return false;
+ const[w,h]=SZ[tp];
+ let anchor=[(p.x/TILE)|0,(p.y/TILE)|0],bounds=null,s=null;
+ if(forP&&forP.home){anchor=homeTile(forP.home)}
+ else if(tp!=='grave'){
+  // town gravity — a settlement pulls new building toward its heart, so towns stay compact
+  const v=p.vid?villages.find(vv=>vv.id===p.vid):nearestVillage(p,34);
+  if(v&&v.claim){
+   anchor=claimCenter(v.claim);
+   s=findSpot(anchor[0],anchor[1],w,h,v.claim);   // fill inside the walls first
+   if(!s)s=findSpot(anchor[0],anchor[1],w,h,null); // otherwise settle at the edge (walls will grow to enclose)
+  }else{
+   const tc=townCentroid();
+   if(tc)anchor=[Math.round((tc[0]+((p.x/TILE)|0))/2),Math.round((tc[1]+((p.y/TILE)|0))/2)];
+  }
+ }
+ if(!s)s=findSpot(anchor[0],anchor[1],w,h,bounds);
+ if(!s)return false;
+ takeMat(p,cost);
+ const b={i:buildings.length,id:nextId++,tp,x:s[0],y:s[1],w,h,prog:0,need:NEED[tp],done:false,gone:false,
+  owners:[],builder:p.id,forId:forP?forP.id:null,stock:{food:0,wood:0,stone:0},prosperity:0,sub:null,name:null,ref:null,
+  emptySince:0,ruined:false,vid:null};
+ if(tp==='biz'){
+  b.sub=pick(BIZKINDS);
+  let nm='The '+pick(BIZ_ADJ)+' '+pick(BIZ_NOUN),tr=0;
+  while(usedBiz.has(nm)&&tr++<15)nm='The '+pick(BIZ_ADJ)+' '+pick(BIZ_NOUN);
+  usedBiz.add(nm);b.name=nm;
+ }
+ buildings.push(b);
+ for(let y=b.y;y<b.y+h;y++)for(let x=b.x;x<b.x+w;x++)bld[idx(x,y)]=b.i;
+ setTask(p,'build',{b});
+ if(forP)tale([p],p.name+' began building a shelter — not for themselves, but for '+forP.name+'.');
+ else tale([p],p.name+' started work on a '+(tp==='biz'?'business':tp)+', hauling '+pick(['mushroom planks','lashed stalks','cut stone','salvaged timber'])+'.');
+ return true;
+}
+function setHome(p,b){
+ if(p.home&&p.home!==b){const o=p.home;o.owners=o.owners.filter(id=>id!==p.id)}
+ p.home=b;
+ if(!b.owners.includes(p.id))b.owners.push(p.id);
+}
+function solidifyBuilding(b){
+ for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++){
+  shoveOccupants(x,y);
+  setSolid(x,y,S_HOUSE);
+ }
+}
+function completeBuild(b){
+ b.done=true;b.prog=b.need;
+ solidifyBuilding(b);
+ const builder=allById.get(b.builder);
+ if(b.tp==='shelter'||b.tp==='home'){
+  if(b.forId){
+   const o=allById.get(b.forId);
+   if(o&&!o.dead){setHome(o,b);tale([builder,o],builder.name+' built a shelter for '+o.name+', asking nothing in return.',true);applyAff(o,builder,30);applyAff(builder,o,10)}
+  }else if(builder&&!builder.dead){
+   const oldHome=builder.home;
+   setHome(builder,b);
+   const pt=builder.partner?allById.get(builder.partner):null;
+   if(pt&&!pt.dead&&(pt.home===oldHome||!pt.home||pt.home===null))setHome(pt,b);
+   if(b.tp==='shelter')tale([builder],builder.name+' raised a small shelter of '+pick(['lashed stalks','mushroom planks','patched hides'])+' to call their own.',true);
+   else{
+    const who=pt&&pt.home===b?builder.name+' and '+pt.name:builder.name;
+    tale(pt&&pt.home===b?[builder,pt]:[builder],who+' finished a proper home — a door that shuts, a hearth that glows.',true);
+   }
+  }
+ }else if(b.tp==='biz'&&builder&&!builder.dead){
+  builder.business=b;
+  tale([builder],builder.name+' opened '+b.name+' — '+b.sub[2]+'.',true);
+ }
+}
+function demolish(b){
+ if(b.gone)return;
+ b.gone=true;
+ for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++)if(bld[idx(x,y)]===b.i){bld[idx(x,y)]=-1;revertTile(x,y)}
+ for(const id of b.owners){const p=allById.get(id);if(p&&p.home===b)p.home=null}
+ b.owners=[];
+ if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
+}
+function ruinBuilding(b){
+ if(b.gone||b.ruined||b.tp==='grave')return;
+ b.ruined=true;b.emptySince=simMin;
+ for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++)if(bld[idx(x,y)]===b.i)setSolid(x,y,S_RUIN);
+ for(const id of b.owners){const p=allById.get(id);if(p&&p.home===b)p.home=null}
+ b.owners=[];
+ if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
+ const what=b.tp==='biz'?b.name:'a '+b.tp;
+ tale([],'With no one to tend it, '+what+' fell to ruin, roof sagging into the dark.');
+}
+function crumbleBuilding(b){
+ if(b.gone)return;
+ b.gone=true;
+ for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++)if(bld[idx(x,y)]===b.i){bld[idx(x,y)]=-1;carveFloor(x,y)}
+ tale([],'The old ruins '+(b.name?'of '+b.name+' ':'')+'finally crumbled to dust and rubble.');
+}
+function addGrave(p){
+ const tx=(p.x/TILE)|0,ty=(p.y/TILE)|0;
+ const s=findSpot(tx,ty,1,1)||nearOpen(tx,ty);
+ if(!s)return;
+ const b={i:buildings.length,id:nextId++,tp:'grave',x:s[0],y:s[1],w:1,h:1,prog:1,need:1,done:true,gone:false,owners:[],builder:p.id,forId:null,stock:null,prosperity:0,sub:null,name:null,ref:p.id};
+ buildings.push(b);
+ bld[idx(s[0],s[1])]=b.i;
+}
+
+/* ================= tasks & AI ================= */
+function setTask(p,k,data){p.task=Object.assign({k,t0:simMin},data||{});p.path=null;p.pi=0}
+function findNode(p,types,pred){
+ if(regionsDirty)computeRegions();
+ const pr=region[idx(clamp((p.x/TILE)|0,0,W-1),clamp((p.y/TILE)|0,0,H-1))];
+ let best=null,bd=1e18;
+ for(const n of nodes){
+  if(n.amt<=0||!types.includes(n.t))continue;
+  if(pred&&!pred(n))continue;
+  if(pr>=0&&region[idx(n.x,n.y)]!==pr)continue; // can't get there from here
+  const d=dist2(p.x,p.y,n.x*TILE,n.y*TILE);
+  if(d<bd){bd=d;best=n}
+ }
+ return best;
+}
+function gatherType(p,kind,want){
+ const types=kind==='food'?['berry','mush']:kind==='wood'?['tree']:['rock'];
+ const n=findNode(p,types);
+ if(!n){setTask(p,'wander',{r:20});return false}
+ setTask(p,'gather',{node:n,want:want||4});
+ return true;
+}
+function wanderTask(p,far){
+ const r=far?28:8;
+ for(let t=0;t<3;t++){
+  const tx=clamp(((p.x/TILE)|0)+ri(-r,r),1,W-2),ty=clamp(((p.y/TILE)|0)+ri(-r,r),1,H-2);
+  if(walkable(tx,ty)){setTask(p,'wander',{});if(goTo(p,tx,ty))return true;p.task=null}
+ }
+ p.task=null;p.thinkT=simMin+rf(15,40); // couldn't find a spot — just linger a while
+ return false;
+}
+function goHome(p,why){
+ if(!p.home||p.home.gone)return false;
+ const[hx,hy]=homeTile(p.home);
+ setTask(p,'gohome',{tx:hx,ty:hy,why});
+ return true;
+}
+function goSleep(p){
+ if(p.home&&!p.home.gone){if(goHome(p,'sleep'))return}
+ p.sleeping=true;p.task=null;p.path=null;
+ if(chance(.08))tale([p],p.name+' slept curled against cold stone.');
+}
+function claimVacant(p){
+ let best=null,bd=1e18;
+ for(const b of buildings){
+  if(b.gone||b.ruined||!b.done||b.tp==='biz'||b.tp==='grave'||b.owners.length)continue;
+  const[hx,hy]=homeTile(b);
+  const d=dist2(p.x,p.y,hx*TILE,hy*TILE);
+  if(d<bd){bd=d;best=b}
+ }
+ if(best){
+  setHome(p,best);best.emptySince=0;
+  tale([p],p.name+' took up residence in an empty '+best.tp+'. It still smelled of someone else.');
+  return true;
+ }
+ return false;
+}
+function nearestBiz(p){
+ let best=null,bd=1e18;
+ for(const b of buildings){
+  if(b.gone||!b.done||b.tp!=='biz')continue;
+  const[hx,hy]=homeTile(b);
+  const d=dist2(p.x,p.y,hx*TILE,hy*TILE);
+  if(d<bd&&d<(140*TILE)**2){bd=d;best=b}
+ }
+ return best;
+}
+function socialize(p){
+ let cand=null;
+ const bel=p.courting||((p.partner&&chance(.5))?p.partner:null);
+ if(bel){const o=allById.get(bel);if(o&&!o.dead&&!o.sleeping)cand=o}
+ if(!cand){
+  let bs=-1e18;
+  for(const o of people){
+   if(o===p||o.dead||o.age<8||o.sleeping)continue;
+   const r=p.rel[o.id];
+   if(r&&r.a<=-30)continue;
+   const dTiles=Math.sqrt(dist2(p.x,p.y,o.x,o.y))/TILE;
+   const s=(r?r.a*2.5:0)-dTiles*1.5+rf(0,25);
+   if(s>bs){bs=s;cand=o}
+  }
+ }
+ const b=nearestBiz(p);
+ if(b&&(!cand||chance(.35))){
+  const[hx,hy]=homeTile(b);
+  setTask(p,'visit',{b,tx:hx,ty:hy});
+  return;
+ }
+ if(cand)setTask(p,'chat',{o:cand,rp:0});
+ else wanderTask(p);
+}
+function nearestMonster(p,range){
+ let best=null,bd=range?range*range:1e18;
+ for(const m of monsters){const d=dist2(p.x,p.y,m.x,m.y);if(d<bd){bd=d;best=m}}
+ return best;
+}
+function think(p){
+ const st=stageOf(p);
+ // ---- monster threat overrides everything ----
+ // emergency: eat before doing anything if starving and reasonably safe
+ const nearM=monsters.length?nearestMonster(p,9*TILE):null;
+ if(p.hunger>82&&p.inv.food>0&&(!nearM||Math.sqrt(dist2(p.x,p.y,nearM.x,nearM.y))>5*TILE)){setTask(p,'eat',{});return}
+ // monster threat overrides only when the beast is genuinely close
+ if(nearM){
+  const close=Math.sqrt(dist2(p.x,p.y,nearM.x,nearM.y))/TILE;
+  if(close<9){
+   if(p.fleeUntil>simMin||!shouldFight(p)){fleeFrom(p,nearM);return;}
+   setTask(p,'fight',{m:nearM});return;
+  }
+ }
+ // children
+ if(st==='child'){
+  if(isNight()||p.energy<20){p.sleeping=true;return}
+  if(p.hunger>55){
+   const s=p.home&&!p.home.gone?p.home.stock:null;
+   if(s&&s.food>0){s.food--;p.hunger=Math.max(0,p.hunger-42)}
+   else for(const pid of p.parents){
+    const pa=allById.get(pid);
+    if(pa&&!pa.dead&&pa.inv.food>0){pa.inv.food--;p.hunger=Math.max(0,p.hunger-42);break}
+   }
+  }
+  const anch=p.home&&!p.home.gone?homeTile(p.home).map(v=>v*TILE):(p.parents.length?(()=>{const pa=allById.get(p.parents[0]);return pa&&!pa.dead?[pa.x,pa.y]:[p.x,p.y]})():[p.x,p.y]);
+  const tx=clamp(((anch[0]/TILE)|0)+ri(-2,2),1,W-2),ty=clamp(((anch[1]/TILE)|0)+ri(-2,2),1,H-2);
+  if(walkable(tx,ty)){setTask(p,'wander',{});if(!goTo(p,tx,ty))p.task=null}
+  p.thinkT=simMin+rf(20,60);
+  return;
+ }
+ // sleep needs
+ if(isNight()&&p.energy<72){goSleep(p);return}
+ if(p.energy<18){goSleep(p);return}
+ // hunger
+ if(p.hunger>62){
+  if(p.inv.food>0){setTask(p,'eat',{});return}
+  if(p.home&&!p.home.gone&&p.home.stock.food>0){goHome(p,'eat');return}
+  gatherType(p,'food',3);return;
+ }
+ // moon-lost wandering
+ if(p.lostUntil>simMin&&chance(.5)){wanderTask(p,true);if(chance(.12))tale([p],p.name+' wandered, moonstruck, down tunnels that all looked the same.');return}
+ // hermits keep to themselves
+ if(p.hermitUntil>simMin){wanderTask(p,true);return}
+ // kids: light duties
+ if(st==='kid'||st==='youth'){
+  if(p.socialN>60){socialize(p);return}
+  if(st==='youth'&&p.home&&!p.home.gone&&p.home.stock.food<6&&chance(.6)){gatherType(p,'food',3);return}
+  wanderTask(p);return;
+ }
+ // deposit surplus at home
+ if(p.home&&!p.home.gone&&(p.inv.food>6||p.inv.wood>=6&&!needsWoodPlan(p)||p.inv.stone>=6&&!needsStonePlan(p))){goHome(p,'deposit');return}
+ // resume construction I started
+ for(const b of buildings){
+  if(!b.gone&&!b.done&&b.builder===p.id){setTask(p,'build',{b});return}
+ }
+ // housing
+ if(!p.home||p.home.gone){
+  if(claimVacant(p))return;
+  if(canAfford(p,COST.shelter)){if(startBuild(p,'shelter'))return}
+  gatherType(p,'wood',COST.shelter.wood);return;
+ }
+ // courting couples make time for each other
+ if(p.courting&&p.socialN>22){socialize(p);return}
+ // social before industry — bonds are the point
+ if(p.socialN>55){socialize(p);return}
+ // upgrade shelter to a proper home (partners first, then settled singles)
+ const pt=p.partner?allById.get(p.partner):null;
+ if(p.home.tp==='shelter'&&((pt&&!pt.dead)||(p.age>=20&&cday()>p.arrDay+4))){
+  if(canAfford(p,COST.home)){if(startBuild(p,'home'))return}
+  if(totalMat(p,'wood')<COST.home.wood){gatherType(p,'wood',3);return}
+  if(totalMat(p,'stone')<COST.home.stone){gatherType(p,'stone',3);return}
+ }
+ // business ambitions (only so many shops fit one cavern)
+ if(p.wantsBiz&&!p.business&&p.home.tp!=='shelter'&&cday()>p.arrDay+2&&buildings.filter(b=>!b.gone&&b.tp==='biz').length<Math.max(2,(people.length/3)|0)){
+  if(canAfford(p,COST.biz)){if(startBuild(p,'biz'))return}
+  if(totalMat(p,'wood')<COST.biz.wood){gatherType(p,'wood',3);return}
+  if(totalMat(p,'stone')<COST.biz.stone){gatherType(p,'stone',3);return}
+ }
+ // stock the pantry
+ if(p.home.stock.food<4+2*Math.min(3,p.kids.length)){gatherType(p,'food',4);return}
+ // the village mind: pitch in on shared work
+ if(p.vid){const v=villages.find(vv=>vv.id===p.vid);const keen=v&&!v.wallDone?0.95:0.7;if(chance(keen)){const job=findVillageJob(p);if(job){setTask(p,'villagejob',{v:job.v,j:job.j});return}}}
+ // the call of the deep
+ if(wantsToQuest(p)){if(formExpedition(p))return}
+ // explorer hearts
+ if(p.goal&&p.goal.k==='wander'&&!p.goal.done&&chance(.4)){wanderTask(p,true);return}
+ if(p.farUntil>simMin&&chance(.5)){wanderTask(p,true);return}
+ // nothing pressing — mostly linger by the hearth, wander only now and then (keeps pathfinding light)
+ if(chance(.35))wanderTask(p);
+ else{p.task=null;p.thinkT=simMin+rf(18,45)}
+}
+function fleeFrom(p,m){
+ let tx,ty;
+ if(p.vid){const v=villages.find(vv=>vv.id===p.vid);if(v){tx=Math.round(v.cx);ty=Math.round(v.cy)}}
+ if(tx===undefined&&p.home&&!p.home.gone){const[hx,hy]=homeTile(p.home);tx=hx;ty=hy}
+ if(tx===undefined){ // run directly away
+  const ax=p.x-m.x,ay=p.y-m.y,L=Math.hypot(ax,ay)||1;
+  tx=clamp(((p.x+ax/L*10*TILE)/TILE)|0,1,W-2);ty=clamp(((p.y+ay/L*10*TILE)/TILE)|0,1,H-2);
+ }
+ setTask(p,'flee',{tx,ty,m});
+ if(chance(.08))tale([p],p.name+' fled from the '+m.name+'.');
+}
+function needsWoodPlan(p){
+ if(!p.home||p.home.gone)return true;
+ if(p.home.tp==='shelter')return true;
+ if(p.wantsBiz&&!p.business)return true;
+ return false;
+}
+function needsStonePlan(p){return needsWoodPlan(p)}
+
+function doTask(p,dt){
+ const t=p.task;
+ switch(t.k){
+  case 'wander':{if(!p.path){p.task=null;break}if(moveAlong(p,dt))p.task=null;break}
+  case 'gather':{
+   const n=t.node;
+   if(!n||n.amt<=0){p.task=null;break}
+   if(!t.arr){
+    if(!p.path&&!t.pathed){t.pathed=true;if(!goTo(p,n.x,n.y)){p.task=null;break}}
+    if(moveAlong(p,dt))t.arr=true;else break;
+   }
+   t.h=(t.h||0)+dt;
+   if(t.h>=8){
+    t.h=0;n.amt--;n.rt=n.reg;
+    p.inv[n.yield]++;
+    emote(p,n.yield==='food'?'🍄':n.yield==='wood'?'🪵':'⛏');
+    if(n.amt<=0||p.inv[n.yield]>=t.want)p.task=null;
+   }
+   break;
+  }
+  case 'eat':{
+   t.h=(t.h||0)+dt;
+   if(t.h>=6){
+    while(p.hunger>22&&p.inv.food>0){p.inv.food--;p.hunger=Math.max(0,p.hunger-42)}
+    p.task=null;
+   }
+   break;
+  }
+  case 'gohome':{
+   if(!p.home||p.home.gone){p.task=null;break}
+   if(!t.arr){
+    if(!p.path&&!t.pathed){t.pathed=true;if(!goTo(p,t.tx,t.ty)){p.task=null;break}}
+    if(moveAlong(p,dt))t.arr=true;else break;
+   }
+   const s=p.home.stock;
+   if(t.why==='eat'){
+    while(p.hunger>22&&s.food>0){s.food--;p.hunger=Math.max(0,p.hunger-42)}
+    p.task=null;
+   }else if(t.why==='deposit'){
+    while(p.inv.food>2){p.inv.food--;s.food++}
+    if(!needsWoodPlan(p))while(p.inv.wood>0){p.inv.wood--;s.wood++}
+    if(!needsStonePlan(p))while(p.inv.stone>0){p.inv.stone--;s.stone++}
+    p.task=null;
+   }else if(t.why==='sleep'){
+    p.sleeping=true;p.task=null;
+   }else p.task=null;
+   break;
+  }
+  case 'build':{
+   const b=t.b;
+   if(!b||b.gone||b.done){p.task=null;break}
+   if(!t.arr){
+    if(!p.path&&!t.pathed){t.pathed=true;const[hx,hy]=homeTile(b);if(!goTo(p,hx,hy)){p.task=null;break}}
+    if(moveAlong(p,dt))t.arr=true;else break;
+   }
+   b.prog+=dt*(1+Math.max(-0.6,mod(p,'work')));
+   if(chance(dt*0.02))emote(p,'🔨');
+   if(b.prog>=b.need){completeBuild(b);p.task=null}
+   break;
+  }
+  case 'chat':{
+   const o=t.o;
+   if(!o||o.dead||(o.sleeping&&!t.arr)){p.task=null;break}
+   if(!t.arr){
+    if(!p.path||simMin-t.rp>25){t.rp=simMin;if(!goTo(p,(o.x/TILE)|0,(o.y/TILE)|0)){p.task=null;break}}
+    moveAlong(p,dt);
+    if(dist2(p.x,p.y,o.x,o.y)<(TILE*1.5)**2){t.arr=true;t.h=0;p.path=null;p.moving=false;o.chatHold=simMin+18;p.fx=o.x>p.x?1:-1;o.fx=p.x>o.x?1:-1;if(SPEEDS[speedIdx]<=16)chatBubbles(p,o)}
+    else if(simMin-t.t0>200){p.task=null}
+   }else{
+    o.chatHold=Math.max(o.chatHold,simMin+6);
+    t.h+=dt;
+    if(chance(dt*0.03))emote(p,'💬');
+    if(t.h>=14){
+     interact(p,o);
+     p.socialN=0;o.socialN=Math.max(0,o.socialN-45);
+     p.task=null;
+    }
+   }
+   break;
+  }
+  case 'visit':{
+   const b=t.b;
+   if(!b||b.gone){p.task=null;break}
+   if(!t.arr){
+    if(!p.path&&!t.pathed){t.pathed=true;if(!goTo(p,t.tx,t.ty)){p.task=null;break}}
+    if(moveAlong(p,dt))t.arr=true;else break;
+   }
+   t.h=(t.h||0)+dt;
+   if(t.h>=20){
+    b.prosperity++;
+    const owner=allById.get(b.builder);
+    if(owner&&!owner.dead&&owner!==p){applyAff(p,owner,rf(1,4));applyAff(owner,p,rf(1,3))}
+    if(p.hunger>50&&['tavern','bakery','teahouse'].includes(b.sub[0]))p.hunger=Math.max(0,p.hunger-30);
+    if(chance(.15))tale([p],p.name+' passed an easy hour at '+b.name+'.');
+    if(b.prosperity===6||b.prosperity===16||b.prosperity===40)tale(owner&&!owner.dead?[owner]:[],b.name+' is the talk of the cavern — everyone has been through its door.',true);
+    p.socialN=Math.max(0,p.socialN-35);
+    p.task=null;
+   }
+   break;
+  }
+  case 'togodungeon':{
+   const d=t.d,exp=t.exp;
+   if(!d||!exp||exp.departed||!expeditions.includes(exp)){p.task=null;break}
+   if(!p.path&&!t.pathed){t.pathed=true;if(!goTo(p,d.x,d.y)){p.task=null;break}}
+   if(moveAlong(p,dt)){exp.arrived.set(p.id,true);p.moving=false;emote(p,'🔦')} // wait at the mouth for the party
+   break;
+  }
+  case 'fight':{
+   const m=t.m;
+   if(!m||monsters.indexOf(m)<0){p.task=null;break}
+   if(!t.avenge&&p.hp<22&&!p.traits.includes('brave')){p.fleeUntil=simMin+120;p.task=null;break}
+   const close=dist2(p.x,p.y,m.x,m.y)<(TILE*1.3)**2;
+   if(!close){
+    if(!p.path||simMin-(t.rp||0)>20){t.rp=simMin;if(!goTo(p,(m.x/TILE)|0,(m.y/TILE)|0)){p.task=null;break}}
+    moveAlong(p,dt);
+    p.fx=m.x>p.x?1:-1;
+   }else{
+    p.path=null;p.moving=false;p.fx=m.x>p.x?1:-1;
+    settlerAttack(p,m,dt);
+   }
+   break;
+  }
+  case 'flee':{
+   if(!t.m||monsters.indexOf(t.m)<0||p.fleeUntil<simMin){p.task=null;break}
+   if(!p.path&&!t.pathed){t.pathed=true;if(!goTo(p,t.tx,t.ty)){p.fleeUntil=0;p.task=null;break}}
+   if(moveAlong(p,dt)){ // reached refuge; cower a moment
+    p.moving=false;
+    if(dist2(p.x,p.y,t.m.x,t.m.y)>(12*TILE)**2)p.fleeUntil=0;
+    p.task=null;
+   }
+   break;
+  }
+  case 'villagejob':{
+   const v=t.v,j=t.j;
+   if(!v||!j||!villages.includes(v)){p.task=null;break}
+   // path to a tile adjacent to the job tile (or the tile itself if walkable)
+   if(!t.arr){
+    if(!p.path&&!t.pathed){
+     t.pathed=true;
+     const tgt=walkable(j.x,j.y)?[j.x,j.y]:(nearOpen(j.x,j.y)||[j.x,j.y]);
+     if(!goTo(p,tgt[0],tgt[1])){releaseJob(v,j);p.task=null;break}
+    }
+    if(moveAlong(p,dt))t.arr=true;else break;
+   }
+   t.h=(t.h||0)+dt;
+   if(chance(dt*0.03))emote(p,j.type==='mine'?'⛏':j.type==='wall'?'🧱':j.type==='harvest'?'🌾':'🌱');
+   if(t.h>=(j.type==='wall'?6:12)){doVillageJob(p,v,j);p.task=null}
+   break;
+  }
+  default:p.task=null;
+ }
+}
+function releaseJob(v,j){j.claimed=null}
+function doVillageJob(p,v,j){
+ const i=idx(j.x,j.y);
+ const drop=()=>{const k=v.jobs.indexOf(j);if(k>=0)v.jobs.splice(k,1)};
+ if(j.type==='wall'){
+  if(!walkable(j.x,j.y)){drop();return}
+  // pay stone from village stock or the worker
+  if(v.stock.stone>=WALL_STONE)v.stock.stone-=WALL_STONE;
+  else if(totalMat(p,'stone')>=WALL_STONE){if(p.inv.stone>0)p.inv.stone--;else if(p.home&&p.home.stock)p.home.stock.stone--}
+  else{releaseJob(v,j);return}
+  shoveOccupants(j.x,j.y);setSolid(j.x,j.y,S_WALL);drop();
+ }else if(j.type==='mine'){
+  if(walkable(j.x,j.y)){drop();return}
+  carveFloor(j.x,j.y);v.stock.stone+=2;p.inv.stone++;drop();
+  if(chance(.2))tale([p],p.name+' widened the halls of '+v.name+', hauling out cut stone.');
+ }else if(j.type==='till'){
+  if(!walkable(j.x,j.y)||farmGrid[i]){drop();return}
+  farmGrid[i]=1;farmTimer[i]=FARM_RIPEN;farmTiles.add(i);markMod(i);drop();
+ }else if(j.type==='harvest'){
+  if(farmGrid[i]===2){farmGrid[i]=1;farmTimer[i]=FARM_RIPEN;farmTiles.add(i);markMod(i);
+   p.inv.food+=ri(2,4);v.stock.food+=ri(3,6);
+   if(chance(.12))tale([p],p.name+' brought in a good harvest from the '+v.name+' plots.');
+  }
+  drop();
+ }
+}
+
+/* ================= romance & interaction ================= */
+function interact(p,o){
+ const r=relOf(p,o),ro=relOf(o,p);
+ if(!r.met){
+  r.met=true;ro.met=true;
+  if(chance(.3))tale([p,o],p.name+' crossed paths with '+o.name+' near '+pick(['the glowcap grove','a quiet pool','the old rockfall','the mushroom terraces','a narrow gallery'])+'.');
+ }
+ let compat=0;
+ for(const t of p.traits)if(o.traits.includes(t))compat+=4;
+ for(const[a,b]of CLASH)if((p.traits.includes(a)&&o.traits.includes(b))||(p.traits.includes(b)&&o.traits.includes(a)))compat-=5;
+ for(const[a,b]of KIN)if((p.traits.includes(a)&&o.traits.includes(b))||(p.traits.includes(b)&&o.traits.includes(a)))compat+=3;
+ const charm=mod(p,'charm')+mod(o,'charm');
+ const roll=rf(-8,10)+compat+charm*4+(mod(p,'social')+mod(o,'social'))*3;
+ let d;
+ if(roll>2)d=rf(4,10)*(1+Math.max(0,mod(p,'social')));
+ else if(roll<-6){
+  d=rf(-9,-3);
+  if(chance(.35))tale([p,o],p.name+' and '+o.name+' quarreled over '+pick(['the proper way to roast a glowcap','a borrowed axe','who saw the silver vein first','an old debt','nothing at all, really'])+'.');
+ }
+ else d=rf(-1,2.5);
+ applyAff(p,o,d);applyAff(o,p,d*rf(.7,1.1));
+ // dates while courting
+ if(p.courting===o.id&&o.courting===p.id){
+  r.cN++;ro.cN++;
+  applyAff(p,o,rf(4,9));applyAff(o,p,rf(4,9));
+  if(chance(.35))tale([p,o],pick([p.name+' and '+o.name+' walked the long gallery together, talking of everything and nothing.',o.name+' laughed at something '+p.name+' said, and the sound carried.',p.name+' and '+o.name+' shared roasted glowcaps by a warm seam in the rock.']));
+  if(r.cN>=3)becomePartners(p,o);
+  return;
+ }
+ // romance spark
+ const adults=p.age>=16&&o.age>=16;
+ if(adults&&d>0&&!p.partner&&!o.partner&&!p.courting&&!o.courting&&!isFamily(p,o)&&r.a>32&&ro.a>26){
+  const pr=0.20+mod(p,'romance')*0.3+mod(o,'romance')*0.2;
+  if(chance(Math.max(0.02,pr))){
+   p.courting=o.id;o.courting=p.id;
+   tale([p,o],pick(['Beneath the glowcaps, '+p.name+' confessed their feelings to '+o.name+'.',p.name+' left cave-flowers at '+o.name+"'s door. Everyone knew what it meant.",p.name+' asked '+o.name+' to walk the long gallery, alone, together.']),true);
+  }
+ }
+}
+function becomePartners(p,o){
+ if(p.partner||o.partner)return;
+ p.courting=null;o.courting=null;
+ p.partner=o.id;o.partner=p.id;
+ relOf(p,o).a=Math.max(relOf(p,o).a,75);relOf(o,p).a=Math.max(relOf(o,p).a,75);
+ tale([p,o],pick([p.name+' and '+o.name+' fell truly in love.','After many walks and small kindnesses, '+p.name+' and '+o.name+' promised themselves to each other.']),true);
+ if(p.goal&&p.goal.k==='love')completeGoal(p);
+ if(o.goal&&o.goal.k==='love')completeGoal(o);
+ // move in together
+ const ph=p.home&&!p.home.gone,oh=o.home&&!o.home.gone;
+ if(ph&&oh&&p.home!==o.home){
+  const keep=p.home.tp==='home'?p.home:o.home.tp==='home'?o.home:p.home;
+  const mover=keep===p.home?o:p;
+  setHome(mover,keep);
+  tale([mover],mover.name+' moved in with '+(keep===p.home?p.name:o.name)+'.');
+ }else if(ph&&!oh)setHome(o,p.home);
+ else if(oh&&!ph)setHome(p,o.home);
+}
+function wed(p,o){
+ p.married=true;o.married=true;p.wedSoon=false;o.wedSoon=false;
+ tale([p,o],p.name+' and '+o.name+' were wed by lantern-light, half the cavern singing off-key.',true);
+ if(chance(.5))drawCard(chance(.5)?p:o,'At the wedding, fate');
+}
+function birth(p,o){
+ const home=p.home&&!p.home.gone?p.home:o.home;
+ if(!home)return;
+ const[hx,hy]=homeTile(home);
+ const traits=[];
+ const pool=shuffle(p.traits.concat(o.traits));
+ traits.push(chance(.6)?pool[0]:pick(TKEYS));
+ let t2=chance(.6)?pool[1]:pick(TKEYS);
+ let tries=0;while(t2===traits[0]&&tries++<20)t2=pick(TKEYS);
+ traits.push(t2);
+ const c=newPerson({x:hx*TILE+TILE/2,y:hy*TILE+TILE/2,age:0,traits,parents:[p.id,o.id]});
+ setHome(c,home);
+ p.kids.push(c.id);o.kids.push(c.id);
+ relOf(p,c).met=true;relOf(c,p).met=true;relOf(o,c).met=true;relOf(c,o).met=true;
+ relOf(p,c).a=90;relOf(c,p).a=90;relOf(o,c).a=90;relOf(c,o).a=90;
+ tale([p,o,c],p.name+' and '+o.name+' welcomed a child into the world: little '+c.name+'.',true);
+ if(p.goal&&p.goal.k==='family')completeGoal(p);
+ if(o.goal&&o.goal.k==='family')completeGoal(o);
+}
+function completeGoal(p){
+ if(!p.goal||p.goal.done)return;
+ p.goal.done=true;
+ buff(p,'luck',.15,20,'fulfilled');
+ tale([p],p.name+"'s heart's wish came true — "+p.goal.t+'. They walked differently after that.',true);
+}
+function die(p,cause){
+ if(p.dead)return;
+ p.dead=true;p.task=null;p.path=null;p.sleeping=false;
+ const i=people.indexOf(p);if(i>=0)people.splice(i,1);
+ const causeText={age:'passed away in their sleep, full of years',hunger:'succumbed to hunger, far from any table',doom:"answered the card that Death had dealt them",collapse:'was taken by a collapse'}[cause]||'passed beyond the lantern-light';
+ const friends=knownRels(p).filter(([o,r])=>r.a>=30).length;
+ const bits=[];
+ bits.push(Math.max(1,Math.floor(p.age))+' summers lived');
+ if(p.kids.length)bits.push(p.kids.length+(p.kids.length>1?' children':' child'));
+ if(friends)bits.push(friends+(friends>1?' dear friends':' dear friend'));
+ if(p.cards.length)bits.push(p.cards.length+' cards drawn from fate');
+ tale([p],p.name+' '+causeText+'. '+bits.join(', ')+'.',true);
+ if(p.business&&!p.business.gone)tale([p],p.business.name+' went dark, its sign creaking in the draft.');
+ if(p.partner){
+  const o=allById.get(p.partner);
+  if(o&&!o.dead){
+   o.partner=null;o.married=false;o.gloomUntil=simMin+6*DAY;
+   tale([o],o.name+' grieved for '+p.name+', and for a long while spoke to no one.',true);
+  }
+ }
+ if(p.courting){const o=allById.get(p.courting);if(o&&!o.dead){o.courting=null;o.gloomUntil=simMin+4*DAY}}
+ for(const kid of p.kids){const k=allById.get(kid);if(k&&!k.dead)tale([k],k.name+' lit a small lamp for '+p.name+', and kept it burning.')}
+ if(p.home&&!p.home.gone){p.home.owners=p.home.owners.filter(id=>id!==p.id)}
+ addGrave(p);
+ if(selected===p)renderPanelFull(p);
+}
+
+/* ================= daily tick ================= */
+const MUSINGS=['{n} spent an hour watching the glowcaps breathe.','{n} hummed an old song from the surface, half-remembered.','{n} carved a little face into a stalagmite. It looked disapproving.','{n} counted their blessings and lost count.','{n} found a beetle the size of a shoe and named it.','{n} stood at the edge of the dark and listened.','{n} mended their cloak with mushroom thread, badly.','{n} skipped stones across a black pool until one skipped back.'];
+const AMBIENT=['A warm wind moved through the galleries, smelling of rain far above.','The glowcaps pulsed brighter than anyone could remember.','Somewhere deep below, water sang against stone.','Dust sifted from the ceiling; the cavern grumbled, then settled.','A flight of pale moths crossed the great vault.','The cold came down from the surface tunnels and everyone wore two cloaks.'];
+function dailyTick(){
+ if(chance(.3))tale([],pick(AMBIENT));
+ const snapshot=people.slice();
+ let giftDone=false;
+ for(const p of snapshot){
+  if(p.dead)continue;
+  pruneBuffs(p);
+  // coming of age
+  if(!p.cameOfAge&&p.age>=16){
+   p.cameOfAge=true;
+   p.goal=pickGoal(p);
+   tale([p],p.name+' came of age — '+traitPhrase(p)+', with a heart set on '+p.goal.t.replace(/^to /,'')+'.',true);
+   drawCard(p,'On their coming of age, fate');
+  }
+  // hermit return
+  if(p.hermitUntil&&p.hermitUntil<=simMin){
+   p.hermitUntil=0;p.base.luck+=.04;
+   tale([p],p.name+' returned from solitude with clearer eyes.');
+  }
+  // fate cards
+  if(p.age>=16&&chance(.12))drawCard(p,null);
+  // musings
+  if(chance(.08))tale([p],pick(MUSINGS).replace('{n}',p.name));
+  // doom & old age
+  if(p.doom&&cday()>=p.doom){die(p,'doom');continue}
+  if(p.age>p.lifespan&&chance(0.05+(p.age-p.lifespan)*0.08)){die(p,'age');continue}
+  // weddings & breakups
+  if(p.partner&&p.id<p.partner){
+   const o=allById.get(p.partner);
+   if(o&&!o.dead){
+    const a=relOf(p,o).a;
+    if(!p.married&&(p.wedSoon||o.wedSoon||(a>45&&chance(.08))))wed(p,o);
+    if(a<0&&chance(.25)){
+     p.partner=null;o.partner=null;p.married=false;o.married=false;
+     p.gloomUntil=simMin+3*DAY;o.gloomUntil=simMin+3*DAY;
+     tale([p,o],p.name+' and '+o.name+' drifted apart, and finally parted ways.',true);
+    }else if(o.home&&p.home===o.home&&p.kids.length<3&&p.age<50&&o.age<50){
+     const pr=0.14*(1+mod(p,"fert")+mod(o,"fert"))*((p.goal&&p.goal.k==='family')||(o.goal&&o.goal.k==='family')?1.5:1);
+     if(chance(pr))birth(p,o);
+    }
+   }
+  }
+  // kindness: build shelter for a homeless friend
+  if(!giftDone&&p.traits.includes('kind')&&p.age>=16&&p.home&&!p.home.gone&&totalMat(p,'wood')>=COST.shelter.wood+3&&(!p.task||p.task.k==='wander')){
+   for(const[o,r]of knownRels(p)){
+    if(r.a>=25&&o.age>=16&&(!o.home||o.home.gone)){
+     if(startBuild(p,'shelter',o)){giftDone=true}
+     break;
+    }
+   }
+  }
+  // goal checks
+  if(p.goal&&!p.goal.done){
+   const g=p.goal.k;
+   if(g==='craft'&&p.business&&p.business.prosperity>=5)completeGoal(p);
+   else if(g==='wander'&&p.visited.size>=openChunks.size*0.6)completeGoal(p);
+   else if(g==='fellows'&&knownRels(p).filter(([o,r])=>r.a>=30).length>=4)completeGoal(p);
+   else if(g==='quiet'&&p.home&&!p.home.gone&&p.home.tp==='home'&&p.age>=50)completeGoal(p);
+  }
+ }
+ // arrivals
+ if(people.length<10&&chance(.4))arrive();
+ else if(people.length<26&&chance(.08))arrive();
+ // the collective mind & the slow decay of empty places
+ villageTick();
+ upkeepTick();
+}
+
+/* ================= sim step ================= */
+function stepSim(dt){
+ simMin+=dt;
+ const d=cday();
+ if(d!==dayMark){dayMark=d;dailyTick()}
+ for(const n of nodes){
+  if(n.amt<n.max){n.rt-=dt;if(n.rt<=0){n.amt++;n.rt=n.reg}}
+ }
+ for(const d of dungeons)if(d.restock&&simMin>=d.restock){d.loot=clamp(d.loot+0.4,0,1.3);d.danger=clamp(d.danger-0.04,.2,.95);d.restock=0}
+ processExpeditions();
+ updateMonsters(dt);
+ ripenAll(dt);
+ for(let i=people.length-1;i>=0;i--){
+  const p=people[i];
+  if(p.dead)continue;
+  updatePerson(p,dt);
+ }
+}
+function updatePerson(p,dt){
+ if(p.inDungeon){p.age+=dt/(DAY*2);return} // time passes in the deep, but they act on nothing here
+ p.age+=dt/(DAY*2);
+ p.hunger=clamp(p.hunger+0.055*dt*(p.age<12?0.7:1),0,100);
+ if(p.hp<100){const threatened=monsters.length&&nearestMonster(p,12*TILE);p.hp=clamp(p.hp+(threatened?0:0.05)*dt,0,100)}
+ if(p.sleeping){
+  p.energy=clamp(p.energy+(p.home&&!p.home.gone?0.18:0.10)*dt,0,100);
+  const t=tod();
+  if(p.energy>=99||(t>0.25&&t<0.85&&p.energy>62)){p.sleeping=false;p.thinkT=simMin+rf(1,4)}
+ }else{
+  p.energy=clamp(p.energy-0.075*dt,0,100);
+  if(p.hermitUntil<simMin)p.socialN=clamp(p.socialN+0.055*dt,0,100);
+ }
+ if(p.hunger>=100){p.starv+=dt;if(p.starv>2*DAY){die(p,'hunger');return}}
+ else p.starv=0;
+ if(p.chatHold>simMin){p.moving=false;return}
+ if(p.sleeping)return;
+ if(p.task)doTask(p,dt);
+ else{
+  p.moving=false;
+  const soon=monsters.length&&nearestMonster(p,9*TILE)?0.6:rf(3,9);
+  if(simMin>=p.thinkT){
+   think(p);
+   if(!p.task)p.thinkT=simMin+soon;
+  }
+ }
+}
+
+/* ================= dungeons & questing ================= */
+const DUN_ADJ=['Weeping','Sunless','Drowned','Gnawed','Whispering','Forgotten','Bleeding','Hungry','Shivering','Broken','Endless','Rotting'];
+const DUN_NOUN=['Deep','Warren','Hollow','Descent','Maw','Abyss','Vault','Undergallery','Fissure','Pit','Labyrinth','Sepulchre'];
+const RELICS=[
+ {g:'💎',n:'Cavern Heart',k:'luck',v:.15,d:'a stone that hums when danger nears'},
+ {g:'🗡',n:'Chitin Blade',k:'work',v:.2,d:'carved from a beast that should not exist'},
+ {g:'📿',n:'Beadwork of the Lost',k:'charm',v:.2,d:'left by someone who never came back'},
+ {g:'🕯',n:'Everlit Lantern',k:'luck',v:.1,d:'its flame has never once gone out'},
+ {g:'🎭',n:'Silt Mask',k:'social',v:.2,d:'faces stare out of the pale clay'},
+ {g:'💍',n:'Deepmarriage Ring',k:'romance',v:.25,d:'two names worn almost smooth'},
+ {g:'🧭',n:'Trembling Needle',k:'speed',v:.2,d:'it points only downward'},
+ {g:'🪬',n:'Warding Sigil',k:'luck',v:.12,d:'the dark seems to lean away from it'}
+];
+function dangerWord(d){return d<.28?'uneasy':d<.45?'dangerous':d<.62?'deadly':d<.8?'a death-trap':'a legend of ruin'}
+function makeDungeon(x,y){
+ let nm='The '+pick(DUN_ADJ)+' '+pick(DUN_NOUN),tr=0;
+ while(usedDun.has(nm)&&tr++<20)nm='The '+pick(DUN_ADJ)+' '+pick(DUN_NOUN);
+ usedDun.add(nm);
+ const d={id:nextId++,x,y,name:nm,danger:rf(.24,.42),depth:ri(2,6),loot:rf(.7,1),restock:0,
+  raids:0,deaths:0,relicsFound:0,inside:new Set()};
+ dungeons.push(d);
+ return d;
+}
+function dungeonAt(x,y){for(const d of dungeons)if(d.x===x&&d.y===y)return d;return null}
+function nearestDungeon(p){
+ let best=null,bd=1e18;
+ for(const d of dungeons){const dd=dist2(p.x,p.y,d.x*TILE,d.y*TILE);if(dd<bd){bd=dd;best=d}}
+ return best;
+}
+function questAppetite(p){
+ let a=0.04;
+ if(p.traits.includes('brave'))a+=.14;
+ if(p.traits.includes('ambitious'))a+=.06;
+ if(p.traits.includes('curious'))a+=.08;
+ if(p.traits.includes('timid'))a-=.06;
+ if(p.traits.includes('lazy'))a-=.05;
+ if(p.goal&&p.goal.k==='wander'&&!p.goal.done)a+=.08;
+ if(!p.home||p.home.gone)a+=.04; // desperate for materials
+ if(p.relics.length)a+=.03; // taste for it
+ return clamp(a,0,.5);
+}
+function wantsToQuest(p){
+ if(p.age<16||p.age>58||p.inDungeon||p.dead)return false;
+ if(p.energy<52||p.hunger>52||p.gloomUntil>simMin)return false;
+ if(cday()<p.nextQuestDay)return false;
+ if(!dungeons.length)return false;
+ return chance(questAppetite(p));
+}
+function formExpedition(p){
+ const d=nearestDungeon(p);
+ if(!d)return false;
+ // is there a party already forming here to join?
+ let exp=expeditions.find(e=>!e.departed&&e.dungeon===d&&e.members.length<3&&cday()<=e.formDay);
+ if(exp){
+  exp.members.push(p);exp.arrived.set(p.id,false);
+  setTask(p,'togodungeon',{d,exp});
+  tale([p],p.name+' resolved to join the expedition into '+d.name+'.');
+  return true;
+ }
+ exp={dungeon:d,members:[p],arrived:new Map([[p.id,false]]),formDay:cday(),departed:false,leader:p.id};
+ expeditions.push(exp);
+ setTask(p,'togodungeon',{d,exp});
+ // maybe recruit 1-2 willing friends (a partner or close friend is a natural companion)
+ const recruits=[];
+ const pool=knownRels(p).filter(([o,r])=>!o.dead&&!o.inDungeon&&o.age>=16&&o.age<=58&&o.energy>=45&&o.hunger<=58&&(!o.task||o.task.k!=='togodungeon'));
+ pool.sort((a,b)=>(b[1].a+(p.partner===b[0].id?60:0))-(a[1].a+(p.partner===a[0].id?60:0)));
+ for(const[o,r]of pool){
+  if(recruits.length>=2)break;
+  if(r.a<14&&p.partner!==o.id)continue;
+  const keen=p.partner===o.id?0.7:0.42+r.a/260+questAppetite(o);
+  if(chance(keen)){
+   exp.members.push(o);exp.arrived.set(o.id,false);
+   setTask(o,'togodungeon',{d,exp});
+   recruits.push(o);
+  }
+ }
+ const who=recruits.length?p.name+', with '+recruits.map(o=>o.name).join(' and ')+',':p.name+', alone,';
+ tale(exp.members,who+' set out to plumb '+d.name+' — '+dangerWord(d.danger)+', they say.',true);
+ return true;
+}
+function departExpedition(exp){
+ exp.departed=true;
+ const d=exp.dungeon;
+ const dur=rf(.35,.9)*DAY*d.depth/3;
+ exp.endMin=simMin+Math.max(180,dur);
+ for(const p of exp.members){
+  if(p.dead)continue;
+  p.inDungeon=true;p.task=null;p.path=null;p.moving=false;p.sleeping=false;
+  d.inside.add(p.id);
+  emote(p,'🔦');
+ }
+ const live=exp.members.filter(p=>!p.dead);
+ if(live.length)tale(live,live.map(p=>p.name).join(' and ')+' descended into '+d.name+', lantern-light swallowed by the dark.',true,d.x,d.y);
+}
+function resolveExpedition(exp){
+ const d=exp.dungeon;
+ d.raids++;
+ const alive=exp.members.filter(p=>!p.dead&&p.inDungeon);
+ for(const p of exp.members){d.inside.delete(p.id);p.inDungeon=false}
+ if(!alive.length){expeditions.splice(expeditions.indexOf(exp),1);return}
+ const party=alive.length;
+ const survivors=[],fallen=[];
+ for(const p of alive){
+  // return them to the entrance
+  const spot=nearOpen(d.x,d.y)||[d.x,d.y];
+  p.x=spot[0]*TILE+TILE/2;p.y=spot[1]*TILE+TILE/2;p.path=null;p.task=null;
+  p.nextQuestDay=cday()+ri(3,7);
+  let risk=d.danger*(0.34-0.07*(party-1)); // parties are safer
+  risk*= (1-clamp(mod(p,'luck'),-.4,.5));
+  if(p.traits.includes('brave'))risk*=.8;
+  risk=clamp(risk,0.01,0.5);
+  if(chance(risk)){fallen.push(p)}
+  else survivors.push(p);
+ }
+ // loot for survivors
+ const rich=d.loot;
+ for(const p of survivors){
+  const boon=(0.6+rich)*(0.8+d.depth*0.14);
+  p.inv.food+=Math.round(rf(2,6)*boon);
+  p.inv.wood+=Math.round(rf(2,6)*boon);
+  p.inv.stone+=Math.round(rf(2,5)*boon);
+  buff(p,'luck',.08,6,'deep-touched');
+  if(p.goal&&p.goal.k==='wander')p.visited.add(((d.x>>3))+','+((d.y>>3)));
+ }
+ // relic — party-level, one lucky finder
+ let relicFinder=null,relic=null;
+ const relicChance=clamp(0.14+d.depth*0.05+rich*0.1,0,.6);
+ if(survivors.length&&chance(relicChance)){
+  relicFinder=pick(survivors);relic=pick(RELICS);
+  giveRelic(relicFinder,relic);d.relicsFound++;
+ }
+ // narrate
+ if(survivors.length&&!fallen.length){
+  const names=survivors.map(p=>p.name).join(' and ');
+  tale(survivors,names+' climbed back out of '+d.name+', packs heavy with '+pick(['glimmering ore','strange preserved fruit','cut timber and stranger things','the spoils of the deep'])+'.',true,d.x,d.y);
+ }else if(survivors.length&&fallen.length){
+  const s=survivors.map(p=>p.name).join(' and '),f=fallen.map(p=>p.name).join(' and ');
+  tale(survivors,s+' staggered out of '+d.name+' with treasure and grief — '+f+' did not come back.',true,d.x,d.y);
+ }else{
+  const f=fallen.map(p=>p.name).join(' and ');
+  tale(fallen,f+' was lost forever to '+d.name+'. Not even a lantern remained.',true,d.x,d.y);
+ }
+ if(relic)tale([relicFinder],'In the lowest gallery, '+relicFinder.name+' found '+relic.g+' the '+relic.n+' — '+relic.d+'.',true,d.x,d.y);
+ // deepen bonds between survivors
+ for(let i=0;i<survivors.length;i++)for(let j=i+1;j<survivors.length;j++){
+  healRel(survivors[i],survivors[j],28);
+ }
+ // grief for fallen
+ for(const p of fallen){d.deaths++;questDeath(p,d,survivors)}
+ // dungeon changes: raiding depletes loot but stirs deeper dangers
+ d.loot=clamp(d.loot-0.14,0.15,1.4);
+ d.danger=clamp(d.danger+0.03,0,.95);
+ d.restock=simMin+rf(6,12)*DAY;
+ expeditions.splice(expeditions.indexOf(exp),1);
+}
+function questDeath(p,d,survivors){
+ p.dead=true;p.task=null;p.path=null;p.inDungeon=false;
+ const i=people.indexOf(p);if(i>=0)people.splice(i,1);
+ tale([p],p.name+' fell in the depths of '+d.name+', '+Math.floor(p.age)+' summers old, '+(p.cards.length)+' cards spent. The dark keeps them now.',true,d.x,d.y);
+ if(p.partner){const o=allById.get(p.partner);if(o&&!o.dead){o.partner=null;o.married=false;o.gloomUntil=simMin+7*DAY;tale([o],o.name+' waited at the mouth of '+d.name+' for '+p.name+', who never climbed out.',true)}}
+ if(p.courting){const o=allById.get(p.courting);if(o&&!o.dead){o.courting=null;o.gloomUntil=simMin+4*DAY}}
+ for(const kid of p.kids){const k=allById.get(kid);if(k&&!k.dead)tale([k],k.name+' grew up with only stories of '+p.name+', who went into the deep for them.')}
+ if(p.home&&!p.home.gone)p.home.owners=p.home.owners.filter(id=>id!==p.id);
+ if(p.business&&!p.business.gone)tale([p],p.business.name+' shuttered, its keeper lost below.');
+ // a cairn at the dungeon mouth
+ const s=nearOpen(d.x,d.y);if(s){const b={i:buildings.length,id:nextId++,tp:'grave',x:s[0],y:s[1],w:1,h:1,prog:1,need:1,done:true,gone:false,owners:[],builder:p.id,forId:null,stock:null,prosperity:0,sub:null,name:null,ref:p.id};buildings.push(b);if(bld[idx(s[0],s[1])]<0)bld[idx(s[0],s[1])]=b.i}
+ if(selected===p)renderPanelFull(p);
+}
+function giveRelic(p,relic){
+ p.relics.push(relic);
+ p.base[relic.k]=(p.base[relic.k]||0)+relic.v;
+}
+function processExpeditions(){
+ for(let i=expeditions.length-1;i>=0;i--){
+  const e=expeditions[i];
+  if(e.departed){
+   if(simMin>=e.endMin)resolveExpedition(e);
+   continue;
+  }
+  // depart when all arrived, or after a grace period with the leader present
+  const all=e.members.every(p=>p.dead||e.arrived.get(p.id));
+  const leaderArr=e.arrived.get(e.leader);
+  const graced=cday()>e.formDay; // ~a day to muster
+  const anyArr=[...e.arrived.values()].some(v=>v);
+  if((all&&anyArr)||(graced&&leaderArr)){
+   e.members=e.members.filter(p=>!p.dead&&(e.arrived.get(p.id)||p.id===e.leader&&leaderArr));
+   if(e.members.length)departExpedition(e);
+   else expeditions.splice(i,1);
+  }else if(cday()>e.formDay+2){
+   // muster failed
+   for(const p of e.members)if(!p.dead&&p.task&&p.task.k==='togodungeon')p.task=null;
+   expeditions.splice(i,1);
+  }
+ }
+}
+
+/* ================= monsters ================= */
+function monsterCap(){return Math.min(11,2+((people.length/3.5)|0))}
+function spawnMonster(d){
+ if(monsters.length>=monsterCap())return;
+ const r=R();
+ let type='grub';
+ if(r<d.danger*0.35)type='horror';
+ else if(r<0.25+d.danger*0.4)type='lurker';
+ const M=MONSTERS[type];
+ const s=nearOpen(d.x,d.y);if(!s)return;
+ const m={id:nextId++,type,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,fx:1,
+  hp:M.hp,maxhp:M.hp,dmg:M.dmg,spd:M.spd,col:M.col,g:M.g,name:M.n,
+  home:d,target:null,path:null,pi:0,atkCd:0,roamT:0,em:null,born:simMin};
+ monsters.push(m);
+ emote2(m,'❗');
+ tale([],'Something '+pick(['wet','many-legged','wrong','pale and huge'])+' came scuttling out of '+d.name+' — a '+M.n+'.',true);
+}
+function emote2(m,g){m.em={g,until:performance.now()+2000}}
+function nearestSettler(mx,my,filter){
+ let best=null,bd=1e18;
+ for(const p of people){
+  if(p.dead||p.inDungeon||(filter&&!filter(p)))continue;
+  const d=dist2(mx,my,p.x,p.y);
+  if(d<bd){bd=d;best=p}
+ }
+ return best?[best,Math.sqrt(bd)]:[null,1e9];
+}
+function monsterMove(m,tx,ty,dt){
+ if(!m.path||m.pi>=m.path.length||simMin-(m.rp||0)>30){
+  m.rp=simMin;
+  const p=findPath((m.x/TILE)|0,(m.y/TILE)|0,tx,ty);
+  if(!p){return false}m.path=p;m.pi=0;
+ }
+ let d=WALK*m.spd*dt;
+ while(d>0&&m.path&&m.pi<m.path.length){
+  const w=m.path[m.pi],dx=w.x-m.x,dy=w.y-m.y,L=Math.hypot(dx,dy);
+  if(L<1.4){m.pi++;continue}
+  if(Math.abs(dx)>0.4)m.fx=dx>0?1:-1;
+  const mv=Math.min(d,L);m.x+=dx/L*mv;m.y+=dy/L*mv;d-=mv;
+ }
+ if(m.pi>=m.path.length)m.path=null;
+ return true;
+}
+function updateMonster(m,dt){
+ if(m.atkCd>0)m.atkCd-=dt;
+ // retarget
+ const[t,td]=nearestSettler(m.x,m.y,p=>!p.inDungeon);
+ m.target=t;
+ if(!t){ // no one to hunt: roam near home dungeon, despawn if very old
+  if(simMin-m.born>3*DAY){killMonster(m,null,true);return}
+  if(!m.path){const rx=clamp(m.home.x+ri(-6,6),1,W-2),ry=clamp(m.home.y+ri(-6,6),1,H-2);monsterMove(m,rx,ry,dt)}
+  else monsterMove(m,0,0,dt);
+  return;
+ }
+ if(td<TILE*1.1){
+  // attack
+  if(m.atkCd<=0){
+   m.atkCd=22;
+   hurtSettler(t,m);
+  }
+  m.batter=0;
+ }else{
+  const moved=monsterMove(m,(t.x/TILE)|0,(t.y/TILE)|0,dt);
+  if(!moved){
+   // no way through — batter down the nearest rampart between beast and prey
+   const wall=wallToward(m,t);
+   if(wall){
+    m.batter=(m.batter||0)+dt;
+    if(chance(dt*0.05))emote2(m,'🔨');
+    if(m.batter>rf(70,110)){carveFloor(wall[0],wall[1]);m.batter=0;m.path=null;
+     tale([],'The '+m.name+' smashed a breach through the ramparts of the nearest town!',true);}
+   }else{
+    const ax=t.x-m.x,ay=t.y-m.y,L=Math.hypot(ax,ay)||1;
+    m.x+=ax/L*WALK*m.spd*dt*0.35;m.y+=ay/L*WALK*m.spd*dt*0.35;
+   }
+  }else m.batter=0;
+ }
+ // very old monsters wander back down
+ if(simMin-m.born>4*DAY&&chance(dt*0.002)){killMonster(m,null,true)}
+}
+function wallToward(m,t){
+ const cx=(m.x/TILE)|0,cy=(m.y/TILE)|0;
+ const dx=Math.sign(t.x-m.x),dy=Math.sign(t.y-m.y);
+ const cands=[[cx+dx,cy],[cx,cy+dy],[cx+dx,cy+dy],[cx+dx,cy-dy],[cx-dx,cy+dy]];
+ let best=null,bd=1e18;
+ for(const[x,y]of cands){
+  if(!inB(x,y)||struct[idx(x,y)]!==S_WALL)continue;
+  const d=dist2(x*TILE,y*TILE,t.x,t.y);
+  if(d<bd){bd=d;best=[x,y]}
+ }
+ return best;
+}
+function hurtSettler(p,m){
+ if(p.dead)return;
+ let dmg=m.dmg*rf(.7,1.1);
+ if(p.traits.includes('brave'))dmg*=.85;
+ p.hp-=dmg;
+ p.sleeping=false;
+ emote(p,'💥');
+ p.chatHold=0;
+ // provoke or panic
+ if(shouldFight(p))setTask(p,'fight',{m});
+ else{p.fleeUntil=simMin+120;p.task=null}
+ if(p.hp<=0)dieByMonster(p,m);
+ else if(chance(.25))tale([p],pick([p.name+' was struck by the '+m.name+' and reeled back, bleeding.',p.name+' took a wound from the '+m.name+'.']));
+}
+function shouldFight(p){
+ if(p.age<16||p.age>60)return false;
+ if(p.hp<28)return false;
+ let base=p.traits.includes('brave')?0.9:p.traits.includes('timid')?0.15:0.5;
+ base+=mod(p,'work')*0.2;
+ // safety in numbers: more nearby settlers -> braver
+ let allies=0;for(const o of people)if(o!==p&&!o.dead&&!o.inDungeon&&dist2(p.x,p.y,o.x,o.y)<(10*TILE)**2)allies++;
+ base+=Math.min(.35,allies*0.09);
+ return chance(base);
+}
+function settlerAttack(p,m,dt){
+ let dmg=(11+mod(p,'work')*14)*dt*0.25;
+ if(p.traits.includes('brave'))dmg*=1.4;
+ for(const r of p.relics)if(r.k==='work')dmg*=1.15;
+ m.hp-=dmg;
+ if(chance(dt*0.04))emote(p,'⚔');
+ m.aggro=p; // remember who's hitting it
+ if(m.hp<=0)killMonster(m,p,false);
+}
+function killMonster(m,slayer,despawn){
+ const i=monsters.indexOf(m);if(i>=0)monsters.splice(i,1);
+ // free any settlers fighting it
+ for(const p of people)if(p.task&&p.task.k==='fight'&&p.task.m===m)p.task=null;
+ if(despawn){return}
+ // rally the defenders who were nearby
+ const defenders=people.filter(p=>!p.dead&&!p.inDungeon&&dist2(p.x,p.y,m.x,m.y)<(9*TILE)**2&&p.age>=16);
+ if(slayer&&!slayer.dead)slayer.kills++;
+ for(const p of defenders){buff(p,'social',.15,4,'triumph');p.fleeUntil=0}
+ // loot: a horror sometimes drops a relic
+ if(m.type==='horror'&&slayer&&!slayer.dead&&chance(.5)){const relic=pick(RELICS);giveRelic(slayer,relic);tale([slayer],slayer.name+' pried '+relic.g+' the '+relic.n+' from the corpse of the deep horror.',true)}
+ if(slayer&&!slayer.dead){
+  const help=defenders.filter(p=>p!==slayer).slice(0,3);
+  if(help.length){
+   for(const h of help)healRel(slayer,h,18);
+   tale([slayer,...help],slayer.name+', with '+help.map(p=>p.name).join(' and ')+', brought down the '+m.name+'. The cavern breathes easier tonight.',true);
+  }else tale([slayer],slayer.name+' stood alone and slew the '+m.name+'.',true);
+ }else tale([],'The '+m.name+' was driven off and destroyed.',true);
+ // drop some meat/materials at the spot
+ const s=nearOpen((m.x/TILE)|0,(m.y/TILE)|0);
+ if(s&&slayer&&!slayer.dead){slayer.inv.food+=ri(2,5)}
+}
+function dieByMonster(p,m){
+ if(p.dead)return;
+ p.dead=true;p.task=null;p.path=null;p.sleeping=false;
+ const i=people.indexOf(p);if(i>=0)people.splice(i,1);
+ tale([p],p.name+' was slain by the '+m.name+', '+Math.floor(p.age)+' summers old. The cavern is poorer for it.',true);
+ if(p.partner){const o=allById.get(p.partner);if(o&&!o.dead){o.partner=null;o.married=false;o.gloomUntil=simMin+7*DAY;o.fleeUntil=0;setTask(o,'fight',{m,avenge:true});tale([o],o.name+' saw '+p.name+' fall, and threw themselves at the '+m.name+' with a cry.',true)}}
+ for(const kid of p.kids){const k=allById.get(kid);if(k&&!k.dead)tale([k],k.name+' lost '+p.name+' to the monsters of the deep.')}
+ if(p.home&&!p.home.gone)p.home.owners=p.home.owners.filter(id=>id!==p.id);
+ addGrave(p);
+ if(selected===p)renderPanelFull(p);
+}
+function updateMonsters(dt){
+ for(let i=monsters.length-1;i>=0;i--)updateMonster(monsters[i],dt);
+ // spawns — the deep is restless
+ for(const d of dungeons){
+  d.spawnT=(d.spawnT||simMin+rf(1.5,3.5)*DAY);
+  if(simMin>=d.spawnT){
+   d.spawnT=simMin+rf(1.9,3.8)*DAY/(0.6+d.danger);
+   if(people.length>=6&&chance(.72)){
+    spawnMonster(d);
+    if(chance(.25+d.danger*0.4)){spawnMonster(d);if(d.danger>0.5&&chance(d.danger-0.4))spawnMonster(d)}
+   }
+  }
+ }
+ // SIEGE: warbands come up to test the walls of any established town
+ if(chance(dt*0.00014)&&monsters.length<monsterCap()-1){
+  const walled=villages.filter(v=>v.founded<cday()-2);
+  if(walled.length){
+   const d=dungeons.slice().sort((a,b)=>b.danger-a.danger)[0];
+   if(d){const n=ri(2,3);let spawned=0;for(let k=0;k<n;k++){const before=monsters.length;spawnMonster(d);if(monsters.length>before)spawned++}
+    if(spawned>1)tale([],'A warband came howling up out of '+d.name+', making straight for the walls of '+pick(walled).name+'.',true);}
+  }
+ }
+}
+
+/* ================= villages (the collective mind) ================= */
+const VIL_ADJ=['Deephold','Glimmer','Hollowstead','Underhome','Lanternreach','Mossgate','Stillwater','Gloamrest','Emberfold','Cairnwell','Duskmoor','Thornhaven'];
+const CLAIM_MARGIN=3,CLAIM_MIN=14,CLAIM_MAX=30,WALL_THICK=2;
+function villageName(){let n=pick(VIL_ADJ),tr=0;while(usedVil.has(n)&&tr++<15)n=pick(VIL_ADJ);usedVil.add(n);return n}
+function clampClaim(c){return{x0:clamp(Math.round(c.x0),2,W-3),y0:clamp(Math.round(c.y0),2,H-3),x1:clamp(Math.round(c.x1),2,W-3),y1:clamp(Math.round(c.y1),2,H-3)}}
+function claimOf(g,extra){
+ // a tight bounding box around every building footprint (and any tiles in `extra`), padded
+ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+ for(const b of g){x0=Math.min(x0,b.x);y0=Math.min(y0,b.y);x1=Math.max(x1,b.x+b.w-1);y1=Math.max(y1,b.y+b.h-1)}
+ if(extra)for(const[x,y]of extra){x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y)}
+ x0-=CLAIM_MARGIN;y0-=CLAIM_MARGIN;x1+=CLAIM_MARGIN;y1+=CLAIM_MARGIN;
+ const cx=(x0+x1)/2,cy=(y0+y1)/2;
+ if(x1-x0<CLAIM_MIN){x0=cx-CLAIM_MIN/2;x1=cx+CLAIM_MIN/2}
+ if(y1-y0<CLAIM_MIN){y0=cy-CLAIM_MIN/2;y1=cy+CLAIM_MIN/2}
+ return clampClaim({x0,y0,x1,y1});
+}
+function capClaim(c){
+ let {x0,y0,x1,y1}=c;const cx=(x0+x1)/2,cy=(y0+y1)/2;
+ if(x1-x0>CLAIM_MAX){x0=cx-CLAIM_MAX/2;x1=cx+CLAIM_MAX/2}
+ if(y1-y0>CLAIM_MAX){y0=cy-CLAIM_MAX/2;y1=cy+CLAIM_MAX/2}
+ return clampClaim({x0,y0,x1,y1});
+}
+function unionClaim(a,b){return{x0:Math.min(a.x0,b.x0),y0:Math.min(a.y0,b.y0),x1:Math.max(a.x1,b.x1),y1:Math.max(a.y1,b.y1)}}
+function claimEq(a,b){return a.x0===b.x0&&a.y0===b.y0&&a.x1===b.x1&&a.y1===b.y1}
+function perimeterTiles(c){
+ const out=[];
+ for(let x=c.x0;x<=c.x1;x++){out.push([x,c.y0]);out.push([x,c.y1])}
+ for(let y=c.y0+1;y<c.y1;y++){out.push([c.x0,y]);out.push([c.x1,y])}
+ return out;
+}
+// a thick rectangular rampart with four clean gates punched straight through every layer
+function fortPlan(cl){
+ const walls=new Map(),gates=new Set();
+ const mx=Math.round((cl.x0+cl.x1)/2),my=Math.round((cl.y0+cl.y1)/2);
+ for(let k=0;k<WALL_THICK;k++){
+  gates.add(mx+','+(cl.y0+k));gates.add(mx+','+(cl.y1-k));
+  gates.add((cl.x0+k)+','+my);gates.add((cl.x1-k)+','+my);
+ }
+ for(let k=0;k<WALL_THICK;k++){
+  const c={x0:cl.x0+k,y0:cl.y0+k,x1:cl.x1-k,y1:cl.y1-k};
+  if(c.x1-c.x0<3||c.y1-c.y0<3)break;
+  for(const[x,y]of perimeterTiles(c)){const key=x+','+y;if(!gates.has(key))walls.set(key,[x,y])}
+ }
+ return {walls,gates};
+}
+function claimCenter(c){return[Math.round((c.x0+c.x1)/2),Math.round((c.y0+c.y1)/2)]}
+function detectVillages(){
+ const homes=buildings.filter(b=>!b.gone&&!b.ruined&&b.done&&(b.tp==='home'||b.tp==='biz'||b.tp==='shelter')&&b.owners.some(id=>{const o=allById.get(id);return o&&!o.dead}));
+ const CL=20;
+ const groups=[];
+ for(const b of homes){
+  const bx=b.x+b.w/2,by=b.y+b.h/2;
+  let g=groups.find(gr=>gr.some(o=>dist2(bx,by,o.x+o.w/2,o.y+o.h/2)<CL*CL));
+  if(g)g.push(b);else groups.push([b]);
+ }
+ for(let pass=0;pass<2;pass++){
+  for(let i=0;i<groups.length;i++)for(let j=i+1;j<groups.length;j++){
+   if(groups[i]&&groups[j]&&groups[i].some(a=>groups[j].some(b=>dist2(a.x,a.y,b.x,b.y)<CL*CL))){groups[i]=groups[i].concat(groups[j]);groups[j]=null}
+  }
+  for(let i=groups.length-1;i>=0;i--)if(!groups[i])groups.splice(i,1);
+ }
+ const live=[];
+ for(const g of groups){
+  const homeCount=g.filter(b=>b.tp==='home'||b.tp==='shelter').length;
+  let cx=0,cy=0;for(const b of g){cx+=b.x+b.w/2;cy+=b.y+b.h/2}cx/=g.length;cy/=g.length;
+  let existing=villages.find(vv=>dist2(vv.cx,vv.cy,cx,cy)<26*26);
+  if(homeCount<VILLAGE_MIN&&!(existing&&homeCount>=2))continue;
+  let v=existing;
+  if(!v){
+   const cl=claimOf(g);
+   v={id:nextId++,name:villageName(),cx,cy,homes:g,jobs:[],stock:{stone:16,food:0},lastPlan:0,founded:cday(),
+      claim:cl,gates:fortPlan(cl).gates,wallDone:false};
+   v.rad=Math.hypot(cl.x1-cl.x0,cl.y1-cl.y0)/2;
+   villages.push(v);
+   tale([],'The huddle of homes has become a village. They call it '+v.name+', and its people begin to think as one — to wall out the dark and farm the stone.',true);
+  }else{
+   v.cx=cx;v.cy=cy;v.homes=g;
+   // expand the ramparts outward if the town has grown past them (only ever grows, so no churn)
+   const want=claimOf(g),uni=capClaim(unionClaim(v.claim,want));
+   if(!claimEq(uni,v.claim)){
+    const oldW=fortPlan(v.claim).walls,newW=fortPlan(uni).walls;
+    for(const key of oldW.keys())if(!newW.has(key)){const[px,py]=key.split(',').map(Number);if(struct[idx(px,py)]===S_WALL)carveFloor(px,py)}
+    v.claim=uni;v.gates=fortPlan(uni).gates;v.wallDone=false;
+    v.rad=Math.hypot(uni.x1-uni.x0,uni.y1-uni.y0)/2;
+    tale([],'The ramparts of '+v.name+' were raised anew, grander, to take in the growing town.');
+   }
+  }
+  for(const b of g){b.vid=v.id;for(const id of b.owners){const o=allById.get(id);if(o&&!o.dead)o.vid=v.id}}
+  live.push(v);
+ }
+ for(let i=villages.length-1;i>=0;i--)if(!live.includes(villages[i])){
+  for(const p of people)if(p.vid===villages[i].id)p.vid=null;
+  villages.splice(i,1);
+ }
+}
+function planVillage(v){
+ v.jobs=v.jobs.filter(j=>{
+  if(j.type==='wall')return walkable(j.x,j.y);
+  if(j.type==='mine')return !walkable(j.x,j.y);
+  if(j.type==='till')return walkable(j.x,j.y)&&farmGrid[idx(j.x,j.y)]===0;
+  if(j.type==='harvest')return farmGrid[idx(j.x,j.y)]===2;
+  return false;
+ });
+ const [cx,cy]=claimCenter(v.claim),cl=v.claim;
+ const fort=fortPlan(cl);v.gates=fort.gates;
+ // WALLS: a thick rectangular rampart enclosing the whole town, with four gates
+ if(!v.wallDone){
+  for(const key of v.gates){const[gx,gy]=key.split(',').map(Number);const gi=idx(gx,gy);if(bld[gi]<0&&!nodeAt.has(gi)&&!dungeonAt(gx,gy)&&!walkable(gx,gy)&&struct[gi]!==S_HOUSE)carveFloor(gx,gy)} // keep gate passages open
+  let queued=v.jobs.filter(j=>j.type==='wall').length,remaining=0;
+  for(const[x,y]of fort.walls.values()){
+   const i=idx(x,y);
+   if(struct[i]===S_WALL)continue;         // already walled
+   if(!walkable(x,y))continue;             // natural rock / a house already seals this stretch
+   if(nodeAt.has(i)||dungeonAt(x,y))continue;
+   remaining++;
+   if(queued>=30)continue;
+   if(!v.jobs.some(j=>j.x===x&&j.y===y)){v.jobs.push({type:'wall',x,y});queued++}
+  }
+  if(remaining===0)v.wallDone=true;
+ }
+ // FARMS: neat rows of plots inside the walls, kept clear of buildings
+ const targetFarms=Math.min(18,v.homes.length+6);
+ let farmCount=0;for(let y=cl.y0;y<=cl.y1;y++)for(let x=cl.x0;x<=cl.x1;x++)if(farmGrid[idx(x,y)])farmCount++;
+ if(farmCount<targetFarms){
+  let added=0;
+  const ix0=cl.x0+WALL_THICK+1,iy0=cl.y0+WALL_THICK+1,ix1=cl.x1-WALL_THICK-1,iy1=cl.y1-WALL_THICK-1;
+  outer:for(let y=iy0;y<=iy1;y++)for(let x=ix0;x<=ix1;x++){
+   const i=idx(x,y);
+   if(walkable(x,y)&&farmGrid[i]===0&&bld[i]<0&&!nodeAt.has(i)&&struct[i]!==S_WALL&&!v.jobs.some(j=>j.x===x&&j.y===y)){
+    v.jobs.push({type:'till',x,y});if(++added>=6)break outer;
+   }
+  }
+ }
+ // HARVEST ripe plots
+ for(let y=cl.y0;y<=cl.y1;y++)for(let x=cl.x0;x<=cl.x1;x++){
+  const i=idx(x,y);
+  if(farmGrid[i]===2&&!v.jobs.some(j=>j.x===x&&j.y===y&&j.type==='harvest'))v.jobs.push({type:'harvest',x,y});
+ }
+ // MINE: carve interior rock to open the town and win stone for the ramparts (never the wall line)
+ if(v.jobs.filter(j=>j.type==='mine').length<4){
+  for(let tries=0;tries<18;tries++){
+   const x=ri(cl.x0+WALL_THICK,cl.x1-WALL_THICK),y=ri(cl.y0+WALL_THICK,cl.y1-WALL_THICK),i=idx(x,y);
+   if(!walkable(x,y)&&struct[i]!==S_WALL&&struct[i]!==S_HOUSE&&struct[i]!==S_RUIN&&bld[i]<0&&!nodeAt.has(i)&&!dungeonAt(x,y)){v.jobs.push({type:'mine',x,y});break}
+  }
+ }
+}
+function villageTick(){
+ detectVillages();
+ for(const v of villages){
+  if(simMin-v.lastPlan>rf(.4,.7)*DAY){v.lastPlan=simMin;planVillage(v)}
+  // share the granary: farm food flows into members' pantries so no one starves inside the walls
+  if(v.stock.food>0){
+   const pantries=v.homes.filter(b=>!b.gone&&!b.ruined&&b.stock);
+   let guard=0;
+   while(v.stock.food>0&&pantries.length&&guard++<40){
+    const b=pick(pantries);b.stock.food++;v.stock.food--;
+   }
+  }
+ }
+}
+function findVillageJob(p){
+ const v=villages.find(vv=>vv.id===p.vid);
+ if(!v||!v.jobs.length)return null;
+ // food first: bringing in a ripe harvest always beats hauling stone
+ let harvest=null,hd=1e18,other=null,od=1e18;
+ for(const j of v.jobs){
+  const d=dist2(p.x,p.y,j.x*TILE,j.y*TILE);
+  if(j.type==='harvest'){if(d<hd){hd=d;harvest=j}}
+  else if(d<od){od=d;other=j}
+ }
+ const j=harvest||other;
+ return j?{v,j}:null;
+}
+
+/* ================= abandonment & upkeep tick ================= */
+function upkeepTick(){
+ for(const b of buildings){
+  if(b.gone||b.tp==='grave')continue;
+  if(!b.done)continue;
+  const livingOwners=b.owners.filter(id=>{const o=allById.get(id);return o&&!o.dead});
+  const proprietorGone=b.tp==='biz'&&(()=>{const o=allById.get(b.builder);return !o||o.dead})();
+  const empty=(b.tp==='biz')?proprietorGone:livingOwners.length===0;
+  if(!b.ruined){
+   if(empty){if(!b.emptySince)b.emptySince=simMin;else if(simMin-b.emptySince>RUIN_DELAY)ruinBuilding(b)}
+   else b.emptySince=0;
+  }else{
+   if(simMin-b.emptySince>CRUMBLE_DELAY)crumbleBuilding(b);
+  }
+ }
+}
+function ripenAll(dt){
+ if(!farmTiles.size)return;
+ for(const i of farmTiles){
+  if(farmGrid[i]===1){farmTimer[i]-=dt;if(farmTimer[i]<=0){farmGrid[i]=2;markMod(i)}}
+  else if(farmGrid[i]===0)farmTiles.delete(i); // no longer a plot
+ }
+}
+const SAY={
+ greet:['Well met, {o}.','You look tired, {o}.','Any luck in the north grove?','The glowcaps are early this year.','Careful near the old rockfall.','Have you eaten?','Strange dreams last night.','I heard something in the deep.'],
+ warm:['I always feel better talking to you, {o}.','You saved me a rough winter once. I remember.','Come by the hearth sometime.','Ha! You always did make me laugh.','Truly, {o}, you are the best of us.','Whatever comes, I am glad you are here.'],
+ flirt:['I made you this. It is not much.','Walk the long gallery with me?','I keep finding reasons to pass your door.','You have mushroom-dust in your hair. It suits you.','Stay a while, {o}?','My heart is a fool for you.'],
+ quarrel:['That axe was MINE, {o}.','I saw the vein first and you know it.','Do not lecture me.','We are done talking.','You never listen.','Keep your opinions in the dark where they belong.'],
+ family:['Eat your greens, little one.','Papa found you a beetle!','Stay close to the light, always.','You have your mother\u2019s stubbornness.','One day this hearth is yours.'],
+ quest:['We go down at first-dark.','Bring rope. And luck.','If I do not come back — tell them I tried.','The deep does not scare me. Much.','Treasure or a good grave, eh?'],
+ musing:['...','I wonder what is above the ceiling.','So many stars we cannot see.','The cave hums, if you listen.','One day I\u2019ll wander the whole of it.']
+};
+function say(p,o,kind){
+ const pool=SAY[kind]||SAY.greet;
+ let line=pick(pool).replace('{o}',o?o.name:'friend');
+ p.bubble={text:line,until:performance.now()+2600};
+}
+function chatBubbles(p,o){
+ let kind='greet';
+ if(p.courting===o.id||p.partner===o.id)kind='flirt';
+ else if(isFamily(p,o)&&(p.parents.includes(o.id)||o.parents.includes(p.id)))kind='family';
+ else{const r=p.rel[o.id];if(r){if(r.a<=-20)kind='quarrel';else if(r.a>=45)kind='warm'}}
+ say(p,o,kind);
+ setTimeout(()=>{if(!o.dead)say(o,p,kind==='flirt'?'flirt':kind==='quarrel'?'quarrel':(o.rel[p.id]&&o.rel[p.id].a>=45?'warm':'greet'))},700);
+}
+
+/* ================= rendering ================= */
+const cv=$('cv'),ctx=cv.getContext('2d');
+let dpr=1,cw=0,ch=0;
+function resize(){
+ dpr=Math.min(2,window.devicePixelRatio||1);
+ cw=window.innerWidth;ch=window.innerHeight;
+ cv.width=cw*dpr;cv.height=ch*dpr;
+ cv.style.width=cw+'px';cv.style.height=ch+'px';
+}
+window.addEventListener('resize',resize);resize();
+let tcv=null,dynCanvas=null,dctx=null;
+function paintFloorTile(c,x,y){
+ const h=hash2(x,y),v=h*14;
+ c.fillStyle='rgb('+(52+v)+','+(45+v*0.8)+','+(70+v)+')';
+ c.fillRect(x*TILE,y*TILE,TILE,TILE);
+ if(h>0.9){c.fillStyle='rgba(255,255,255,0.05)';c.fillRect(x*TILE+((h*97)%12|0),y*TILE+((h*53)%12|0),2,2)}
+}
+function paintRockTile(c,x,y){
+ const h=hash2(x,y),shade=10+h*8;
+ c.fillStyle='rgb('+(shade+8)+','+(shade+5)+','+(shade+16)+')';
+ c.fillRect(x*TILE,y*TILE,TILE,TILE);
+}
+function buildTerrainLayer(){
+ tcv=document.createElement('canvas');
+ tcv.width=W*TILE;tcv.height=H*TILE;
+ const c=tcv.getContext('2d');
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const h=hash2(x,y);
+  if(map[idx(x,y)]===1){
+   paintRockTile(c,x,y);
+   let openN=false;
+   if(walkable(x,y+1)||walkable(x,y-1)||walkable(x+1,y)||walkable(x-1,y))openN=true;
+   if(openN){
+    c.fillStyle='rgba(80,68,110,0.28)';
+    if(walkable(x,y+1))c.fillRect(x*TILE,y*TILE+TILE-3,TILE,3);
+    if(walkable(x,y-1))c.fillRect(x*TILE,y*TILE,TILE,2);
+    if(walkable(x+1,y))c.fillRect(x*TILE+TILE-2,y*TILE,2,TILE);
+    if(walkable(x-1,y))c.fillRect(x*TILE,y*TILE,2,TILE);
+   }
+  }else{
+   const v=h*14;
+   let nw=0;
+   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&!walkable(x+dx,y+dy))nw++;
+   const dark=nw*3;
+   c.fillStyle='rgb('+(52+v-dark)+','+(45+v*0.8-dark)+','+(70+v-dark)+')';
+   c.fillRect(x*TILE,y*TILE,TILE,TILE);
+   if(h>0.9){c.fillStyle='rgba(255,255,255,0.05)';c.fillRect(x*TILE+((h*97)%12|0),y*TILE+((h*53)%12|0),2,2)}
+   if(h<0.06){c.fillStyle='rgba(0,0,0,0.18)';c.fillRect(x*TILE+((h*997)%11|0),y*TILE+((h*631)%11|0),3,2)}
+  }
+ }
+ dynCanvas=document.createElement('canvas');
+ dynCanvas.width=W*TILE;dynCanvas.height=H*TILE;
+ dctx=dynCanvas.getContext('2d');
+ terrainDirty=true;
+}
+function houseColor(i){
+ const bi=bld[i];
+ if(bi>=0&&buildings[bi]){const b=buildings[bi];const o=b.owners.length?allById.get(b.owners[0]):allById.get(b.builder);if(o)return o.col}
+ return '#8a63c9';
+}
+function paintDynTile(c,i){
+ const x=i%W,y=(i/W)|0,px=x*TILE,py=y*TILE;
+ c.clearRect(px,py,TILE,TILE);
+ if(farmGrid[i]===1||farmGrid[i]===2){
+  const ripe=farmGrid[i]===2;
+  c.fillStyle='#3a2a1c';c.fillRect(px,py,TILE,TILE);
+  c.fillStyle=ripe?'#c9a23d':'#4a6a3a';
+  for(let r=0;r<4;r++){c.fillRect(px+1,py+2+r*4,TILE-2,2)}
+  if(ripe){c.fillStyle='#e8d06a';for(let r=0;r<4;r++)for(let k=0;k<3;k++)c.fillRect(px+2+k*5,py+1+r*4,2,2)}
+  return;
+ }
+ if(map[i]===0){paintFloorTile(c,x,y);return}
+ const s=struct[i];
+ if(s===S_HOUSE){
+  const rc=houseColor(i);
+  c.fillStyle='#5b4a3a';c.fillRect(px,py,TILE,TILE);        // wall body
+  c.fillStyle='#6d5a46';c.fillRect(px+1,py+4,TILE-2,TILE-5);
+  c.fillStyle=rc;c.fillRect(px,py,TILE,5);                   // roof band (owner colour)
+  c.fillStyle='rgba(0,0,0,0.28)';c.fillRect(px,py+4,TILE,1);
+  // edge outline where it meets open/other
+  c.fillStyle='rgba(0,0,0,0.35)';
+  if(walkable(x,y+1))c.fillRect(px,py+TILE-1,TILE,1);
+  if(walkable(x,y-1))c.fillRect(px,py,TILE,1);
+  if(walkable(x+1,y))c.fillRect(px+TILE-1,py,1,TILE);
+  if(walkable(x-1,y))c.fillRect(px,py,1,TILE);
+ }else if(s===S_WALL){
+  c.fillStyle='#6a6270';c.fillRect(px,py,TILE,TILE);
+  c.fillStyle='#7d7686';c.fillRect(px+1,py+2,TILE-2,TILE-3);
+  c.fillStyle='#4a4453';                                     // crenellations
+  c.fillRect(px+1,py,3,3);c.fillRect(px+6,py,3,3);c.fillRect(px+11,py,3,3);
+  c.fillStyle='rgba(0,0,0,0.25)';c.fillRect(px,py+TILE-2,TILE,2);
+ }else if(s===S_RUIN){
+  c.fillStyle='#3a3340';c.fillRect(px,py,TILE,TILE);
+  c.fillStyle='#4a4150';
+  c.fillRect(px+1,py+7,6,6);c.fillRect(px+9,py+3,5,5);c.fillRect(px+7,py+10,6,4);
+  c.fillStyle='rgba(0,0,0,0.4)';c.fillRect(px+3,py+2,2,4);c.fillRect(px+11,py+9,2,3);
+ }else{
+  paintFloorTile(c,x,y);
+ }
+}
+function paintDyn(){
+ if(!dctx)return;
+ for(const i of modTiles)paintDynTile(dctx,i);
+}
+function mkGlow(col){
+ const g=document.createElement('canvas');g.width=g.height=64;
+ const c=g.getContext('2d');
+ const gr=c.createRadialGradient(32,32,2,32,32,32);
+ gr.addColorStop(0,col);gr.addColorStop(1,'rgba(0,0,0,0)');
+ c.fillStyle=gr;c.fillRect(0,0,64,64);
+ return g;
+}
+const GLOW_WARM=mkGlow('rgba(255,190,90,0.55)'),GLOW_CYAN=mkGlow('rgba(90,230,210,0.35)');
+function drawNode(c,n,t){
+ const px=n.x*TILE+TILE/2,py=n.y*TILE+TILE/2;
+ if(n.t==='berry'){
+  c.fillStyle=n.amt>0?'#3f7d4f':'#2c4636';
+  c.beginPath();c.ellipse(px,py+1,6,5,0,0,7);c.fill();
+  c.fillStyle='#e75a6f';
+  for(let i=0;i<n.amt;i++){const a=i*2.1+n.x;c.fillRect(px-4+((i*3.7)%9),py-3+((i*2.3)%6),2,2)}
+ }else if(n.t==='mush'){
+  for(let i=0;i<Math.max(1,n.amt);i++){
+   const ox=((i*5)%9)-4,oy=((i*3)%5)-2;
+   c.fillStyle='#cfe8e0';c.fillRect(px+ox-1,py+oy-2,2,4);
+   c.fillStyle=n.amt>0?'#59e6d0':'#3a6b64';
+   c.beginPath();c.ellipse(px+ox,py+oy-3,3.5,2.5,0,0,7);c.fill();
+  }
+ }else if(n.t==='tree'){
+  const r=4+n.amt*1.4;
+  c.fillStyle='#cabfa8';c.fillRect(px-2,py-10,4,12);
+  c.fillStyle=n.amt>0?'#6adbc8':'#4a7a70';
+  c.beginPath();c.ellipse(px,py-11,r,r*0.72,0,0,7);c.fill();
+  c.fillStyle='rgba(255,255,255,0.25)';
+  c.beginPath();c.ellipse(px-r*0.3,py-12,r*0.3,r*0.2,0,0,7);c.fill();
+  if(t%2000<1000){c.fillStyle='rgba(120,255,230,0.25)';c.fillRect(px-1,py-11,2,2)}
+ }else if(n.t==='rock'){
+  c.fillStyle='#8b8fa3';
+  for(let i=0;i<Math.max(1,n.amt);i++){
+   const ox=((i*4.2)%10)-5,oy=((i*2.9)%6)-3;
+   c.fillRect(px+ox-2,py+oy-1,5,4);
+  }
+  c.fillStyle='rgba(255,255,255,0.2)';c.fillRect(px-3,py-2,2,1);
+ }
+}
+function drawBuilding(c,b,nf){
+ const px=b.x*TILE,py=b.y*TILE,w=b.w*TILE,h=b.h*TILE;
+ if(b.tp==='grave'){
+  c.fillStyle='#6f7285';
+  c.beginPath();c.moveTo(px+4,py+13);c.lineTo(px+4,py+6);c.arc(px+8,py+6,4,Math.PI,0);c.lineTo(px+12,py+13);c.closePath();c.fill();
+  c.fillStyle='#4a5c48';c.fillRect(px+3,py+12,10,2);
+  return;
+ }
+ if(b.ruined)return; // ruins are painted into the terrain overlay
+ if(!b.done){
+  c.strokeStyle='rgba(232,192,101,0.7)';c.setLineDash([4,3]);
+  c.strokeRect(px+1,py+1,w-2,h-2);c.setLineDash([]);
+  c.fillStyle='#7a6248';c.fillRect(px+3,py+h-6,6,4);c.fillRect(px+w-9,py+4,5,4);
+  c.fillStyle='#241f33';c.fillRect(px+2,py-5,w-4,3);
+  c.fillStyle='#e8c065';c.fillRect(px+2,py-5,(w-4)*Math.min(1,b.prog/b.need),3);
+  return;
+ }
+ // finished house/shelter/biz footprints are solid terrain (drawn by the overlay);
+ // here we add only the roof-ridge accent, door, and business sign.
+ const owner=allById.get(b.builder);
+ const roof=(b.owners.length?allById.get(b.owners[0]):owner);
+ const rc=roof?roof.col:'#8a63c9';
+ c.fillStyle='#1b1626';c.fillRect(px+w/2-2,py+h-4,4,4); // doorway notch at the base
+ if(b.tp==='biz'){
+  c.fillStyle='#3d3554';c.fillRect(px+w-6,py-8,2,8);
+  c.font='8px system-ui';c.textAlign='center';
+  c.fillText(b.sub[1],px+w-5,py-9);
+ }
+}
+function drawMonster(c,m,t){
+ const px=m.x,py=m.y;
+ c.save();c.translate(px,py);
+ c.fillStyle='rgba(0,0,0,0.4)';c.beginPath();c.ellipse(0,2,7,3,0,0,7);c.fill();
+ // pulsing menace aura
+ const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+ c.drawImage(GLOW_RED,-18,-18,36,36);c.globalCompositeOperation=go;
+ c.scale(m.fx<0?-1:1,1);
+ c.fillStyle=m.col;
+ if(m.type==='grub'){
+  c.beginPath();c.ellipse(0,-3,7,5,0,0,7);c.fill();
+  c.fillStyle='rgba(0,0,0,0.3)';for(let s=-4;s<=4;s+=3)c.fillRect(s,-7,1,8);
+ }else if(m.type==='lurker'){
+  c.beginPath();c.ellipse(0,-4,8,5,0,0,7);c.fill();
+  c.strokeStyle=m.col;c.lineWidth=1.4;
+  for(let s=-1;s<=1;s+=2){c.beginPath();c.moveTo(s*5,-2);c.lineTo(s*10,4);c.stroke();c.beginPath();c.moveTo(s*5,-5);c.lineTo(s*11,-8);c.stroke()}
+ }else{
+  c.beginPath();c.ellipse(0,-6,9,8,0,0,7);c.fill();
+  c.fillStyle='#2a0f18';c.beginPath();c.ellipse(0,-5,5,5,0,0,7);c.fill();
+ }
+ // eyes
+ c.fillStyle='#ffe14a';c.fillRect(-3,-6,2,2);c.fillRect(1,-6,2,2);
+ c.restore();
+ // hp bar when hurt
+ if(m.hp<m.maxhp){
+  c.fillStyle='#1b1626';c.fillRect(px-8,py-15,16,2);
+  c.fillStyle='#d24a5a';c.fillRect(px-8,py-15,16*clamp(m.hp/m.maxhp,0,1),2);
+ }
+ if(m.em&&m.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(m.em.g,px,py-17)}
+}
+function drawSprite(c,p,t){
+ const s=p.age<6?0.55:p.age<12?0.72:p.age<16?0.86:1;
+ const bob=p.moving?Math.sin(t*0.02+p.id)*1.2:0;
+ c.save();
+ c.fillStyle='rgba(0,0,0,0.35)';
+ c.beginPath();c.ellipse(0,1,5*s,2*s,0,0,7);c.fill();
+ c.translate(0,bob);c.scale(s*(p.fx<0?-1:1),s);
+ // body
+ c.fillStyle=p.age>=56?desat(p.col):p.col;
+ rr(c,-4,-10,8,10,3);c.fill();
+ c.fillStyle='rgba(0,0,0,0.2)';rr(c,-4,-4,8,4,2);c.fill();
+ // head
+ c.fillStyle=p.skin;
+ c.beginPath();c.arc(0.5,-12.5,3.6,0,7);c.fill();
+ // hood
+ c.fillStyle=p.age>=56?desat(p.col):p.col;
+ c.beginPath();c.arc(0,-13,3.9,Math.PI*0.85,Math.PI*2.15);c.fill();
+ // eyes
+ c.fillStyle='#1b1626';
+ if(p.sleeping){c.fillRect(1,-12,2,1)}
+ else{c.fillRect(1,-13,1.4,1.6);c.fillRect(3,-13,1.4,1.6)}
+ if(p.age>=56){c.fillStyle='#cfc6b8';c.fillRect(-1,-10.5,4,1.4)}
+ c.restore();
+}
+function desat(hex){
+ const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+ const m=(r+g+b)/3;
+ return 'rgb('+((r+m*1.4)/2.4|0)+','+((g+m*1.4)/2.4|0)+','+((b+m*1.4)/2.4|0)+')';
+}
+function rr(c,x,y,w,h,r){
+ c.beginPath();
+ c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();
+}
+function nightFactor(){
+ const t=tod();
+ if(t<0.20)return 1;
+ if(t<0.30)return 1-(t-0.20)/0.10;
+ if(t<0.80)return 0;
+ if(t<0.90)return (t-0.80)/0.10;
+ return 1;
+}
+function draw(t){
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+ ctx.fillStyle='#0d0b14';ctx.fillRect(0,0,cw,ch);
+ const z=cam.z;
+ if(follow&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
+ cam.x=clamp(cam.x,Math.min(cw/(2*z),W*TILE/2),Math.max(W*TILE-cw/(2*z),W*TILE/2));
+ cam.y=clamp(cam.y,Math.min(ch/(2*z),H*TILE/2),Math.max(H*TILE-ch/(2*z),H*TILE/2));
+ ctx.setTransform(z*dpr,0,0,z*dpr,dpr*(cw/2-cam.x*z),dpr*(ch/2-cam.y*z));
+ ctx.imageSmoothingEnabled=false;
+ if(tcv)ctx.drawImage(tcv,0,0);
+ if(terrainDirty){paintDyn();terrainDirty=false}
+ if(dynCanvas)ctx.drawImage(dynCanvas,0,0);
+ // visible rect (tiles)
+ const vx0=Math.max(0,((cam.x-cw/(2*z))/TILE|0)-2),vx1=Math.min(W-1,((cam.x+cw/(2*z))/TILE|0)+2);
+ const vy0=Math.max(0,((cam.y-ch/(2*z))/TILE|0)-2),vy1=Math.min(H-1,((cam.y+ch/(2*z))/TILE|0)+2);
+ const nf=nightFactor();
+ for(const n of nodes){
+  if(n.x<vx0||n.x>vx1||n.y<vy0||n.y>vy1)continue;
+  drawNode(ctx,n,t);
+ }
+ const vis=[];
+ for(const b of buildings){
+  if(b.gone)continue;
+  if(b.x+b.w<vx0||b.x>vx1||b.y+b.h<vy0||b.y>vy1)continue;
+  vis.push(b);
+ }
+ vis.sort((a,b)=>(a.y+a.h)-(b.y+b.h));
+ for(const b of vis)drawBuilding(ctx,b,nf);
+ // dungeons
+ for(const d of dungeons){
+  if(d.x<vx0||d.x>vx1||d.y<vy0||d.y>vy1)continue;
+  drawDungeon(ctx,d,t);
+ }
+ // village banners at their heart
+ for(const v of villages){
+  const vx=v.cx*TILE,vy=v.cy*TILE;
+  if(v.cx<vx0||v.cx>vx1||v.cy<vy0||v.cy>vy1)continue;
+  ctx.fillStyle='#3d3554';ctx.fillRect(vx-1,vy-18,2,14);
+  ctx.fillStyle='#e8c065';ctx.beginPath();ctx.moveTo(vx+1,vy-18);ctx.lineTo(vx+11,vy-15);ctx.lineTo(vx+1,vy-12);ctx.closePath();ctx.fill();
+  if(z>1.1){ctx.font='7px system-ui';ctx.textAlign='center';ctx.fillStyle='rgba(232,220,180,0.85)';ctx.fillText(v.name,vx,vy-20)}
+ }
+ // monsters
+ for(const m of monsters){
+  if(m.x/TILE<vx0-2||m.x/TILE>vx1+2||m.y/TILE<vy0-2||m.y/TILE>vy1+2)continue;
+  drawMonster(ctx,m,t);
+ }
+ // people (in-dungeon settlers are hidden below ground)
+ const ppl=people.filter(p=>!p.inDungeon).sort((a,b)=>a.y-b.y);
+ for(const p of ppl){
+  ctx.save();ctx.translate(p.x,p.y);
+  if(p===selected){
+   ctx.strokeStyle='rgba(232,192,101,'+(0.6+Math.sin(t*0.006)*0.3)+')';
+   ctx.lineWidth=1.5;
+   ctx.beginPath();ctx.ellipse(0,1,8,4,0,0,7);ctx.stroke();
+  }
+  drawSprite(ctx,p,t);
+  if(p.hp<92){ctx.fillStyle='#1b1626';ctx.fillRect(-7,-19,14,2);ctx.fillStyle=p.hp<35?'#d24a5a':'#6fa04f';ctx.fillRect(-7,-19,14*clamp(p.hp/100,0,1),2)}
+  ctx.font='7px system-ui';ctx.textAlign='center';
+  if(p.task&&p.task.k==='fight')ctx.fillText('⚔',0,-16);
+  else if(p.fleeUntil>simMin)ctx.fillText('💨',0,-16);
+  else if(p.sleeping)ctx.fillText('💤',5,-16);
+  else if(p.em&&p.em.until>performance.now())ctx.fillText(p.em.g,0,-18);
+  else if(p.courting&&t%1400<700)ctx.fillText('❤',0,-18);
+  ctx.restore();
+ }
+ // speech bubbles on top
+ if(SPEEDS[speedIdx]<=16){
+  for(const p of ppl){
+   if(p.bubble&&p.bubble.until>performance.now())drawBubble(ctx,p);
+  }
+ }
+ // night overlay & glows
+ if(nf>0.02){
+  ctx.fillStyle='rgba(9,10,38,'+(0.42*nf)+')';
+  ctx.fillRect(vx0*TILE-TILE,vy0*TILE-TILE,(vx1-vx0+3)*TILE,(vy1-vy0+3)*TILE);
+  const go=ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation='screen';
+  ctx.globalAlpha=nf;
+  for(const n of nodes){
+   if(n.t!=='tree'||n.amt<=0)continue;
+   if(n.x<vx0||n.x>vx1||n.y<vy0||n.y>vy1)continue;
+   ctx.drawImage(GLOW_CYAN,n.x*TILE+TILE/2-24,n.y*TILE-32,48,48);
+  }
+  for(const b of vis){
+   if(b.tp==='grave'||!b.done||b.ruined)continue;
+   ctx.drawImage(GLOW_WARM,b.x*TILE+b.w*TILE/2-28,b.y*TILE+b.h*TILE/2-28,56,56);
+  }
+  ctx.globalAlpha=1;
+  ctx.globalCompositeOperation=go;
+ }
+}
+const GLOW_RED=mkGlow('rgba(210,60,70,0.5)');
+function drawDungeon(c,d,t){
+ const px=d.x*TILE+TILE/2,py=d.y*TILE+TILE/2;
+ const go=c.globalCompositeOperation;
+ c.globalCompositeOperation='screen';
+ c.drawImage(GLOW_RED,px-24,py-24,48,48);
+ c.globalCompositeOperation=go;
+ // rock arch
+ c.fillStyle='#2a2233';
+ c.beginPath();c.moveTo(px-8,py+7);c.lineTo(px-8,py-2);c.arc(px,py-2,8,Math.PI,0);c.lineTo(px+8,py+7);c.closePath();c.fill();
+ // dark maw
+ c.fillStyle='#08060f';
+ c.beginPath();c.moveTo(px-5,py+7);c.lineTo(px-5,py-1);c.arc(px,py-1,5,Math.PI,0);c.lineTo(px+5,py+7);c.closePath();c.fill();
+ // eyes in the dark
+ const blink=(Math.sin(t*0.003+d.id)>0.9);
+ if(!blink){c.fillStyle='#e8563a';c.fillRect(px-3,py+1,1.6,1.6);c.fillRect(px+1.4,py+1,1.6,1.6)}
+ // torches
+ c.fillStyle='#5a3a22';c.fillRect(px-9,py-1,1.5,7);c.fillRect(px+7.5,py-1,1.5,7);
+ const fl=0.6+0.4*Math.sin(t*0.02+d.id);
+ c.fillStyle='rgba(255,'+(140+fl*60|0)+',60,'+(0.7+fl*0.3)+')';
+ c.beginPath();c.arc(px-8.2,py-2,2,0,7);c.fill();c.beginPath();c.arc(px+8.2,py-2,2,0,7);c.fill();
+ // adventurers inside
+ if(d.inside.size){
+  c.fillStyle='#e8c065';c.font='6px system-ui';c.textAlign='center';
+  c.fillText('🔦'+d.inside.size,px,py-13);
+ }
+}
+function drawBubble(c,p){
+ const txt=p.bubble.text;
+ c.font='6px system-ui';
+ const w=Math.min(74,c.measureText(txt).width+8),h=11;
+ const bx=p.x,by=p.y-22;
+ const fade=clamp((p.bubble.until-performance.now())/500,0,1);
+ c.globalAlpha=0.92*Math.min(1,fade*3);
+ c.fillStyle='#f4efe4';
+ rr(c,bx-w/2,by-h,w,h,3);c.fill();
+ c.beginPath();c.moveTo(bx-2,by-1);c.lineTo(bx+2,by-1);c.lineTo(bx,by+3);c.closePath();c.fill();
+ c.fillStyle='#241f33';c.textAlign='center';c.textBaseline='middle';
+ c.fillText(txt,bx,by-h/2,w-6);
+ c.textBaseline='alphabetic';c.globalAlpha=1;
+}
+
+/* ================= input ================= */
+const ptrs=new Map();
+let pinchD=0,downInfo=null;
+cv.addEventListener('pointerdown',e=>{
+ cv.setPointerCapture(e.pointerId);
+ ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+ if(ptrs.size===1)downInfo={x:e.clientX,y:e.clientY,t:performance.now(),moved:0};
+ if(ptrs.size===2){
+  const a=[...ptrs.values()];
+  pinchD=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
+ }
+});
+cv.addEventListener('pointermove',e=>{
+ const pr=ptrs.get(e.pointerId);
+ if(!pr)return;
+ const dx=e.clientX-pr.x,dy=e.clientY-pr.y;
+ pr.x=e.clientX;pr.y=e.clientY;
+ if(ptrs.size===1){
+  if(downInfo)downInfo.moved+=Math.abs(dx)+Math.abs(dy);
+  cam.x-=dx/cam.z;cam.y-=dy/cam.z;
+  if(downInfo&&downInfo.moved>8)follow=false;
+ }else if(ptrs.size===2){
+  const a=[...ptrs.values()];
+  const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
+  if(pinchD>0)cam.z=clamp(cam.z*(d/pinchD),0.6,3.2);
+  pinchD=d;
+ }
+});
+function endPtr(e){
+ ptrs.delete(e.pointerId);
+ if(ptrs.size<2)pinchD=0;
+ if(ptrs.size===0&&downInfo){
+  const dt=performance.now()-downInfo.t;
+  if(downInfo.moved<10&&dt<420)tapAt(e.clientX,e.clientY);
+  downInfo=null;
+ }
+}
+cv.addEventListener('pointerup',endPtr);
+cv.addEventListener('pointercancel',endPtr);
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.z=clamp(cam.z*(e.deltaY<0?1.1:0.9),0.6,3.2)},{passive:false});
+function tapAt(sx,sy){
+ const wx=cam.x+(sx-cw/2)/cam.z,wy=cam.y+(sy-ch/2)/cam.z;
+ let best=null,bd=1e18;
+ for(const p of people){
+  if(p.inDungeon)continue;
+  const psx=(p.x-cam.x)*cam.z+cw/2,psy=(p.y-8-cam.y)*cam.z+ch/2;
+  const d=dist2(sx,sy,psx,psy);
+  if(d<bd&&d<32*32){bd=d;best=p}
+ }
+ if(best){if(cine)focusCine(best);else selectPerson(best);return}
+ // monsters (tap the beast to size it up)
+ let bm=null,bmd=1e18;
+ for(const m of monsters){
+  const msx=(m.x-cam.x)*cam.z+cw/2,msy=(m.y-6-cam.y)*cam.z+ch/2;
+  const d=dist2(sx,sy,msx,msy);
+  if(d<bmd&&d<30*30){bmd=d;bm=m}
+ }
+ if(bm){if(!cine)inspectMonster(bm);return}
+ if(cine)return; // in cinematic, only character/monster taps matter
+ const tx=(wx/TILE)|0,ty=(wy/TILE)|0;
+ if(!inB(tx,ty)){closeInspect();return}
+ // village banner (near a centroid)?
+ for(const v of villages){
+  const vsx=(v.cx*TILE-cam.x)*cam.z+cw/2,vsy=(v.cy*TILE-16-cam.y)*cam.z+ch/2;
+  if(dist2(sx,sy,vsx,vsy)<26*26){inspectVillage(v);return}
+ }
+ // dungeon?
+ const dun=dungeonAt(tx,ty);
+ if(dun){inspectDungeon(dun);return}
+ // building / grave?
+ if(bld[idx(tx,ty)]>=0){
+  const b=buildings[bld[idx(tx,ty)]];
+  if(b&&!b.gone){
+   if(b.tp==='grave'&&b.ref){const p=allById.get(b.ref);if(p){selectPerson(p);return}}
+   inspectBuilding(b);return;
+  }
+ }
+ // resource node?
+ const nd=nodeAt.get(idx(tx,ty));
+ if(nd){inspectNode(nd);return}
+ // bare floor / wall
+ if(selected){selected=null;$('charPanel').classList.add('hidden')}
+ inspectTile(tx,ty);
+}
+/* ---- inspect panel ---- */
+function showInspect(glyph,title,sub,rows,body){
+ $('charPanel').classList.add('hidden');$('logPanel').classList.add('hidden');
+ $('iGlyph').textContent=glyph;
+ $('iTitle').textContent=title;
+ $('iSub').textContent=sub||'';
+ const bd=$('iBody');bd.innerHTML='';
+ if(rows&&rows.length){
+  for(const[k,v,onclick]of rows){
+   const r=document.createElement('div');r.className='irow';
+   const kk=document.createElement('span');kk.className='k';kk.textContent=k;
+   const vv=document.createElement('span');vv.className='v'+(onclick?' iname':'');vv.textContent=v;
+   if(onclick)vv.onclick=onclick;
+   r.appendChild(kk);r.appendChild(vv);bd.appendChild(r);
+  }
+ }
+ if(body){const p=document.createElement('div');p.style.marginTop='9px';p.style.fontStyle='italic';p.style.opacity='.9';p.textContent=body;bd.appendChild(p)}
+ $('inspect').classList.remove('hidden');
+}
+function closeInspect(){$('inspect').classList.add('hidden')}
+function nameLink(p){return[p.name,()=>selectPerson(p)]}
+function inspectBuilding(b){
+ if(b.tp==='grave'){
+  showInspect('🪦','A cairn of stones','someone the cave took back',[],'A small pile of stones marks a life that ended here. Their name is worn away, but the cavern remembers.');
+  return;
+ }
+ const owners=b.owners.map(id=>allById.get(id)).filter(o=>o&&!o.dead);
+ if(b.tp==='biz'){
+  const keeper=allById.get(b.builder);
+  const rows=[['Kind',b.sub[2].replace(/^a[n]? /,'')],['Proprietor',keeper&&!keeper.dead?keeper.name:'shuttered'],['Patrons served',String(b.prosperity)],['Status',b.prosperity>30?'the talk of the cavern':b.prosperity>8?'doing well':'finding its feet']];
+  const kr=keeper&&!keeper.dead?nameLink(keeper):null;
+  if(kr)rows[1]=['Proprietor',kr[0],kr[1]];
+  showInspect(b.sub[1],b.name,b.sub[2],rows,'Lantern-light spills from the doorway. Someone is always here, trading news for warmth.');
+  return;
+ }
+ const tp=b.tp==='home'?'A home':'A shelter';
+ const rows=[];
+ if(owners.length)rows.push(['Home to',owners.map(o=>o.name).join(' & '),owners.length===1?nameLink(owners[0])[1]:null]);
+ else rows.push(['Occupied by','no one — empty']);
+ if(b.stock)rows.push(['Pantry','🍄'+b.stock.food+' 🪵'+b.stock.wood+' 🪨'+b.stock.stone]);
+ const bld2=allById.get(b.builder);
+ if(bld2)rows.push(['Raised by',bld2.name+(bld2.dead?' (departed)':''),bld2.dead?null:nameLink(bld2)[1]]);
+ showInspect(b.tp==='home'?'🏠':'⛺',tp,owners.length?'':'vacant — a newcomer could claim it',rows,b.tp==='home'?'A door that shuts and a hearth that glows. Small comforts against a very large dark.':'Lashed stalks and patched hides. It keeps the worst of the cold out.');
+}
+function inspectNode(n){
+ const info={berry:['🫐','A berry patch','sweet cave-berries, good eating'],mush:['🍄','A glowcap cluster','pale mushrooms that feed the cavern'],tree:['🌳','A glowcap tree','tall fungal stalks — timber and light'],rock:['🪨','A stone seam','loose rock, waiting to be worked']}[n.t];
+ const rows=[['Yields',n.yield==='food'?'🍄 food':n.yield==='wood'?'🪵 wood':'🪨 stone'],['Remaining',n.amt+' / '+n.max+(n.amt<=0?' (depleted)':'')],['Regrows',n.amt<n.max?'slowly, in time':'fully grown']];
+ showInspect(info[0],info[1],info[2],rows,n.amt<=0?'Picked clean for now. Give it time and it will come back.':'A little of the cavern\u2019s quiet generosity, here for whoever finds it first.');
+}
+function inspectDungeon(d){
+ const inside=[...d.inside].map(id=>allById.get(id)).filter(Boolean);
+ const rows=[
+  ['Danger',dangerWord(d.danger)],
+  ['Depth',d.depth+' galleries down'],
+  ['Adventurers within',inside.length?inside.map(p=>p.name).join(', '):'none, for now'],
+  ['Expeditions',String(d.raids)],
+  ['Souls lost',String(d.deaths)],
+  ['Relics recovered',String(d.relicsFound)],
+  ['Treasure left',d.loot>0.9?'rich':d.loot>0.5?'picked over':'nearly stripped']
+ ];
+ showInspect('🕳',d.name,dangerWord(d.danger)+' · '+d.depth+' deep',rows,'A cold breath rises from the dark. Some who go down come back rich. Some do not come back.');
+}
+function inspectTile(tx,ty){
+ const i=idx(tx,ty);
+ if(farmGrid[i]===1||farmGrid[i]===2){
+  const v=villages.find(vv=>dist2(vv.cx,vv.cy,tx,ty)<(vv.rad+4)**2);
+  showInspect(farmGrid[i]===2?'🌾':'🌱',farmGrid[i]===2?'A ripe farm plot':'A tilled farm plot',v?'tended by '+v.name:'',[['State',farmGrid[i]===2?'ready to harvest':'growing']],'The village mind carved order into the wild cave — rows of pale grain under the glow.');
+  return;
+ }
+ if(!walkable(tx,ty)){
+  const s=struct[i];
+  if(s===S_WALL){showInspect('🧱','Village wall','raised against the dark',[],'Stone hauled up from the deep and stacked into a rampart. It funnels the monsters toward the gates, where the brave wait.');return}
+  if(s===S_RUIN){showInspect('🏚','Ruins','a home no one tends',[],'Sagging timbers and fallen stone. In time even this will crumble back to bare rock.');return}
+  if(s===S_HOUSE){const bi=bld[i];if(bi>=0&&buildings[bi]&&!buildings[bi].gone){inspectBuilding(buildings[bi]);return}}
+  showInspect('🪨','Cavern wall','solid rock',[],'Living stone, older than anything that walks here.');return;
+ }
+ showInspect('·','Bare cavern floor','',[],'Smooth stone underfoot, faintly glowing. Room enough to build a life on.');
+}
+function inspectMonster(m){
+ const rows=[['Health',Math.max(0,Math.round(m.hp))+' / '+m.maxhp],['Menace',m.dmg+' harm per strike'],['Crawled from',m.home.name],['Hunting',m.target&&!m.target.dead?m.target.name:'nothing yet']];
+ showInspect(m.g,'A '+m.name,'a horror from the deep',rows,'It should not be up here in the light. Someone brave will have to put it down — and no one should face it alone.');
+}
+function inspectVillage(v){
+ const members=new Set();
+ for(const b of v.homes)for(const id of b.owners){const o=allById.get(id);if(o&&!o.dead)members.add(o)}
+ const homes=v.homes.filter(b=>b.tp==='home'||b.tp==='shelter').length;
+ const shops=v.homes.filter(b=>b.tp==='biz').length;
+ const wallCount=(()=>{let n=0;for(let i=0;i<struct.length;i++)if(struct[i]===S_WALL)n++;return n})();
+ const rows=[
+  ['Founded','Day '+v.founded],
+  ['Households',String(homes)],
+  ['Businesses',String(shops)],
+  ['Folk',String(members.size)],
+  ['Granary','🪨'+v.stock.stone+' 🍄'+v.stock.food],
+  ['Ongoing works',v.jobs.length?v.jobs.length+' jobs':'all quiet']
+ ];
+ showInspect('🏘',v.name,'a village with a mind of its own',rows,'What began as a huddle of homes now moves as one: walling out the dark, tilling the stone, mining the halls ever wider.');
+}
+
+/* ================= UI panels ================= */
+function chronRow(e){
+ const div=document.createElement('div');
+ div.className='e'+(e.major?' maj':'');
+ div.innerHTML='<span class="d">Day '+e.d+'</span>'+esc(e.text);
+ return div;
+}
+function prependChron(e){
+ const list=$('logList');
+ list.insertBefore(chronRow(e),list.firstChild);
+ while(list.children.length>260)list.removeChild(list.lastChild);
+}
+function refreshChron(){
+ const list=$('logList');list.innerHTML='';
+ const start=Math.max(0,chron.length-260);
+ for(let i=start;i<chron.length;i++)list.insertBefore(chronRow(chron[i]),list.firstChild);
+}
+function prependStory(e){
+ const list=$('pstory');
+ list.insertBefore(chronRow(e),list.firstChild);
+ while(list.children.length>200)list.removeChild(list.lastChild);
+}
+function taskLabel(p){
+ if(p.dead)return '🪦 their story has ended';
+ if(p.inDungeon){const d=[...dungeons].find(dd=>dd.inside.has(p.id));return '🕳 deep inside '+(d?d.name:'a dungeon')}
+ if(p.sleeping)return 'sleeping';
+ if(!p.task)return 'idling';
+ switch(p.task.k){
+  case 'wander':return p.farUntil>simMin?'roaming far galleries':'wandering';
+  case 'gather':return 'gathering '+(p.task.node?p.task.node.yield:'');
+  case 'eat':return 'eating';
+  case 'gohome':return p.task.why==='sleep'?'heading home to rest':p.task.why==='eat'?'heading home to eat':'hauling goods home';
+  case 'build':return 'building a '+(p.task.b?(p.task.b.tp==='biz'?'business':p.task.b.tp):'structure');
+  case 'chat':return p.courting===(p.task.o&&p.task.o.id)?'courting '+p.task.o.name:'talking with '+(p.task.o?p.task.o.name:'someone');
+  case 'visit':return 'visiting '+(p.task.b?p.task.b.name:'a shop');
+  case 'togodungeon':return 'mustering to raid '+(p.task.d?p.task.d.name:'a dungeon');
+  case 'fight':return '⚔ fighting a '+(p.task.m?p.task.m.name:'monster');
+  case 'flee':return '💨 fleeing for their life';
+  case 'villagejob':{const j=p.task.j;return j?({wall:'raising the walls',mine:'mining the halls wider',till:'tilling a farm plot',harvest:'bringing in the harvest'}[j.type]||'working for the village'):'working for the village'}
+ }
+ return '...';
+}
+function moodOf(p){
+ if(p.dead)return 'at rest';
+ if(p.inDungeon)return 'in peril';
+ if(p.task&&p.task.k==='fight')return 'battle-fury';
+ if(p.fleeUntil>simMin)return 'terrified';
+ if(p.hp<35)return 'badly wounded';
+ if(p.gloomUntil>simMin)return 'heartsore';
+ if(p.hunger>78)return 'hungry';
+ if(p.energy<22)return 'weary';
+ if(p.courting)return 'lovestruck';
+ if(p.socialN>78)return 'lonely';
+ if(p.lostUntil>simMin)return 'moonstruck';
+ return p.traits.includes('cheerful')?'sunny':p.traits.includes('gloomy')?'brooding':'content';
+}
+let lastStoryLen=0;
+function renderPanelFull(p){
+ $('charPanel').classList.remove('hidden');
+ $('pname').textContent=(p.dead?'🪦 ':'')+p.name;
+ renderPanelLive(p);
+ const tr=$('ptraits');tr.innerHTML='';
+ for(const t of p.traits){
+  const c=document.createElement('span');c.className='chip';c.textContent=TRAITS[t].a;tr.appendChild(c);
+ }
+ const pc=$('pcards');pc.innerHTML='';
+ for(const cd of p.cards){
+  const c=document.createElement('span');c.className='chip card';
+  const card=TAROT[cd.i];
+  c.textContent=card.g+' '+card.n;
+  c.onclick=()=>toast(card.g+' '+card.n+' — '+card.line,'card');
+  pc.appendChild(c);
+ }
+ if(!p.cards.length){const c=document.createElement('span');c.className='chip card';c.textContent='no cards yet';pc.appendChild(c)}
+ $('pgoal').textContent=p.goal?('✦ Their arc: '+p.goal.t+(p.goal.done?' — fulfilled':'')):'✦ Too young for an arc yet';
+ // relics
+ const rb=$('relbox');rb.innerHTML='';
+ $('relhead').classList.toggle('hidden',!p.relics.length);
+ for(const r of p.relics){
+  const div=document.createElement('div');div.className='relic';
+  div.innerHTML='<span class="g">'+r.g+'</span><span class="nm">'+esc(r.n)+'</span><span class="ef">+'+Math.round(r.v*100)+'% '+r.k+'</span>';
+  div.title=r.d;rb.appendChild(div);
+ }
+ renderRels(p);
+ const st=$('pstory');st.innerHTML='';
+ const start=Math.max(0,p.story.length-200);
+ for(let i=start;i<p.story.length;i++)st.insertBefore(chronRow(p.story[i]),st.firstChild);
+ lastStoryLen=p.story.length;
+ // portrait
+ const pcv=$('pcv'),pctx=pcv.getContext('2d');
+ pctx.clearRect(0,0,64,64);
+ pctx.save();pctx.translate(32,50);pctx.scale(3.4,3.4);
+ pctx.imageSmoothingEnabled=false;
+ const wasM=p.moving;p.moving=false;
+ drawSprite(pctx,p,0);
+ p.moving=wasM;
+ pctx.restore();
+}
+function renderPanelLive(p){
+ const vil=p.vid?villages.find(v=>v.id===p.vid):null;
+ $('pmeta').textContent=Math.floor(p.age)+' summers · '+stageOf(p)+' · '+moodOf(p)+(p.hp<100?' · ❤'+Math.round(p.hp):'')+(vil?' · 🏘 '+vil.name:'')+(p.kills?' · ⚔'+p.kills:'')+' · 🍄'+p.inv.food+' 🪵'+p.inv.wood+' 🪨'+p.inv.stone;
+ $('ptask').textContent=taskLabel(p);
+}
+function renderRels(p){
+ const box=$('prels');box.innerHTML='';
+ const rels=[];
+ for(const id in p.rel){
+  const o=allById.get(+id);
+  if(!o||!p.rel[id].met)continue;
+  rels.push([o,p.rel[id]]);
+ }
+ rels.sort((a,b)=>Math.abs(b[1].a)-Math.abs(a[1].a));
+ let n=0;
+ for(const[o,r]of rels){
+  if(n++>=8)break;
+  const div=document.createElement('div');div.className='rel';
+  const nm=document.createElement('span');nm.className='nm';nm.textContent=(o.dead?'🪦 ':'')+o.name;
+  nm.onclick=()=>selectPerson(o);
+  const st=document.createElement('span');st.className='st';st.textContent=relLabel(p,o);
+  div.appendChild(nm);div.appendChild(st);box.appendChild(div);
+ }
+ if(!n){const div=document.createElement('div');div.className='rel';div.innerHTML='<span style="opacity:.6">no one yet — the cave is big</span>';box.appendChild(div)}
+}
+function selectPerson(p){
+ selected=p;follow=false;
+ $('followBtn').style.opacity='1';
+ $('logPanel').classList.add('hidden');
+ renderPanelFull(p);
+}
+$('charClose').onclick=()=>{selected=null;follow=false;$('charPanel').classList.add('hidden')};
+$('followBtn').onclick=()=>{follow=!follow;$('followBtn').style.opacity=follow?'1':'.55';toast(follow?'Following '+(selected?selected.name:''):'Camera freed')};
+$('logBtn').onclick=()=>{
+ const lp=$('logPanel');
+ if(lp.classList.contains('hidden')){refreshChron();lp.classList.remove('hidden');$('charPanel').classList.add('hidden');selected=null}
+ else lp.classList.add('hidden');
+};
+$('logClose').onclick=()=>$('logPanel').classList.add('hidden');
+$('iClose').onclick=closeInspect;
+function setSpeed(idx){
+ speedIdx=idx;
+ document.querySelectorAll('.sp button').forEach(x=>x.classList.toggle('on',+x.dataset.s===idx));
+ document.querySelectorAll('.cspd button').forEach(x=>x.classList.toggle('on',+x.dataset.s===idx));
+}
+document.querySelectorAll('.sp button,.cspd button').forEach(b=>{b.onclick=()=>setSpeed(+b.dataset.s)});
+
+/* ---- cinematic mode ---- */
+let cineLastStory=-1,cineZoomTarget=2.8,preCineZoom=1.4;
+function pickInteresting(){
+ if(selected&&!selected.dead)return selected;
+ let pool=people.filter(p=>!p.inDungeon&&p.age>=16);
+ if(!pool.length)pool=people.slice();
+ if(!pool.length)return null;
+ const c=pool.filter(p=>p.courting||p.task&&p.task.k==='togodungeon');
+ if(c.length)return pick(c);
+ return pool.sort((a,b)=>b.story.length-a.story.length)[0];
+}
+function enterCine(p){
+ p=p||pickInteresting();
+ if(!p)return;
+ selected=p;cine=true;follow=true;cineLastStory=-1;
+ preCineZoom=cam.z;cineZoomTarget=2.8;
+ $('cine').classList.add('on');
+ $('charPanel').classList.add('hidden');$('logPanel').classList.add('hidden');closeInspect();
+ $('top').style.display='none';
+ setSpeed(speedIdx);
+ updateCine();
+}
+function exitCine(){
+ cine=false;follow=false;
+ cam.z=preCineZoom;
+ $('cine').classList.remove('on');
+ $('top').style.display='';
+}
+function focusCine(p){
+ if(!p||p.dead)return;
+ selected=p;cineLastStory=-1;updateCine();
+}
+function cineCycle(dir){
+ const alive=people.filter(x=>!x.inDungeon&&!x.dead);
+ if(!alive.length)return;
+ let i=alive.indexOf(selected);
+ i=(i+dir+alive.length)%alive.length;
+ if(i<0)i=0;
+ focusCine(alive[i]);
+}
+function updateCine(){
+ const p=selected;if(!p)return;
+ $('cinName').textContent=(p.dead?'🪦 ':'')+p.name;
+ $('cinSub').textContent=Math.floor(p.age)+' summers · '+traitPhrase(p);
+ const last=p.story.length-1;
+ const beat=last>=0?p.story[last].text:p.name+' has yet to make their mark.';
+ const cap=$('cinCap');
+ if(last!==cineLastStory){
+  cineLastStory=last;
+  cap.style.opacity='0';
+  cap.textContent=beat;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{cap.style.opacity='1'}));
+ }
+}
+$('cineBtn').onclick=()=>enterCine(selected);
+$('cinExit').onclick=exitCine;
+$('cinPrev').onclick=()=>cineCycle(-1);
+$('cinNext').onclick=()=>cineCycle(1);
+let newArm=0;
+$('newBtn').onclick=()=>{
+ if(performance.now()-newArm<3000){
+  seed=(Math.random()*2**31)|0;rng=mulberry32(seed);
+  genWorld();
+  $('charPanel').classList.add('hidden');$('logPanel').classList.add('hidden');
+  toast('A new cavern...');
+  newArm=0;
+ }else{
+  newArm=performance.now();
+  toast('Tap ↻ again to abandon this cavern');
+ }
+};
+
+/* ================= main loop ================= */
+let last=performance.now(),acc=0,uiT=0;
+function frame(t){
+ const rdt=Math.min(0.1,(t-last)/1000);last=t;
+ const sp=SPEEDS[speedIdx];
+ if(sp>0){
+  acc=Math.min(acc+rdt*sp*RATE,500);
+  while(acc>0){
+   const st=Math.min(2,acc);
+   stepSim(st);
+   acc-=st;
+  }
+ }
+ if(cine){
+  if(selected&&selected.dead&&!selected.inDungeon){/* linger a beat, then let user cycle */}
+  cam.z+=(cineZoomTarget-cam.z)*0.09;
+ }
+ draw(t);
+ if(t-uiT>(cine?260:450)){
+  uiT=t;
+  $('clock').textContent='Day '+cday()+' · '+phase();
+  $('pop').textContent='👥 '+people.length;
+  if(cine&&selected)updateCine();
+  if(selected&&!$('charPanel').classList.contains('hidden')){
+   renderPanelLive(selected);
+   if(selected.story.length!==lastStoryLen){
+    const st=$('pstory');
+    for(let i=lastStoryLen;i<selected.story.length;i++)prependStory(selected.story[i]);
+    lastStoryLen=selected.story.length;
+   }
+   if(((t/450)|0)%5===0)renderRels(selected);
+  }
+ }
+ requestAnimationFrame(frame);
+}
+
+/* ================= boot ================= */
+genWorld();
+setTimeout(()=>{const h=$('hint');if(h)h.style.opacity='0'},7000);
+setTimeout(()=>{const h=$('hint');if(h&&h.parentNode)h.parentNode.removeChild(h)},9000);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
