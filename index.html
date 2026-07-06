@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>SEED &amp; SAGE — a garden that thinks</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+html,body{height:100%;overflow:hidden;background:#0d140b;color:#e8e2d5;font-family:system-ui,-apple-system,sans-serif;touch-action:none;overscroll-behavior:none}
+.hidden{display:none!important}
+canvas{image-rendering:pixelated}
+button{background:rgba(30,38,26,.88);border:1px solid #3c4f33;color:#e8e2d5;border-radius:10px;padding:7px 11px;font-size:13px;line-height:1;cursor:pointer}
+button:active{transform:translateY(1px)}
+
+/* ================= SURFACE (the garden) ================= */
+#cvS{position:fixed;inset:0;touch-action:none}
+#top{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:8px 10px;padding-top:calc(8px + env(safe-area-inset-top));background:linear-gradient(rgba(10,16,9,.9),rgba(10,16,9,0));z-index:5;pointer-events:none}
+#top>*{pointer-events:auto}
+#clock{font-weight:650;font-size:13px;letter-spacing:.02em}
+#pop{opacity:.75;font-size:12px}
+#hearts{font-size:12px;color:#ffb3c0;letter-spacing:.06em;margin-left:6px}
+.sp{display:flex;gap:4px;margin-left:auto}
+#sui .sp button.on,#sui .cspd button.on{background:#cfe37a;color:#1c2414;border-color:#cfe37a;font-weight:700}
+#toasts{position:fixed;top:54px;left:50%;transform:translateX(-50%);z-index:20;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;width:min(92vw,440px)}
+.toast{background:rgba(20,28,17,.94);border:1px solid #4a6640;border-radius:12px;padding:8px 13px;font-size:12.5px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,.5);animation:tin .25s ease;max-width:100%}
+.toast.card{border-color:#8a76c2;color:#d9cff2}
+@keyframes tin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.panel{position:fixed;left:0;right:0;bottom:0;background:rgba(19,26,16,.97);border-top:1px solid #3c4f33;border-radius:18px 18px 0 0;z-index:10;display:flex;flex-direction:column;box-shadow:0 -8px 30px rgba(0,0,0,.5);padding-bottom:env(safe-area-inset-bottom)}
+.phead{display:flex;gap:10px;padding:10px 14px;align-items:center;border-bottom:1px solid #26331f;flex:0 0 auto}
+.phead b{font-size:15px}
+.pbtns{margin-left:auto;display:flex;gap:6px}
+#logPanel{max-height:62vh}
+#charPanel{max-height:62vh}
+.plist{overflow-y:auto;padding:6px 14px 12px;font-family:Georgia,'Times New Roman',serif;font-size:13.5px;line-height:1.5;-webkit-overflow-scrolling:touch}
+.plist .e{padding:6px 0;border-bottom:1px dashed #26331f;color:#cfc6b8}
+.plist .e .d{color:#8fa885;font-family:system-ui;font-size:10.5px;font-weight:600;margin-right:7px;white-space:nowrap}
+.plist .e.maj{color:#e8c065}
+#charBody{overflow-y:auto;-webkit-overflow-scrolling:touch}
+#pcv{border-radius:12px;background:#1e2618;flex:0 0 auto}
+.pinfo{min-width:0}
+#pname{font-size:16px;font-weight:700}
+#pmeta{font-size:12px;opacity:.8;margin-top:2px}
+#ptask{font-size:12px;color:#a8d8b0;margin-top:2px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;padding:9px 14px 0}
+.chip{background:#1e2618;border:1px solid #3c4f33;border-radius:99px;padding:4px 10px;font-size:12px;line-height:1.2}
+.chip.card{border-color:#6b5a8f;background:#28223c;color:#d9cff2}
+.goal{padding:9px 14px 0;font-size:12.5px;color:#c9b98a}
+.shead{padding:11px 14px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#8fa885;font-weight:700}
+#prels{padding:0 14px}
+.rel{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed #26331f;font-size:13px}
+.rel .nm{color:#e8e2d5;font-weight:600}
+.rel .st{opacity:.85}
+#pstory{max-height:none}
+#sHint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:4;background:rgba(19,26,16,.85);border:1px solid #3c4f33;border-radius:99px;padding:7px 15px;font-size:12px;opacity:.9;pointer-events:none;transition:opacity 1s;text-align:center}
+#relbox{padding:0 14px}
+.relic{display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed #26331f;font-size:12.5px;align-items:baseline}
+.relic .g{font-size:15px}.relic .nm{color:#e8c065;font-weight:600}.relic .ef{opacity:.7;margin-left:auto;font-size:11px}
+/* inspect */
+#inspect{position:fixed;left:0;right:0;bottom:0;z-index:11;background:rgba(19,26,16,.97);border-top:1px solid #3c4f33;border-radius:18px 18px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.5);padding-bottom:env(safe-area-inset-bottom);max-height:56vh;display:flex;flex-direction:column}
+#inspect .ihead{display:flex;gap:10px;align-items:center;padding:12px 14px 8px}
+#inspect .iglyph{font-size:26px;line-height:1}
+#inspect .ititle{font-size:16px;font-weight:700}
+#inspect .isub{font-size:12px;opacity:.75;margin-top:1px}
+#inspect .ibody{overflow-y:auto;padding:2px 14px 16px;font-family:Georgia,serif;font-size:13.5px;line-height:1.55;color:#d6cdbe;-webkit-overflow-scrolling:touch}
+#inspect .irow{display:flex;justify-content:space-between;font-family:system-ui;font-size:12.5px;padding:5px 0;border-bottom:1px dashed #26331f}
+#inspect .irow .k{opacity:.6}#inspect .irow .v{font-weight:600}
+#inspect .iname{color:#e8c065;cursor:pointer}
+#inspect .iclose{margin-left:auto}
+/* cinematic */
+#cine{position:fixed;inset:0;z-index:14;pointer-events:none;display:none}
+#cine.on{display:block}
+#cine .bar-t,#cine .bar-b{position:absolute;left:0;right:0;height:9vh;background:#000;transition:height .4s}
+#cine .bar-t{top:0}#cine .bar-b{bottom:0}
+#cine .vig{position:absolute;inset:0;background:radial-gradient(ellipse 78% 62% at 50% 46%,transparent 42%,rgba(6,10,5,.72) 100%)}
+#cine .plate{position:absolute;left:16px;top:calc(9vh + 12px);pointer-events:none}
+#cine .pn{font-size:20px;font-weight:750;letter-spacing:.01em;text-shadow:0 2px 10px #000}
+#cine .ps{font-size:12px;opacity:.85;margin-top:2px;text-shadow:0 1px 6px #000}
+#cine .cap{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(9vh + 16px);width:min(90vw,560px);text-align:center;font-family:Georgia,serif;font-size:15px;line-height:1.5;color:#f0e9da;text-shadow:0 2px 12px #000,0 0 24px rgba(0,0,0,.6);transition:opacity .5s}
+#cine .cx{position:absolute;top:calc(9vh + 12px);right:14px;pointer-events:auto}
+#cine .cspd{position:absolute;bottom:calc(9vh + 14px);right:14px;pointer-events:auto;display:flex;gap:5px}
+#cine .nav{position:absolute;bottom:calc(9vh + 14px);left:14px;pointer-events:auto;display:flex;gap:5px}
+/* surface context buttons + dialog */
+#sTalkBtn,#sDescendBtn{position:fixed;left:50%;transform:translateX(-50%);
+  display:none;background:#1a3524;color:#cfe8cf;border:2px solid #3fae54;border-radius:10px;
+  padding:12px 26px;font-size:14px;letter-spacing:1px;z-index:6;box-shadow:0 4px 16px rgba(0,0,0,.6)}
+#sTalkBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 96px)}
+#sDescendBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 44px);background:#241a35;border-color:#8a63c9;color:#d9cff2}
+#sDialog{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);
+  display:none;background:rgba(16,24,14,0.95);border:2px solid #3fae54;border-radius:12px;
+  padding:16px 18px 12px;color:#e8f0e3;z-index:8;box-shadow:0 6px 24px rgba(0,0,0,.7)}
+#sDialogName{color:#8fe0a0;font-size:12px;letter-spacing:2px;margin-bottom:6px;text-transform:uppercase}
+#sDialogText{font-family:Georgia,serif;font-size:15px;line-height:1.55;min-height:3.2em}
+#sDialogNext{text-align:right;color:#7a967a;font-size:11px;margin-top:6px;letter-spacing:1px}
+
+/* ================= DUNGEON (the Understory) ================= */
+#cvD{position:fixed;inset:0;width:100vw;height:100vh;touch-action:none}
+#dui{font-family:'Courier New',monospace}
+#dHud{position:fixed;top:env(safe-area-inset-top,8px);left:0;right:0;padding:10px 14px;
+  display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none;color:#e8f0e3}
+.hudbox{text-shadow:0 0 8px rgba(0,0,0,.9);font-size:14px;line-height:1.5}
+#dQuestBox{position:fixed;top:calc(env(safe-area-inset-top,8px) + 8px);left:50%;transform:translateX(-50%);
+  text-align:center;pointer-events:none;color:#ffd166;font-size:12px;letter-spacing:1px;
+  text-shadow:0 0 8px #000;max-width:64vw;font-family:'Courier New',monospace}
+#dBuffs{position:fixed;top:calc(env(safe-area-inset-top,8px) + 64px);left:14px;pointer-events:none}
+.buff{font-size:11px;color:#cfe8cf;text-shadow:0 0 6px #000;margin-bottom:3px;font-family:'Courier New',monospace}
+#dCombo{position:fixed;top:calc(env(safe-area-inset-top,8px) + 40px);right:14px;
+  font-size:22px;font-weight:bold;color:#ffd166;opacity:0;transition:opacity .15s;
+  pointer-events:none;text-shadow:0 0 8px #000;font-family:'Courier New',monospace}
+#dTalkBtn{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 90px);left:50%;transform:translateX(-50%);
+  display:none;background:#141f2a;color:#cfe0e8;border:2px solid #5a7fae;border-radius:10px;
+  padding:12px 30px;font-family:'Courier New',monospace;font-size:15px;letter-spacing:2px;z-index:5;
+  box-shadow:0 4px 16px rgba(0,0,0,.6)}
+#dLeaveBtn{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 16px);left:14px;z-index:5;
+  background:rgba(16,24,14,.85);border:1.5px solid #3c5f45;color:#8fe0a0;
+  font-family:'Courier New',monospace;font-size:11px;letter-spacing:1px;border-radius:9px;padding:9px 12px}
+#dDialog{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);
+  display:none;background:rgba(13,20,27,0.94);border:2px solid #5a7fae;border-radius:12px;
+  padding:16px 18px 12px;color:#e3ebf0;z-index:6;box-shadow:0 6px 24px rgba(0,0,0,.7);
+  font-family:'Courier New',monospace}
+#dDialogName{color:#7db8e3;font-size:12px;letter-spacing:2px;margin-bottom:6px;text-transform:uppercase}
+#dDialogText{font-size:15px;line-height:1.55;min-height:3.2em}
+#dDialogNext{text-align:right;color:#7a8b96;font-size:11px;margin-top:6px;letter-spacing:1px}
+#dHint{position:fixed;bottom:calc(env(safe-area-inset-bottom,0px) + 20px);left:0;right:0;text-align:center;
+  color:#7a967a;font-size:12px;pointer-events:none;text-shadow:0 0 6px #000;transition:opacity 1s;
+  font-family:'Courier New',monospace}
+#dLevelFlash{position:fixed;top:38%;left:0;right:0;text-align:center;pointer-events:none;
+  font-size:30px;font-weight:bold;color:#7de3ff;text-shadow:0 0 18px #7de3ff;
+  opacity:0;transition:opacity .3s;letter-spacing:3px;font-family:'Courier New',monospace}
+
+/* ================= EDITOR (the Gardener's Bench) ================= */
+#edPanel{position:fixed;top:0;left:0;right:0;z-index:30;
+  transform:translateY(-102%);transition:transform .28s cubic-bezier(.22,.61,.36,1);
+  background:linear-gradient(180deg,#101a0ef7,#0c150af2);
+  border-bottom:2px solid #6fae54;box-shadow:0 8px 30px rgba(0,0,0,.6);
+  padding:calc(env(safe-area-inset-top,8px) + 14px) 14px 16px;
+  max-height:84vh;overflow-y:auto;color:#dceede;-webkit-overflow-scrolling:touch}
+#edPanel.open{transform:translateY(0)}
+#edPanel h3{color:#a0e08f;font-size:13px;letter-spacing:3px;font-weight:bold;margin-bottom:2px;text-transform:uppercase;display:flex;align-items:center}
+#edPanel h3 button{margin-left:auto}
+#edPanel .sub{color:#7a9a6f;font-size:11px;letter-spacing:1px;margin-bottom:12px}
+#edPanel .grp{margin-bottom:14px}
+#edPanel .grpTitle{color:#6a8f5f;font-size:10px;letter-spacing:2px;text-transform:uppercase;
+  margin:0 0 7px 2px;border-bottom:1px solid #2c4022;padding-bottom:4px}
+#edPanel .btnrow{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+#edPanel button.fb{flex:1 1 auto;min-width:96px;background:#1c3015;color:#cfe8cf;
+  border:1.5px solid #4a7038;border-radius:9px;padding:11px 8px;
+  font-size:12px;letter-spacing:.5px;cursor:pointer;transition:background .12s,border-color .12s}
+#edPanel button.fb:active{background:#2c4a1f;border-color:#7ece5f}
+#edPanel button.fb.big{flex-basis:100%;background:#2a441c;border-color:#7ece5f;
+  color:#eaffea;font-size:13px;letter-spacing:2px;font-weight:bold;padding:13px}
+#edPanel button.fb.warn{border-color:#8a6d33;color:#ffd88a;background:#2b2417}
+#edPanel .seedline{display:flex;gap:8px;align-items:center;margin:6px 0 8px}
+#edPanel .seedline input{flex:1;background:#0c150a;border:1.5px solid #2c4a23;color:#a0e08f;
+  font-family:ui-monospace,monospace;font-size:12px;padding:9px 10px;border-radius:8px;letter-spacing:1px}
+#edPanel .worldnote{color:#7a9a6f;font-size:10.5px;margin:2px 0 10px;line-height:1.5;letter-spacing:.5px}
+#edScrim{position:fixed;inset:0;z-index:29;background:rgba(0,0,0,0);pointer-events:none;transition:background .28s}
+#edScrim.open{background:rgba(0,0,0,0.4);pointer-events:auto}
+</style>
+</head>
+<body>
+
+<!-- ================= SURFACE ================= -->
+<div id="sui">
+  <canvas id="cvS"></canvas>
+  <div id="top">
+    <div><div id="clock">Day 1</div><div id="pop">👥 0</div></div>
+    <div id="hearts">♥♥♥♥♥</div>
+    <div class="sp">
+      <button data-s="0">⏸</button><button data-s="1" class="on">1×</button><button data-s="2">16×</button><button data-s="3">500×</button>
+    </div>
+    <button id="logBtn">📜</button>
+    <button id="edBtn">🛠</button>
+    <button id="newBtn">↻</button>
+  </div>
+  <div id="toasts"></div>
+  <div id="sHint">drag to walk · quick swipe to slash · tap anything to inspect<br>pinch to zoom · 🛠 opens the Gardener's Bench</div>
+
+  <div id="cine">
+    <div class="bar-t"></div><div class="bar-b"></div>
+    <div class="vig"></div>
+    <div class="plate"><div class="pn" id="cinName"></div><div class="ps" id="cinSub"></div></div>
+    <button class="cx" id="cinExit">✕ Exit</button>
+    <div class="nav"><button id="cinPrev">‹</button><button id="cinNext">›</button></div>
+    <div class="cspd">
+      <button data-s="1" class="on">1×</button><button data-s="2">16×</button><button data-s="3">500×</button>
+    </div>
+    <div class="cap" id="cinCap"></div>
+  </div>
+
+  <div id="inspect" class="hidden">
+    <div class="ihead"><div class="iglyph" id="iGlyph"></div><div><div class="ititle" id="iTitle"></div><div class="isub" id="iSub"></div></div><button class="iclose" id="iClose">✕</button></div>
+    <div class="ibody" id="iBody"></div>
+  </div>
+
+  <div id="logPanel" class="panel hidden">
+    <div class="phead"><b>Chronicle of the Garden</b><div class="pbtns"><button id="logClose">✕</button></div></div>
+    <div id="logList" class="plist"></div>
+  </div>
+
+  <div id="charPanel" class="panel hidden">
+    <div class="phead">
+      <canvas id="pcv" width="64" height="64"></canvas>
+      <div class="pinfo"><div id="pname"></div><div id="pmeta"></div><div id="ptask"></div></div>
+      <div class="pbtns"><button id="cineBtn">🎬</button><button id="followBtn">🎯</button><button id="charClose">✕</button></div>
+    </div>
+    <div id="charBody">
+      <div id="ptraits" class="chips"></div>
+      <div id="pcards" class="chips"></div>
+      <div id="pgoal" class="goal"></div>
+      <div id="relhead" class="shead hidden">Relics won in the deep</div>
+      <div id="relbox"></div>
+      <div class="shead">Bonds</div>
+      <div id="prels"></div>
+      <div class="shead">Their story</div>
+      <div id="pstory" class="plist"></div>
+    </div>
+  </div>
+
+  <button id="sTalkBtn">💬 TALK</button>
+  <button id="sDescendBtn">🕳 DESCEND</button>
+  <div id="sDialog">
+    <div id="sDialogName"></div>
+    <div id="sDialogText"></div>
+    <div id="sDialogNext">tap to continue ▸</div>
+  </div>
+</div>
+
+<!-- ================= DUNGEON ================= -->
+<div id="dui" class="hidden">
+  <canvas id="cvD"></canvas>
+  <div id="dHud">
+    <div class="hudbox">
+      <div id="dHp"></div>
+      <div id="dXpline" style="font-size:11px;color:#9fc79f;"></div>
+    </div>
+    <div class="hudbox" style="text-align:right;">
+      <div id="dScore">KILLS 0</div>
+    </div>
+  </div>
+  <div id="dQuestBox"></div>
+  <div id="dBuffs"></div>
+  <div id="dCombo"></div>
+  <button id="dTalkBtn">TALK</button>
+  <button id="dLeaveBtn">▲ FLEE TO SURFACE</button>
+  <div id="dDialog">
+    <div id="dDialogName"></div>
+    <div id="dDialogText"></div>
+    <div id="dDialogNext">tap to continue ▸</div>
+  </div>
+  <div id="dLevelFlash">LEVEL UP</div>
+  <div id="dHint">drag = move · quick swipe = slash · find the Keeper ✦ · ▲ portal returns to the surface</div>
+</div>
+
+<!-- ================= EDITOR ================= -->
+<div id="edScrim"></div>
+<div id="edPanel">
+  <h3>The Gardener's Bench <button id="edClose">✕</button></h3>
+  <div class="sub">randomize the world · edit whatever you last tapped</div>
+  <div class="worldnote" id="edWorldNote"></div>
+  <div class="grp"><div class="grpTitle">World</div><div id="edWorldBtns"></div></div>
+  <div class="grp"><div class="grpTitle">Conjure</div><div id="edSpawnBtns"></div></div>
+  <div class="grp"><div class="grpTitle">Appearances (Creature &amp; Plant Forge)</div><div id="edLookBtns"></div></div>
+  <div class="grp" id="edSelected"></div>
+</div>
+
+<script src="js/core.js"></script>
+<script src="js/forge.js"></script>
+<script src="js/plants.js"></script>
+<script src="js/surface.js"></script>
+<script src="js/dungeon.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
