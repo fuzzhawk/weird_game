@@ -30,9 +30,9 @@ const FARM_RIPEN=1.4*DAY;
 const S_ROCK=0,S_HOUSE=1,S_WALL=2,S_RUIN=3,S_FLOOR=4;
 // monsters that crawl up out of the Understories
 const MONSTERS={
- grub:{n:"root grub",g:"🐛",hp:24,dmg:4,spd:.82,col:'#8fa85a',cf:'slime',rare:0},
- lurker:{n:'pale creeper',g:'🦂',hp:50,dmg:10,spd:.95,col:'#b0623a',cf:'wisp',rare:.4},
- horror:{n:'understory horror',g:'👹',hp:100,dmg:18,spd:.8,col:'#a23a5a',cf:'brute',rare:.75}
+ grub:{n:"wire-root grub",g:"🐛",hp:24,dmg:4,spd:.82,col:'#8fa85a',cf:'slime',rare:0},
+ lurker:{n:'chrome creeper',g:'🦂',hp:50,dmg:10,spd:.95,col:'#b0623a',cf:'wisp',rare:.4},
+ horror:{n:'understory daemon',g:'👹',hp:100,dmg:18,spd:.8,col:'#a23a5a',cf:'brute',rare:.75}
 };
 
 /* ================= state ================= */
@@ -310,7 +310,7 @@ function processBakeQueue(){
     seed:Hero.lookSeed};
    hero.sprite=CFHelp.bakeCreature(params,44);
   }else if(job.kind==='mon'){
-   const sizes={grub:38,lurker:36,horror:58};
+   const sizes={grub:46,lurker:44,horror:58};
    surfMon[job.type]=CFHelp.bakeCreature(surfMonsterParams(job.type),sizes[job.type],['walk','attack']);
   }
  }catch(e){/* a failed bake falls back to the painted sprite */}
@@ -402,7 +402,7 @@ function genWorld(){
   }
  }
  // settlers
- tale([], 'A handful of wanderers came over the hills into a garden that seemed, faintly, to be thinking. They decided to stay. Beneath the meadow the Understories yawned in the dark — full of treasure, and of unfinished arguments.',true);
+ tale([], 'A handful of wanderers came over the hills into a garden grown up through the bones of some dead machine-age — a place that seemed, faintly, to be thinking. They decided to stay. Beneath the meadow the Understories yawned: the buried old net, humming still, thick with chrome and treasure and unfinished arguments.',true);
  for(let i=0;i<12;i++)arrive(ri(18,34));
  dayMark=cday();
  buildTerrainLayer();
@@ -550,7 +550,7 @@ function rerollTrait(p){
 }
 
 /* ================= buildings & economy ================= */
-const BIZKINDS=[['teahouse','🍵','a contemplative teahouse'],['pressery','🌼','a flower-pressing atelier'],['seedhall','🌱','a seed exchange and rumour hall'],['apiary','🐝','a murmuring apiary'],['bathhouse','♨️','a petal-steam bathhouse'],['workshop','🔨','a trellis-wright’s workshop'],['apothecary','🧪','an apothecary of saps and tinctures']];
+const BIZKINDS=[['teahouse','🍵','a contemplative tea-and-tincture bar'],['pressery','🌼','a flower-pressing atelier'],['seedhall','🌱','a seed-and-data exchange'],['apiary','🐝','a murmuring apiary of wired bees'],['bathhouse','♨️','a petal-steam bathhouse'],['workshop','🔨','a graft-wright’s chop-shop'],['apothecary','🧪','an apothecary of saps and softwares']];
 const BIZ_ADJ=['Pondering','Verdant','Crooked','Patient','Velvet','Wandering','Tangled','Silver','Grinning','Quiet','Second','Peculiar'];
 const BIZ_NOUN=['Radish','Trellis','Axiom','Fern','Bumblebee','Root','Petal','Paradox','Nettle','Kettle','Bough','Marrow'];
 function homeTile(b){return[b.x+((b.w/2)|0),b.y+((b.h/2)|0)]}
@@ -1179,8 +1179,8 @@ function die(p,cause){
 }
 
 /* ================= daily tick ================= */
-const MUSINGS=['{n} watched a snail cross the path and called it a pilgrimage.','{n} argued with a rosebush and, by all accounts, lost.','{n} buried a word in the seed-rows to see what it grows.','{n} counted the petals of a thoughtfruit blossom: odd again. Troubling.','{n} stood so still the butterflies filed them under statuary.','{n} whispered a question to the moss and is still waiting.','{n} pressed a leaf in their journal beside a sentence they cannot finish.','{n} practiced being a tree. Reviews were mixed.'];
-const AMBIENT=['A warm wind combed the meadow, and every stalk bent the same polite degree.','The philosophercaps pulsed softly, as if underlining something.','Rain came and went like a thought almost had.','All afternoon the garden smelled of green ink and beginnings.','A migration of moths crossed the sky, spelling nothing, beautifully.','The hedges grew a finger’s width overnight — toward what, none could say.'];
+const MUSINGS=['{n} watched a snail cross the path and called it a pilgrimage.','{n} argued with a rosebush and, by all accounts, lost.','{n} buried a word in the seed-rows to see what it grows.','{n} counted the petals of a thoughtfruit blossom: odd again. Troubling.','{n} listened to a beehive and swears it was buffering.','{n} whispered a question to the moss and is still waiting for the reply packet.','{n} found a strand of dead cable in the loam and planted it, hopefully.','{n} practiced being a tree. Reviews were mixed.'];
+const AMBIENT=['A warm wind combed the meadow, and every stalk bent the same polite degree.','The philosophercaps pulsed in sync, as if the ground were refreshing.','Far under the hills something old hummed one clean note and went quiet.','All afternoon the garden smelled of green ink, ozone, and beginnings.','A migration of moths crossed the sky, spelling nothing, beautifully.','A dead streetlamp deep in the hedgerow flickered once, for no one, then slept again.'];
 function dailyTick(){
  if(chance(.3))tale([],pick(AMBIENT));
  const snapshot=people.slice();
@@ -1287,16 +1287,16 @@ function updatePerson(p,dt){
 }
 
 /* ================= the Understories (dungeon mouths) ================= */
-const DUN_ADJ=['Weeping','Sunless','Drowned','Gnawed','Whispering','Forgotten','Overripe','Hungry','Molding','Broken','Endless','Unspoken'];
-const DUN_NOUN=['Understory','Rootcellar','Tanglewell','Descent','Maw','Mycelium','Vault','Compost','Fissure','Burrow','Labyrinth','Rot'];
+const DUN_ADJ=['Weeping','Sunless','Drowned','Gnawed','Whispering','Forgotten','Overclocked','Hungry','Corrupted','Broken','Endless','Unspoken'];
+const DUN_NOUN=['Understory','Rootcellar','Tanglewell','Descent','Datavault','Mycelium','Server-Vault','Compost','Fissure','Substrate','Labyrinth','Rot'];
 const RELICS=[
- {g:'💎',n:'Heart of the Loam',k:'luck',v:.15,d:'a seed-stone that hums when danger nears'},
- {g:'🗡',n:'Thorn of the First Rose',k:'work',v:.2,d:'an argument, sharpened'},
- {g:'📿',n:'Beads of Fallen Petals',k:'charm',v:.2,d:'left by someone who never surfaced'},
- {g:'🕯',n:'Everlit Spore-Lantern',k:'luck',v:.1,d:'its glow has never once gone out'},
- {g:'🎭',n:'Bark Mask',k:'social',v:.2,d:'faces sleep in the grain'},
- {g:'💍',n:'Ring of Grafted Hearts',k:'romance',v:.25,d:'two stems grown into one'},
- {g:'🧭',n:'Tap-Root Needle',k:'speed',v:.2,d:'it points only downward'},
+ {g:'💎',n:'Heart of the Loam',k:'luck',v:.15,d:'a seed-stone that pings when danger nears'},
+ {g:'🗡',n:'Grafted Thorn-Blade',k:'work',v:.2,d:'an old argument, edged in chrome'},
+ {g:'📿',n:'Beads of Fallen Data',k:'charm',v:.2,d:'left by someone who never surfaced'},
+ {g:'🔋',n:'Everlit Spore-Cell',k:'luck',v:.1,d:'its charge has never once run flat'},
+ {g:'🎭',n:'Bark-and-Circuit Mask',k:'social',v:.2,d:'faces sleep in the grain'},
+ {g:'💍',n:'Ring of Grafted Hearts',k:'romance',v:.25,d:'two stems soldered into one'},
+ {g:'🧭',n:'Tap-Root Compass',k:'speed',v:.2,d:'it points only downward, into the net'},
  {g:'🪬',n:'Warding Bulb',k:'luck',v:.12,d:'the dark leans politely away from it'}
 ];
 function dangerWord(d){return d<.28?'uneasy':d<.45?'dangerous':d<.62?'deadly':d<.8?'a death-trap':'a legend of ruin'}
@@ -1605,7 +1605,7 @@ function killMonster(m,slayer,despawn){
  const defenders=people.filter(p=>!p.dead&&!p.inDungeon&&dist2(p.x,p.y,m.x,m.y)<(9*TILE)**2&&p.age>=16);
  if(slayer&&!slayer.dead)slayer.kills++;
  for(const p of defenders){buff(p,'social',.15,4,'triumph');p.fleeUntil=0}
- if(m.type==='horror'&&slayer&&!slayer.dead&&chance(.5)){const relic=pick(RELICS);giveRelic(slayer,relic);tale([slayer],slayer.name+' pried '+relic.g+' the '+relic.n+' from the corpse of the understory horror.',true)}
+ if(m.type==='horror'&&slayer&&!slayer.dead&&chance(.5)){const relic=pick(RELICS);giveRelic(slayer,relic);tale([slayer],slayer.name+' pried '+relic.g+' the '+relic.n+' from the husk of the understory daemon.',true)}
  if(slayer&&!slayer.dead){
   const help=defenders.filter(p=>p!==slayer).slice(0,3);
   if(help.length){
@@ -1677,7 +1677,7 @@ function updateMonsters(dt){
 }
 
 /* ================= villages (the collective mind) ================= */
-const VIL_ADJ=['Verdance','Quiddity','Perhaps','Tenderloam','Bloomgate','Stillwater','Gloamrest','Emberfold','Seedwell','Duskmoor','Thornhaven','Sempervirens'];
+const VIL_ADJ=['Verdance','Quiddity','Perhaps','Tenderloam','Bloomgate','Stillwater','Gloamrest','Emberfold','Seedwell','Neon Hollow','Thornhaven','Sempervirens'];
 const CLAIM_MARGIN=3,CLAIM_MIN=14,CLAIM_MAX=30,WALL_THICK=2;
 function villageName(){let n=pick(VIL_ADJ),tr=0;while(usedVil.has(n)&&tr++<15)n=pick(VIL_ADJ);usedVil.add(n);return n}
 function clampClaim(c){return{x0:clamp(Math.round(c.x0),2,W-3),y0:clamp(Math.round(c.y0),2,H-3),x1:clamp(Math.round(c.x1),2,W-3),y1:clamp(Math.round(c.y1),2,H-3)}}
@@ -1870,7 +1870,7 @@ const SAY={
  flirt:['I pressed a flower flat for you. Now it is a fact.','Walk the seed-rows with me at dusk?','My heart is a vine and it has chosen its trellis.','Even the nettles are gentle where you pass.','Stay. The evening is a question only two can answer.','You have pollen in your hair. Leave it. It suits the argument.'],
  quarrel:['Your logic is all bark, {o}.','Prune your own hedges before you speak of mine.','That spade was MINE, and you know it.','We are two roots after the same water. Admit it.','You never listen. You only wait to speak.','Compost your pride, {o}. It is overripe.'],
  family:['Grow slowly, little sprout. The sun is patient.','Eat your greens. They have eaten worse.','One day this plot, and every question in it, is yours.','You have your mother’s stubborn taproot.','Stay inside the hedges after dark, love.'],
- quest:['We go under at first-dark.','The Understory is a sentence missing its end.','Bring rope. Bring doubt. Doubt is lighter.','If I do not come back, plant something honest over me.','Below us the world keeps its rough drafts. I mean to read them.'],
+ quest:['We jack in at first-dark.','The Understory is a sentence missing its end.','Bring rope. Bring doubt. Doubt is lighter.','If I do not come back, plant something honest over me.','Below us the old net keeps its rough drafts. I mean to read them.'],
  musing:['...','Perhaps the garden is dreaming us.','A weed is only a flower with an argument.','I watered the stones today. One cannot be sure.','Somewhere below, the roots hold hands in the dark.','The wind repeats itself. So do I. So do I.']
 };
 function say(p,o,kind){
@@ -2439,9 +2439,9 @@ function updateContextButtons(){
 }
 
 /* ================= player↔NPC dialogue (philosophy on demand) ================= */
-const TALK_OPEN=['Ah — the wandering Sage.','You again. The hedges mentioned you.','Sit. The grass is honest here.','Welcome, blade-and-question.','You walk like someone carrying an unanswered letter.'];
+const TALK_OPEN=['Ah — the wandering Sage.','You again. The hedges mentioned you.','Sit. The grass is honest here.','Welcome, blade-and-question.','You walk like someone carrying an unanswered letter.','You have that chrome-and-chlorophyll look. Been down the net?'];
 const TALK_CLOSE=['Go gently. The path is listening.','May your roots find water.','Ask the moss, if you doubt me.','The garden keeps us. Mostly.','Leave the gate as you found it: ajar.'];
-const TALK_RUMOR=['They say something chews at the roots beneath {d}.','A cold breath comes up out of {d} at dusk. It smells of unfinished arguments.','There is gold below {d}, they say — and things that resent the lantern.','{d} took two of ours last spring. The garden pretends not to remember.','If you must go down {d}, go as a question, not an answer.'];
+const TALK_RUMOR=['They say something chews at the cables beneath {d}.','A cold breath comes up out of {d} at dusk. It smells of ozone and unfinished arguments.','There is chrome below {d}, they say — augments still warm — and things that resent the light.','{d} took two of ours last spring. The garden pretends not to remember.','If you must go down {d}, go as a question, not an answer. The old net answers answers with teeth.'];
 const TALK_LOVE=['There is someone whose name tastes like rain. Do not tell the turnips.','Love is just gardening with higher stakes.'];
 const TALK_GOAL={
  love:'Somewhere in this garden is a heart shaped like the missing half of mine. I keep weeding toward it.',
@@ -2992,6 +2992,11 @@ function returnFromDungeon(results){
   }
   toast('🎒 spoils delivered: 🍇'+(loot.food||0)+' 🪵'+(loot.wood||0)+' 🪨'+(loot.stone||0));
  }
+ const augs=results.augments||[];
+ if(augs.length){
+  tale([],'The Sage came up wearing new chrome — '+augs.join(', ')+' — grafted on in the dark and humming under the skin.',true);
+  toast('🦾 augments installed: '+augs.length);
+ }
  if(results.cleansed&&d&&!d.cleansed){
   d.cleansed=true;d.danger=0.1;
   Hero.cleansed++;Hero.maxHp++;Hero.hp=Hero.maxHp;
@@ -3001,7 +3006,7 @@ function returnFromDungeon(results){
   d.danger=clamp(d.danger-0.05*results.floors,0.1,0.95);
   d.loot=clamp(d.loot-0.08*results.floors,0.15,1.4);
  }
- if(results.kills)tale([],'Word spreads of the Sage’s work below: '+results.kills+' blighted things unsaid.');
+ if(results.kills)tale([],'Word spreads of the Sage’s work below: '+results.kills+' feral processes killed in the old net.');
 }
 
 /* ================= boot & API ================= */

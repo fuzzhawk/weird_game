@@ -259,7 +259,7 @@ function playerPalette(rng){
 }
 let CREATURES = null;
 function generateCreatures(seedStr){
-  const drawSizes = { slime:40, wisp:34, brute:64, boss:96, player:44 };
+  const drawSizes = { slime:46, wisp:44, brute:64, boss:96, player:44 };
   const out = {};
   for(const kind of ['player','slime','wisp','brute','boss']){
     // the player's SHAPE follows the Hero between worlds; only the colours
@@ -517,7 +517,9 @@ function genWorld(seedStr){
   }
   field=best.field; vgrid=best.vgrid; tileMap=best.tileMap;
   buildTerraces(rng);
-  placeStructures(rng);
+  // no dwellings in the Understory — nobody lives down here, only the dark
+  // and what it hoards. (structures stay empty; terraces still shape the maze.)
+  blockGrid=new Uint8Array(ROWS*COLS); structures=[];
   mainRegion = largestInteriorRegion();
   regionSet = new Set(mainRegion.map(([y,x])=>y*COLS+x));
   variantMap = tileMap.map(row=>row.map(()=>Math.floor(rng()*NUM_VARIANTS)));
@@ -608,7 +610,7 @@ const player = {
 };
 function xpNeed(){ return 5 + (player.level-1)*4; }
 
-let enemies=[], particles=[], slashes=[], floaters=[], drops=[], blooms=[];
+let enemies=[], particles=[], slashes=[], floaters=[], drops=[], blooms=[], treasures=[];
 let npcs=[], boss=null;
 let combo=0, comboT=0, shake=0, hitstop=0, spawnT=2.5, dead=false, deadT=0;
 let questPath=null, pathTimer=0;
@@ -629,57 +631,89 @@ let tilesetReady=false;
 function isFinalFloor(){ return dInfo && floorIdx>=dInfo.depth-1; }
 function dangerMul(){ return 1 + (dInfo?dInfo.danger:0.3)*0.8 + floorIdx*0.18; }
 
+/* ---------- chrome augments (cyberware pulled from the deep) ---------- */
+let augmentsGot=[];   // names of augments claimed this run, for the exit summary
+const AUGMENTS=[
+  {n:'Reflex Coprocessor',g:'⚡',fx(){player.speedMul*=1.12},d:'+12% speed'},
+  {n:'Myomer Filament',   g:'💪',fx(){player.dmg+=0.3},       d:'+blade damage'},
+  {n:'Servo Elbow',       g:'🦾',fx(){player.rangeMul*=1.18}, d:'+reach'},
+  {n:'Fractal Edge',      g:'🌀',fx(){player.arcMul*=1.2},    d:'+wider arc'},
+  {n:'Subdermal Weave',   g:'🛡',fx(){player.maxHp++;player.hp=Math.min(player.maxHp,player.hp+1)}, d:'+1 heart'},
+];
+function grantAugment(x,y){
+  const a=AUGMENTS[(Math.random()*AUGMENTS.length)|0];
+  a.fx(); augmentsGot.push(a.n);
+  floater(x,y-16,a.g+' '+a.n,'#7de3ff'); floater(x,y+2,a.d,'#c9f27d');
+  burst(x,y,'#7de3ff',24,230); SFX.level(); updHud();
+}
+/* ---------- scattered treasure caches ---------- */
+function spawnTreasures(){
+  treasures=[];
+  const rng=mulberry32(hashSeed(worldSeed)^0x7EA51);
+  const n = 7 + floorIdx*2 + Math.round((dInfo?dInfo.danger:0.3)*6);
+  for(let i=0;i<n;i++){
+    let s=null;
+    for(let tries=0;tries<80;tries++){
+      s=randRegionCell(rng, RES*4, player.x, player.y);
+      if(pathFromPlayer(s.x, s.y)) break;
+    }
+    if(!s) continue;
+    const chrome = rng()<0.26;   // ~a quarter hold a chrome augment
+    treasures.push({x:s.x, y:s.y, t:Math.random()*6.28, chrome, got:false});
+  }
+}
+
 /* ---------- keepers & their murky philosophies ---------- */
-const KEEPER_NAMES=['THE OLD ROOT','MOTHER LICHEN','THE PALE AXIOM','BROTHER MULCH','SISTER SPORE','THE UNBLINKING BULB','GRANDFATHER FERN','THE PATIENT MARROW'];
+const KEEPER_NAMES=['THE DEAD ROUTER','MOTHER LICHEN','NULL-9','BROTHER MULCH','SISTER SPORE','THE UNBLINKING BULB','GHOST-IN-THE-FERN','THE PATIENT MARROW'];
 const SCRIPTS={
   cull:{
     intro:[
-      'So. Another surface-thought comes down to be tested.',
-      'This floor has grown a blight of half-formed things — arguments that never finished becoming animals.',
-      'Unsay EIGHT of them. Pruning, too, is a kind of philosophy.',
+      'So. Another surface-thought comes down to be debugged.',
+      'This floor is running feral subroutines — corrupted processes that grew teeth and forgot their purpose.',
+      'Terminate EIGHT of them. Pruning, too, is a kind of philosophy.',
     ],
-    mid:'The blight still mutters. {n} more must be unsaid.',
+    mid:'The corrupted still spawn. {n} more processes must be killed.',
     done:[
       'Quieter. You argue well with that blade of yours.',
-      'Take this — may your heart hold one more wound. ♥',
+      'Take this patch — may your heart hold one more wound. ♥',
     ],
     reward(){ player.maxHp++; player.hp=player.maxHp; },
   },
   blooms:{
     intro:[
       'Light grows down here, where it should not. It hums. It is learning to want.',
-      'Bring me FIVE night-blooms before they finish the thought.',
-      'Do not listen to them on the way back.',
+      'Harvest FIVE datha-blooms before they finish compiling their thought.',
+      'Do not read what scrolls across them on the way back.',
     ],
-    mid:'The blooms glow where the dark grows thickest. {n} remain. Do not listen to them.',
+    mid:'The datha-blooms glow where the dark runs deepest. {n} remain. Do not read them.',
     done:[
-      'Give them here. Yes. They will stop singing soon.',
+      'Jack them in here. Yes. They will stop broadcasting soon.',
       'Your blade will sweep wider now. Consider, later, why that pleases you.',
     ],
     reward(){ player.rangeMul*=1.25; player.arcMul*=1.15; },
   },
   boss:{
     intro:[
-      'Every floor of the world has a thesis. This one’s is large, and angry, and nearly awake.',
-      'Find the heart of this dark and refute it.',
+      'Every floor of the old net has a root process. This one’s is large, and angry, and nearly awake.',
+      'Find the heart of this dark and refute it — hard-kill it at the core.',
       'Follow the skull. All arguments end the same way.',
     ],
-    mid:'It waits in the far murk. Follow the skull on your compass.',
+    mid:'It waits in the far murk, spinning up. Follow the skull on your compass.',
     done:[
-      'Refuted. The floor forgets it ever believed.',
+      'Refuted. The floor forgets it ever believed. Its chrome is yours.',
       'You are becoming quite the counter-example.',
     ],
     reward(){ player.dmg+=0.25; },
   },
 };
 const FINAL_DONE=[
-  'The last word here was yours. The Understory closes its mouth.',
-  'Go up, gardener. Tell the surface it may keep on dreaming.',
+  'The last word here was yours. The Understory closes its port.',
+  'Go up, gardener. Tell the surface it may keep on dreaming — for now.',
 ];
 const IDLE_LINES=[
-  'The dark and I have reached an understanding. You may pass.',
-  'Go up, or go down. Standing still is how roots happen.',
-  'I water nothing, and everything grows anyway. Troubling.',
+  'The dark and I have reached a handshake. You may pass.',
+  'Go up, or go down. Standing still is how roots — and deadlocks — happen.',
+  'I run nothing, and everything executes anyway. Troubling.',
 ];
 
 function questLabel(){
@@ -793,6 +827,7 @@ function startFloor(){
   portalUp={x:us.x,y:us.y,t:Math.random()*6.28};
   portalDown=null;
   trees = trees.filter(t=>Math.hypot(t.x-portalUp.x,t.y-portalUp.y)>RES*1.5);
+  spawnTreasures();
   portalCd=1.5;
   spawnT=2.5;
   player.ifr=1.5;
@@ -969,13 +1004,16 @@ function spawnEnemy(){
   }
 }
 function dropLoot(x,y,fromBig){
+  // the Understory hoards; a kill spills more than it used to
   const r=Math.random();
-  if(r<0.16 && player.hp<player.maxHp) drops.push({x,y,kind:'heart',t:0});
-  else if(r<0.30) drops.push({x,y,kind:'gem',t:0});
-  else if(r<0.30+(fromBig?0.30:0.08)){
+  if(r<0.20 && player.hp<player.maxHp) drops.push({x,y,kind:'heart',t:0});
+  else if(r<0.62) drops.push({x,y,kind:'gem',t:0});
+  else if(r<0.62+(fromBig?0.34:0.12)){
     const kinds=['rage','swift','wide'];
     drops.push({x,y,kind:kinds[Math.floor(Math.random()*3)],t:0});
   }
+  // a second gem from the fat ones
+  if(fromBig && Math.random()<0.6) drops.push({x:x+Math.random()*10-5,y:y+Math.random()*10-5,kind:'gem',t:0});
 }
 function gainXp(n){
   player.xp+=n;
@@ -1009,6 +1047,10 @@ function onKill(e){
     if(questStage===1&&questVariant==='boss'){ questStage=2; SFX.quest(); }
     floater(e.x,e.y-20,'THE HEART IS REFUTED','#ff5d8f');
     shake=18;
+    // the heart always spits out chrome — and a heap of salvage
+    grantAugment(e.x,e.y);
+    lootBag.stone+=4; lootBag.food+=3; lootBag.wood+=3;
+    for(let i=0;i<4;i++) drops.push({x:e.x+Math.random()*24-12,y:e.y+Math.random()*24-12,kind:'gem',t:0});
   }
   updHud();
 }
@@ -1317,6 +1359,25 @@ function update(dt){
     }
   }
   drops=drops.filter(d=>!d.got && d.t<25);
+  // --- treasure caches ---
+  for(const tr of treasures){
+    tr.t+=dt*1.5;
+    if(!tr.got && Math.hypot(tr.x-player.x,tr.y-player.y)<player.r+14){
+      tr.got=true; SFX.pickup();
+      if(tr.chrome){
+        grantAugment(tr.x,tr.y);
+      }else{
+        const haul=2+Math.floor(Math.random()*4);
+        const k=['food','wood','stone'][(Math.random()*3)|0];
+        lootBag[k]+=haul; gainXp(3);
+        burst(tr.x,tr.y,'#ffd166',16,200);
+        floater(tr.x,tr.y,'+'+haul+' salvage','#ffd166');
+        if(Math.random()<0.4) drops.push({x:tr.x,y:tr.y,kind:'gem',t:0});
+      }
+      updHud();
+    }
+  }
+  treasures=treasures.filter(t=>!t.got);
   if(questStage===1&&questVariant==='blooms'){
     for(const b of blooms){
       b.t+=dt*2;
@@ -1524,6 +1585,31 @@ function drawBloom(b){
   ctx.beginPath(); ctx.arc(0,0,3,0,6.28); ctx.fill();
   ctx.restore();
 }
+function drawTreasure(tr){
+  if(tr.got) return;
+  const px=wx(tr.x), py=wy(tr.y);
+  if(px<-30||px>W+30||py<-30||py>H+30) return;
+  const bob=Math.sin(tr.t)*2;
+  const col=tr.chrome?'#7de3ff':'#ffd166';
+  ctx.save(); ctx.translate(px,py+bob);
+  ctx.shadowColor=col; ctx.shadowBlur=12;
+  if(tr.chrome){
+    // a chrome augment cache: rotating cyber-diamond
+    ctx.rotate(tr.t*0.6);
+    ctx.fillStyle='#0a1520'; ctx.strokeStyle=col; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(0,-6); ctx.lineTo(5,0); ctx.lineTo(0,6); ctx.lineTo(-5,0); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.shadowBlur=0; ctx.fillStyle=col;
+    ctx.beginPath(); ctx.arc(0,0,1.6,0,6.28); ctx.fill();
+  }else{
+    // a salvage crate
+    ctx.fillStyle='#3a2c18'; ctx.fillRect(-5,-4,10,8);
+    ctx.fillStyle='#5a4423'; ctx.fillRect(-5,-4,10,2);
+    ctx.shadowBlur=0;
+    ctx.fillStyle=col; ctx.fillRect(-1,-4,2,8); ctx.fillRect(-5,-1,10,2);
+  }
+  ctx.restore();
+}
 function drawPlayerChar(time){
   const blink=player.ifr>0&&Math.floor(time*14)%2===0;
   if(blink) return;
@@ -1683,6 +1769,7 @@ function draw(time){
   }
   drawPortal(portalUp,true);
   drawPortal(portalDown,false);
+  for(const tr of treasures) drawTreasure(tr);
   for(const b of blooms) drawBloom(b);
   for(const d of drops) drawDrop(d);
   const sprites=[];
@@ -1741,6 +1828,7 @@ function syncToHero(){
 function enter(info, onExit){
   dInfo=info; exitCb=onExit; active=true;
   floorIdx=0; lootBag={food:0,wood:0,stone:0}; totalKills=0; cleansedRun=false;
+  augmentsGot=[]; treasures=[];
   stick=null; pending.clear(); mDown=null;
   worldSeed=baseSeed()+'-f0';
   resizeCvs();
@@ -1758,7 +1846,7 @@ function exitDungeon(){
   gamePaused=false; dialogQueue=null;
   $('dDialog').style.display='none';
   $('dTalkBtn').style.display='none';
-  const results={dungeon:dInfo?dInfo.ref:null, loot:lootBag, kills:totalKills, cleansed:cleansedRun, floors:floorIdx+1};
+  const results={dungeon:dInfo?dInfo.ref:null, loot:lootBag, kills:totalKills, cleansed:cleansedRun, floors:floorIdx+1, augments:augmentsGot.slice()};
   const cb=exitCb; exitCb=null;
   if(cb)cb(results);
 }

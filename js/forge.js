@@ -644,28 +644,35 @@ const CFHelp = (function(){
 
   /* ---------- archetype recipes (structure only; colours layered on) ---------- */
   const ARCHETYPES = {
+    // NOTE ON PROPORTIONS: the cast reads best with small, lean heads and a
+    // slim street build — the low end of the head-size / head-roundness /
+    // body-width sliders. Humanoids (player + villagers) are pinned near that
+    // low end; the small monsters are sized up toward the player so they read
+    // as street-level threats, not pests.
     player: (rng)=>{
       const heroish = rng()<0.5 ? CF.PRESETS.Hero : CF.PRESETS.Villager;
       return { size:48, ...heroish,
         cloth: pick(rng,['tunic','shirt','robe']),
         hairType: pick(rng,['wild','swept','topknot','ponytail','bowl','spiky','long']),
         chest: pick(rng,['none','half']),
-        pauldrons: rng()<0.5, boots: rng()<0.5, belt:true,
+        pauldrons: rng()<0.5, boots: rng()<0.5, gauntlets: rng()<0.45, belt:true,
         attackStyle: pick(rng,['slash','stab']),
         tailType:'none', hornType:'none', earType: pick(rng,['none','round']),
+        headSize: -1.5+rng()*0.35, headRound: 0.6+rng()*0.05, bodyW: 2.4+rng()*0.5,
         walkFrames:6, outline:true,
       };
     },
-    slime: (rng)=>({ size:32,
-      bodyW:4.5, bodyH:5.5, taper:-.15, bodyRound:.72, headSize:-0.6, headRound:.95,
+    // small monsters bumped to native 44 so they render close to the player's 48
+    slime: (rng)=>({ size:44,
+      bodyW:4.5, bodyH:5.5, taper:-.15, bodyRound:.72, headSize:-0.9, headRound:.78,
       earType:'none', hornType:'none', tailType: pick(rng,['none','stub']),
       armLen:4, legLen:6, legThick:1.6, footSize:2.0,
       cloth:'none', shoes:false, chest:'none', helmet:'none', hairType:'none',
       tex: pick(rng,['smooth','dither']), texAmt:.5, spots: rng()<0.5,
       snout:0, attackStyle:'stab', walkFrames:4, outline:true, belt:false, belly:true,
     }),
-    wisp: (rng)=>({ size:32,
-      bodyW:2.6, bodyH:6.5, taper:-.2, bodyRound:.6, headSize:-0.2, headRound:.85,
+    wisp: (rng)=>({ size:44,
+      bodyW:2.6, bodyH:6.5, taper:-.2, bodyRound:.6, headSize:-0.6, headRound:.72,
       earType: pick(rng,['fin','pointed']), earSize:3.5, hornType:'none',
       tailType: pick(rng,['spike','long','fluff']), tailSize:6,
       armLen:5, legLen:6.5, legThick:1.4,
@@ -674,7 +681,7 @@ const CFHelp = (function(){
       snout: rng()<0.5?1.5:0, attackStyle:'cast', walkFrames:6, outline:true, belt:false,
     }),
     brute: (rng)=>({ size:48,
-      bodyW:5.0, bodyH:8, taper:-.15, bodyRound:.55, headSize:0.6, headRound:.8,
+      bodyW:5.0, bodyH:8, taper:-.15, bodyRound:.55, headSize:0.1, headRound:.72,
       earType: pick(rng,['round','pointed']), earSize:3,
       hornType: pick(rng,['straight','curved','antler']), hornSize:4.5,
       tailType: pick(rng,['fluff','long','none']), tailSize:6,
@@ -685,7 +692,7 @@ const CFHelp = (function(){
       attackStyle: pick(rng,['claw','slash']), walkFrames:6, outline:true, belt:false,
     }),
     boss: (rng)=>({ size:64,
-      bodyW:5.25, bodyH:9, taper:-.15, bodyRound:.5, headSize:0.8, headRound:.78,
+      bodyW:5.25, bodyH:9, taper:-.15, bodyRound:.5, headSize:0.2, headRound:.72,
       earType: pick(rng,['pointed','fin']), earSize:4,
       hornType: pick(rng,['curved','antler','straight']), hornSize:6,
       tailType: pick(rng,['spike','fluff','long']), tailSize:7,
@@ -708,13 +715,17 @@ const CFHelp = (function(){
     P.hairHue = Math.round(rng()*360);
     P.clothHue = Math.round(rng()*360);
     P.hue = 18+Math.round(rng()*30);          // warm skin family
-    P.sat = 26+Math.round(rng()*26);
+    P.sat = 34+Math.round(rng()*40);          // neon-leaning street wardrobe
     P.lit = 42+Math.round(rng()*30);
     P.hue2 = P.hue+8;
     P.accent = Math.round(rng()*360);
     P.belt = rng()<0.6;
-    P.bodyW = 3.5+rng()*1.2;
-    P.headSize = 0.3+rng()*0.7;
+    P.gauntlets = rng()<0.4;                   // a little chrome
+    P.boots = rng()<0.5;
+    // pinned near the low end of the sliders that read best: small lean head, slim build
+    P.bodyW = 2.3+rng()*0.6;
+    P.headSize = -1.5+rng()*0.4;
+    P.headRound = 0.6+rng()*0.06;
     if(opts.elder){ P.hairHue=40; P.hairType=pick(rng,['long','bowl','tuft','topknot']); P.cloth='robe'; }
     return P;
   }
