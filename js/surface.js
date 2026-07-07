@@ -41,7 +41,7 @@ let struct,farmGrid,farmTimer;
 let farmTiles=new Set();
 let region,regionsDirty=true;
 let people=[],allById=new Map(),buildings=[];
-let dungeons=[],expeditions=[],monsters=[],villages=[];
+let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[];
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
 let cam={x:W*TILE/2,y:H*TILE/2,z:1.4};
 let selected=null,follow=false,cine=false;
@@ -321,6 +321,9 @@ function processBakeQueue(){
   }else if(job.kind==='mon'){
    const sizes={grub:48,lurker:48,horror:48};
    surfMon[job.type]=CFHelp.bakeCreature(surfMonsterParams(job.type),sizes[job.type],['walk','attack']);
+  }else if(job.kind==='animal'){
+   const a=job.a;if(a.dead)return;
+   a.sprite=CFHelp.bakeCreature(a.made.params,48,['walk','attack']);
   }
  }catch(e){/* a failed bake falls back to the painted sprite */}
 }
@@ -432,6 +435,8 @@ function genWorld(){
  }
  salvage=[];
  for(let i=0;i<relicTarget();i++)spawnSalvage();
+ animals=[];
+ for(let i=0;i<animalTarget();i++)spawnAnimal();
  refreshChron();
 }
 // relics surface as the world industrialises: few in the forest, many in the waste
@@ -1272,6 +1277,12 @@ function dailyTick(){
   if(salvage.length<tgt&&chance(.5)){spawnSalvage();if(salvage.length&&chance(.3))tale([],'Something old works its way up through the soil, catching the light.')}
   else if(salvage.length>tgt+3&&eraGreen()>0.6&&chance(.25))salvage.pop();
  }
+ // fauna wax in green ages and thin out toward the waste
+ {
+  const at=animalTarget();
+  if(animals.length<at&&chance(.5))spawnAnimal();
+  else if(animals.length>at+2&&chance(.15)){const a=animals[ri(0,animals.length-1)];if(a)a.dead=true}
+ }
  // the age turns, and the land with it
  eraRebuildCheck();
  if(surfEra&&chance(.05))tale([],pick(surfEra.lines));
@@ -1297,6 +1308,7 @@ function stepSim(dt){
  for(const d of dungeons)if(d.restock&&simMin>=d.restock){d.loot=clamp(d.loot+0.4,0,1.3);d.danger=d.cleansed?d.danger:clamp(d.danger-0.04,.2,.95);d.restock=0}
  processExpeditions();
  updateMonsters(dt);
+ updateAnimals(dt);
  ripenAll(dt);
  for(let i=people.length-1;i>=0;i--){
   const p=people[i];
@@ -1763,6 +1775,144 @@ function updateMonsters(dt){
     if(spawned>1)tale([],'A warband came clawing up out of '+d.name+', making straight for the hedge-walls of '+pick(walled).name+'.',true);}
   }
  }
+}
+
+/* ================= fauna (the Animal Forge) ================= */
+// there is more life in a green age than a grey one
+function animalTarget(){ return Math.round(2 + eraGreen()*12); }
+function spawnAnimal(key,made){
+ let spot=null;
+ for(let t=0;t<40&&!spot;t++){
+  const[x,y]=randOpenTile();
+  if(bld[idx(x,y)]>=0||nodeAt.has(idx(x,y))||dungeonAt(x,y))continue;
+  if(dist2(x*TILE,y*TILE,hero.x,hero.y)<8*TILE*8*TILE)continue;
+  spot=[x,y];
+ }
+ if(!spot)return null;
+ // natural spawns skew heavily toward prey — a few hunters keep it lively
+ if(!key&&!made){const bag=['deer','deer','deer','rabbit','rabbit','rabbit','fowl','fowl','boar','boar','fox','wolf'];key=pick(bag)}
+ made=made||AF.make(key,seed+'-'+nextId+'-'+((R()*1e9)|0));
+ const s=made.spec;
+ const a={id:nextId++,made,key:made.key,spec:s,name:made.name,temper:s.temper,
+  x:spot[0]*TILE+TILE/2,y:spot[1]*TILE+TILE/2,fx:1,dirIdx:0,animClock:R()*4,anim:'walk',
+  hp:s.hp,maxhp:s.hp,dmg:s.dmg,spd:s.spd,sizeScale:made.sizeScale,dead:false,
+  wgoal:null,wgoalT:0,atkCd:0,fleeUntil:0,em:null,sprite:null};
+ animals.push(a);
+ bakeQueue.push({kind:'animal',a});
+ return a;
+}
+function emoteA(a,g){a.em={g,until:performance.now()+1600}}
+function moveCritter(a,dx,dy){
+ const nx=a.x+dx,ny=a.y+dy;
+ if(walkable((nx/TILE)|0,(ny/TILE)|0)){a.x=nx;a.y=ny}
+ else if(walkable((nx/TILE)|0,(a.y/TILE)|0))a.x=nx;
+ else if(walkable((a.x/TILE)|0,(ny/TILE)|0))a.y=ny;
+ else{const o=nearOpen((a.x/TILE)|0,(a.y/TILE)|0);if(o){a.x+=Math.sign(o[0]*TILE+TILE/2-a.x)*0.6;a.y+=Math.sign(o[1]*TILE+TILE/2-a.y)*0.6}}
+ a.x=clamp(a.x,TILE,W*TILE-TILE);a.y=clamp(a.y,TILE,H*TILE-TILE);
+}
+function steer(a,tx,ty,dt,mul){
+ const dx=tx-a.x,dy=ty-a.y,L=Math.hypot(dx,dy)||1;
+ const step=WALK*a.spd*(mul||1)*dt;
+ moveCritter(a,dx/L*step,dy/L*step);
+ if(Math.abs(dx)>0.4)a.fx=dx>0?1:-1;
+ a.dirIdx=CFHelp.angToDir(Math.atan2(dy,dx));
+ a.anim='walk';
+}
+function fleeCritter(a,fx,fy,dt){
+ const ax=a.x-fx,ay=a.y-fy,L=Math.hypot(ax,ay)||1;
+ steer(a,a.x+ax/L*6*TILE,a.y+ay/L*6*TILE,dt,1.35);
+}
+function wanderCritter(a,dt){
+ if(!a.wgoal||simMin>=a.wgoalT||dist2(a.x,a.y,a.wgoal[0],a.wgoal[1])<(TILE*0.8)**2){
+  if(chance(.45)){a.wgoal=null;a.wgoalT=simMin+rf(15,55)}  // graze/idle
+  else{const tx=clamp(((a.x/TILE)|0)+ri(-6,6),1,W-2),ty=clamp(((a.y/TILE)|0)+ri(-6,6),1,H-2);
+   if(walkable(tx,ty)){a.wgoal=[tx*TILE+TILE/2,ty*TILE+TILE/2];a.wgoalT=simMin+rf(30,80)}}
+ }
+ if(a.wgoal&&simMin<a.wgoalT)steer(a,a.wgoal[0],a.wgoal[1],dt,0.55);
+ else a.anim='walk';
+}
+function biteAnimalTarget(a,tgt){
+ emoteA(a,a.temper==='predator'?'🦷':'💢');
+ if(tgt.isHero){hurtHero({name:a.spec.label});return}
+ tgt.hp-=a.dmg; tgt.fleeUntil=simMin+240; emoteA(tgt,'💥');
+ if(tgt.hp<=0)killAnimal(tgt,a);
+ else a.spd=a.spec.spd; // keep chasing
+}
+function killAnimal(a,slayer){
+ if(a.dead)return; a.dead=true;
+ const i=animals.indexOf(a);if(i>=0)animals.splice(i,1);
+ if(slayer&&slayer!==hero&&slayer.temper==='predator'){slayer.hp=Math.min(slayer.maxhp,slayer.hp+6);slayer.wgoal=null}
+}
+function heroKillAnimal(a){
+ killAnimal(a,hero);
+ const xp={rabbit:1,fowl:1,deer:2,fox:2,boar:3,wolf:3}[a.key]||1;
+ const ups=heroGainXp(xp);
+ if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
+ // a felled animal feeds the nearest table
+ if(chance(.7))depositResource('food',ri(1,3),a.x,a.y);
+ if(chance(.25))tale([],'The Sage took a '+a.spec.label+' for the pot.');
+}
+function nearestPredator(a,range){
+ let best=null,bd=(range*TILE)**2;
+ for(const o of animals)if(o!==a&&!o.dead&&o.temper==='predator'){const d=dist2(a.x,a.y,o.x,o.y);if(d<bd){bd=d;best=o}}
+ for(const m of monsters){const d=dist2(a.x,a.y,m.x,m.y);if(d<bd){bd=d;best=m}}
+ if(heroTargetable()){const d=dist2(a.x,a.y,hero.x,hero.y);if(d<bd){bd=d;best={x:hero.x,y:hero.y,isHero:true}}}
+ return best;
+}
+function updateAnimal(a,dt){
+ if(a.atkCd>0)a.atkCd-=dt;
+ a.animClock+=dt*0.12;
+ a.anim='walk';
+ // freshly-hurt prey just runs
+ if(a.temper!=='predator'&&a.fleeUntil>simMin){
+  const thr=nearestPredator(a,14)||{x:hero.x,y:hero.y};
+  fleeCritter(a,thr.x,thr.y,dt);return;
+ }
+ if(a.temper==='predator'){
+  // hunt the nearest prey animal; the bold also stalk the Sage
+  let prey=null,pd=(a.spec.aggro*TILE)**2;
+  for(const o of animals)if(o!==a&&!o.dead&&o.temper==='prey'){const d=dist2(a.x,a.y,o.x,o.y);if(d<pd){pd=d;prey=o}}
+  let tgt=prey;
+  if(!tgt&&a.spec.bold&&heroTargetable()){
+   const d=dist2(a.x,a.y,hero.x,hero.y);
+   if(d<(a.spec.aggro*TILE)**2)tgt={x:hero.x,y:hero.y,isHero:true};
+  }
+  if(tgt){
+   if(dist2(a.x,a.y,tgt.x,tgt.y)<(TILE*1.2)**2){
+    a.anim='attack';a.fx=tgt.x>a.x?1:-1;a.dirIdx=CFHelp.angToDir(Math.atan2(tgt.y-a.y,tgt.x-a.x));
+    if(a.atkCd<=0){a.atkCd=18;biteAnimalTarget(a,tgt)}
+   }else steer(a,tgt.x,tgt.y,dt,1.2);
+   return;
+  }
+ }else{
+  // prey / neutral: flee a nearby threat (neutral has a short fuse and holds ground more)
+  const thr=nearestPredator(a,a.temper==='neutral'?4:a.spec.flee);
+  if(thr){
+   if(a.temper==='neutral'&&thr.isHero&&dist2(a.x,a.y,thr.x,thr.y)<(2.6*TILE)**2){
+    // a cornered boar gores
+    if(dist2(a.x,a.y,thr.x,thr.y)<(TILE*1.2)**2){a.anim='attack';if(a.atkCd<=0){a.atkCd=26;biteAnimalTarget(a,thr)}}
+    else steer(a,thr.x,thr.y,dt,1.1);
+    return;
+   }
+   fleeCritter(a,thr.x,thr.y,dt);return;
+  }
+ }
+ wanderCritter(a,dt);
+}
+function updateAnimals(dt){
+ for(let i=animals.length-1;i>=0;i--){const a=animals[i];if(a.dead){animals.splice(i,1);continue}updateAnimal(a,dt)}
+}
+function drawAnimal(c,a,t){
+ const px=a.x,py=a.y,s=a.sizeScale;
+ c.fillStyle='rgba(0,0,0,0.30)';c.beginPath();c.ellipse(px,py+2,6*s,2.4*s,0,0,7);c.fill();
+ if(a.sprite){
+  const anim=(a.anim==='attack'&&a.sprite.FRAMES.attack)?'attack':'walk';
+  CFHelp.drawCreatureSprite(c,a.sprite,px,py+3,a.dirIdx||0,anim,a.animClock,s);
+ }else{
+  c.fillStyle='#8a7a5a';c.beginPath();c.ellipse(px,py-3,5*s,4*s,0,0,7);c.fill();
+ }
+ if(a.hp<a.maxhp){c.fillStyle='#1b1626';c.fillRect(px-7,py-16,14,2);c.fillStyle=a.temper==='predator'?'#d24a5a':'#6fa04f';c.fillRect(px-7,py-16,14*clamp(a.hp/a.maxhp,0,1),2)}
+ if(a.em&&a.em.until>performance.now()){c.font='8px system-ui';c.textAlign='center';c.fillText(a.em.g,px,py-18)}
 }
 
 /* ================= villages (the collective mind) ================= */
@@ -2405,6 +2555,10 @@ function draw(t){
   else if(p.courting&&t%1400<700)ctx.fillText('❤',0,-18);
   ctx.restore();
  }}));
+ for(const a of animals){
+  if(a.x/TILE<vx0-2||a.x/TILE>vx1+2||a.y/TILE<vy0-2||a.y/TILE>vy1+2)continue;
+  drawables.push({y:a.y,f:()=>drawAnimal(ctx,a,t)});
+ }
  if(!hero.down)drawables.push({y:hero.y,f:()=>drawHero(t)});
  drawables.sort((a,b)=>a.y-b.y);
  for(const d of drawables)d.f();
@@ -2601,6 +2755,18 @@ function updateHero(rdt){
       }
     }
    }
+   // slashes vs animals (prey scatter, predators can be culled)
+   for(const a of animals.slice()){
+    if(a.dead||s.hit.has(a))continue;
+    const dx=a.x-hero.x,dy=a.y-hero.y,d=Math.hypot(dx,dy);
+    if(d<s.range+8){
+     let da=Math.atan2(dy,dx)-s.ang;da=Math.atan2(Math.sin(da),Math.cos(da));
+     if(Math.abs(da)<s.arc/2){
+      s.hit.add(a);a.hp-=(16+Hero.level*4)*Hero.dmg;a.fleeUntil=simMin+400;emoteA(a,'💥');
+      if(a.hp<=0)heroKillAnimal(a);
+     }
+    }
+   }
   }
  }
  heroSlashes=heroSlashes.filter(s=>s.t<0.25);
@@ -2778,6 +2944,13 @@ function tapAt(sx,sy){
   if(d<bmd&&d<30*30){bmd=d;bm=m}
  }
  if(bm){if(!cine)inspectMonster(bm);return}
+ let ba=null,bad=1e18;
+ for(const a of animals){
+  const asx=(a.x-cam.x)*cam.z+cw/2,asy=(a.y-6-cam.y)*cam.z+ch/2;
+  const d=dist2(sx,sy,asx,asy);
+  if(d<bad&&d<28*28){bad=d;ba=a}
+ }
+ if(ba){if(!cine)inspectAnimal(ba);return}
  if(cine)return;
  const tx=(wx/TILE)|0,ty=(wy/TILE)|0;
  if(!inB(tx,ty)){closeInspect();return}
@@ -2886,6 +3059,13 @@ function inspectMonster(m){
  lastInspect={type:'monster',obj:m};
  const rows=[['Health',Math.max(0,Math.round(m.hp))+' / '+m.maxhp],['Menace',m.dmg+' harm per strike'],['Rose from',m.home.name],['Hunting',m.target?(m.target.isHero?'the Sage':(!m.target.dead?m.target.name:'nothing yet')):'nothing yet']];
  showInspect(m.g,'A '+m.name,'a thing from the Understory',rows,'It should not be up here in the light. A quick swipe of the finger is a blade — or someone brave will have to put it down.');
+}
+const ANIMAL_GLYPH={deer:'🦌',rabbit:'🐇',fowl:'🐓',boar:'🐗',fox:'🦊',wolf:'🐺'};
+function inspectAnimal(a){
+ lastInspect={type:'animal',obj:a};
+ const temper={prey:'skittish — flees anything with teeth',neutral:'even-tempered, but it gores what corners it',predator:'a hunter; watch your ankles'}[a.temper];
+ const rows=[['Health',Math.max(0,Math.round(a.hp))+' / '+a.maxhp],['Temperament',a.temper],['Bite',a.dmg?a.dmg+' harm':'harmless'],['Doing',a.anim==='attack'?'attacking':a.fleeUntil>simMin?'fleeing':'wandering']];
+ showInspect(ANIMAL_GLYPH[a.key]||'🐾',a.name+' the '+a.spec.label,'wild fauna',rows,temper+'. The Animal Forge dreamed it up out of the green.');
 }
 function inspectVillage(v){
  lastInspect={type:'village',obj:v};
@@ -3163,7 +3343,7 @@ function frame(t){
  if(t-uiT>(cine?260:450)){
   uiT=t;
   $('clock').textContent='Day '+cday()+' · '+(surfEra?surfEra.name:phase());
-  $('pop').textContent='👥 '+people.length+(monsters.length?' · 👹'+monsters.length:'');
+  $('pop').textContent='👥 '+people.length+(animals.length?' · 🐾'+animals.length:'')+(monsters.length?' · 👹'+monsters.length:'');
   $('hearts').textContent=speedIdx>=2?'🧘 the Sage meditates':heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
   if(cine&&selected)updateCine();
   if(selected&&!$('charPanel').classList.contains('hidden')){
@@ -3271,7 +3451,16 @@ return {
   rerollFlora:()=>{bakeFlora('garden-'+seed+'-'+((Math.random()*1e6)|0));buildTerrainLayer();repaintDynAll();toast('The flora reconsiders its whole aesthetic.')},
   era:()=>eraState(),
   eraStats:()=>({green:eraGreen(),salvage:salvage.length,relicTarget:relicTarget(),
+    animals:animals.length,animalTarget:animalTarget(),
     nodeFood:nodes.filter(n=>n.yield==='food').reduce((a,n)=>a+n.amt,0)}),
+  // ---- Animal Forge ----
+  AF,
+  animals:()=>animals,
+  animalCount:()=>animals.length,
+  spawnAnimal:(key)=>spawnAnimal(key),
+  forgeAnimal:()=>{const made=AF.make(null,'forge-'+((Math.random()*1e9)|0));made._preview=CFHelp.bakeCreature(made.params,48,['walk']);return made},
+  spawnAnimalMade:(made)=>spawnAnimal(made&&made.key,made),
+  populateFauna:()=>{const at=animalTarget();let n=0;while(animals.length<at&&n++<40)if(!spawnAnimal())break;toast('The green fills with life.')},
   tileStyle:()=>({name:surfStyle&&surfStyle.name,edge:surfStyle&&surfStyle.edge}),
   advanceEra:()=>{eraOffset+=ERA_SEG_DAYS;lastEraBucket=-999;buildTerrainLayer();repaintDynAll();const es=eraState();toast('The age turns → '+es.name)},
   rerollTiles:()=>{tileSalt=(Math.random()*1e6)|0;buildTerrainLayer();repaintDynAll();toast('The ground reconsiders its texture. ('+surfStyle.name+' · '+surfStyle.edge+' edge)')},

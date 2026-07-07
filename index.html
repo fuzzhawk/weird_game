@@ -163,6 +163,9 @@ button:active{transform:translateY(1px)}
 #edForgeName{color:#37e6ff;font-weight:bold;font-size:13px;letter-spacing:.5px}
 #edForgeSkill{color:#a6d46a;font-size:11px;margin-top:2px}
 #edForgeDesc{color:#7a9a6f;font-size:10px;margin-top:3px;line-height:1.4}
+#edAnimalCanvas{width:56px;height:56px;image-rendering:pixelated;background:#22301a;border:1px solid #2c4022;border-radius:6px;flex:0 0 auto}
+#edAnimalName{color:#cfe37a;font-weight:bold;font-size:13px;letter-spacing:.5px}
+#edAnimalTemper{color:#a6d46a;font-size:11px;margin-top:2px}
 </style>
 </head>
 <body>
@@ -280,6 +283,18 @@ button:active{transform:translateY(1px)}
     </div>
     <div id="edForgeBtns"></div>
   </div>
+  <div class="grp" id="edAnimalGroup">
+    <div class="grpTitle">Animal Forge — generate fauna</div>
+    <div class="forgerow">
+      <canvas id="edAnimalCanvas" width="56" height="56"></canvas>
+      <div class="forgemeta">
+        <div id="edAnimalName"></div>
+        <div id="edAnimalTemper"></div>
+      </div>
+    </div>
+    <div id="edAnimalBtns"></div>
+    <div id="edAnimalSpecies"></div>
+  </div>
   <div class="grp" id="edSelected"></div>
 </div>
 
@@ -288,6 +303,7 @@ button:active{transform:translateY(1px)}
 <script src="js/forge.js"></script>
 <script src="js/plants.js"></script>
 <script src="js/relics.js"></script>
+<script src="js/animals.js"></script>
 <script src="js/surface.js"></script>
 <script src="js/dungeon.js"></script>
 <script src="js/editor.js"></script>

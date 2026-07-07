@@ -45,6 +45,18 @@ function drawForgePreview(){
   $('edForgeDesc').textContent=forgePreview.d;
 }
 function reforge(){ forgePreview=A().forgeRelic(); drawForgePreview(); }
+let animalPreview=null;
+function drawAnimalPreview(){
+  const cv=$('edAnimalCanvas'); if(!cv||!animalPreview||!animalPreview._preview) return;
+  const c=cv.getContext('2d'); c.imageSmoothingEnabled=false; c.clearRect(0,0,cv.width,cv.height);
+  const F=animalPreview._preview.FRAMES.walk[0], n=F.length;
+  const img=F[Math.floor(performance.now()*0.006)%n];
+  const s=(animalPreview.sizeScale||1)*1.05, w=img.width*s, h=img.height*s;
+  c.drawImage(img,(cv.width-w)/2,(cv.height-h)/2,w,h);
+  $('edAnimalName').textContent=animalPreview.name+' the '+animalPreview.spec.label;
+  $('edAnimalTemper').textContent=animalPreview.spec.temper+(animalPreview.spec.dmg?' · bite '+animalPreview.spec.dmg:' · harmless');
+}
+function reforgeAnimal(){ animalPreview=A().forgeAnimal(); drawAnimalPreview(); }
 function refresh(){
   if(!open)return;
   const era=A().era?A().era():null, ts=A().tileStyle?A().tileStyle():null;
@@ -57,6 +69,7 @@ function refresh(){
       +(ts?' · tiles: '+ts.name+' / '+ts.edge+' edge':''):'');
   $('edPeaceBtn').textContent=A().peaceful?'☮ Peace: ON':'☮ Peace: off';
   drawForgePreview();
+  drawAnimalPreview();
   renderSelected();
 }
 function renderSelected(){
@@ -177,6 +190,20 @@ function init(){
     btn('📡 Scatter salvage in the world',()=>A().scatterSalvage())
   ));
   drawForgePreview();
+  // --- Animal Forge group ---
+  animalPreview=A().forgeAnimal();
+  $('edAnimalBtns').appendChild(row(
+    btn('🎲 Reforge',()=>reforgeAnimal(),'big')
+  ));
+  $('edAnimalBtns').appendChild(row(
+    btn('🐾 Release into the world',()=>{A().spawnAnimalMade(animalPreview);reforgeAnimal()}),
+    btn('🌿 Populate fauna',()=>A().populateFauna())
+  ));
+  const glyphs={deer:'🦌',rabbit:'🐇',fowl:'🐓',boar:'🐗',fox:'🦊',wolf:'🐺'};
+  const sp=$('edAnimalSpecies'); const chips=[];
+  for(const k of A().AF.KEYS) chips.push(btn((glyphs[k]||'🐾')+' '+k,()=>A().spawnAnimal(k)));
+  sp.appendChild(row(...chips));
+  drawAnimalPreview();
 }
 return {init,setOpen,get open(){return open}};
 })();

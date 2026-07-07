@@ -24,6 +24,13 @@ A unified game built from the four prototypes in this repo:
   it — the Sage *and* NPCs. Relics turn up as dungeon rewards, as surface
   salvage caches the Sage walks over, and can be generated & gifted by hand
   from the Gardener's Bench.
+- **Animal Forge** (`js/animals.js`, new) → a procedural generator for
+  **fauna** (deer, rabbit, fowl, boar, fox, wolf), built as Creature-Forge
+  "beast" recipes with a **temperament** driving a simple AI: prey **wander &
+  flee**, predators **hunt**, and a cornered boar **gores**. Fauna populate the
+  surface (more in green ages, fewer in the waste), can be inspected, are
+  huntable by the Sage, and can be generated / released from the Gardener's
+  Bench.
 
 ## Play
 
@@ -74,6 +81,7 @@ flora; walk over one to install it.
 | `js/forge.js` | Creature Forge sprite engine + baking bridge (CFHelp) |
 | `js/plants.js` | Plant Forge flora engine + baking helper |
 | `js/relics.js` | Tech Forge — procedural tech-relic sprite generator + relic catalog |
+| `js/animals.js` | Animal Forge — procedural fauna species (recipes + temperaments) |
 | `js/surface.js` | the surface garden sim (Hollowlight adapted) |
 | `js/dungeon.js` | the Understory action floors (Grove & Blade adapted) |
 | `js/editor.js` | the Gardener's Bench (sim edit window) |
