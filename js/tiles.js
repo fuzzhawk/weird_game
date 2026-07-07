@@ -121,7 +121,9 @@ function edgeMask(res, corners, style){
 }
 
 /* ---------- palettes from a grass + dirt hex ---------- */
-function makePalettes(grassHex, dirtHex){
+function makePalettes(grassHex, dirtHex, opts){
+  opts=opts||{};
+  const rockLift = (opts.rockLift!==undefined)?opts.rockLift:0.18;  // how far rock is lifted above the dirt tone
   const low={ grassBase:hexToRgb(grassHex), grassLight:shade(grassHex,0.22), grassDark:shade(grassHex,-0.32),
               dirtBase:hexToRgb(dirtHex),  dirtLight:shade(dirtHex,0.24),  dirtDark:shade(dirtHex,-0.42) };
   const gh2=shade(grassHex,0.20); const ghHex='#'+gh2.map(v=>v.toString(16).padStart(2,'0')).join('');
@@ -130,7 +132,7 @@ function makePalettes(grassHex, dirtHex){
   const [dr,dg,db]=hexToRgb(dirtHex); const [dhh,ds,dl]=rgbToHsl(dr,dg,db);
   const [gr,gg,gb]=hexToRgb(grassHex); const [gh]=rgbToHsl(gr,gg,gb);
   const hue=dhh+(((gh-dhh+1.5)%1)-0.5)*0.15;
-  const rockBase=hslToHex((hue+1)%1, Math.max(0.08,ds*0.55), Math.min(0.44,dl+0.18));
+  const rockBase=hslToHex((hue+1)%1, Math.max(0.08,ds*0.55), Math.min(0.44,dl+rockLift));
   const rock={ base:hexToRgb(rockBase), dark:shade(rockBase,-0.30), light:shade(rockBase,0.20), deep:shade(rockBase,-0.5) };
   return {low, high, rock};
 }

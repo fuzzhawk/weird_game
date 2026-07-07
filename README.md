@@ -52,9 +52,13 @@ village granary.
 **Eras.** The surface world slowly cycles between a lush medieval forest and a
 sci-fi urban wasteland and back — a full ping-pong takes ~1000 days. As the age
 turns (The Verdant Age → The Age of Smoke → The Grey Age → The Neon Waste →
-…back), the terrain palette, texture, and edge style morph, plant life thins
-out toward the wasteland, and the current age shows in the top bar. The
-Gardener's Bench can turn the age or reroll the ground on demand.
+…back), the terrain palette, texture, and edge style morph (open ground stays
+light and blocked bramble stays dark, so walkable vs solid always reads),
+plants **wither and die back** toward the wasteland (nodes crossfade to dry
+husks, food grows scarce) and green again as the forest returns, and **relics
+surface** as the world industrialises (few in the forest, many in the waste).
+The current age shows in the top bar; the Gardener's Bench can turn the age or
+reroll the ground on demand.
 
 **Relics on the landscape.** Tech-Forge relics are scattered across the world
 as detailed generated sprites (with glow halos) at the same fidelity as the
