@@ -75,17 +75,49 @@ function sampleQuadrant(px,py,res,c){
   const left=px<res/2, top=py<res/2;
   return (top?(left?c.NW:c.NE):(left?c.SW:c.SE))?1:0;
 }
-function roundedFieldMask(res, corners, radius){
+const diamCache={};
+function diamondOffsets(r){ if(diamCache[r])return diamCache[r];
+  const offs=[]; for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++) if(Math.abs(dx)+Math.abs(dy)<=r) offs.push([dx,dy]);
+  return diamCache[r]=offs; }
+function morphMask(res, corners, offs){
   const base=new Uint8Array(res*res);
   for(let y=0;y<res;y++)for(let x=0;x<res;x++) base[y*res+x]=sampleQuadrant(x,y,res,corners);
-  if(radius<=0)return base;
-  const offs=diskOffsets(radius);
   const samp=(arr,x,y)=>(x>=0&&x<res&&y>=0&&y<res)?arr[y*res+x]:sampleQuadrant(x,y,res,corners);
   const erode=arr=>{const o=new Uint8Array(res*res);
     for(let y=0;y<res;y++)for(let x=0;x<res;x++){let a=1;for(const[dx,dy]of offs){if(!samp(arr,x+dx,y+dy)){a=0;break}}o[y*res+x]=a}return o;};
   const dil=arr=>{const o=new Uint8Array(res*res);
     for(let y=0;y<res;y++)for(let x=0;x<res;x++){let a=0;for(const[dx,dy]of offs){if(samp(arr,x+dx,y+dy)){a=1;break}}o[y*res+x]=a}return o;};
   let m=dil(erode(base)); m=erode(dil(m)); return m;
+}
+// original rounded (organic disk) edge — kept for back-compat callers
+function roundedFieldMask(res, corners, radius){
+  if(radius<=0){ const b=new Uint8Array(res*res);
+    for(let y=0;y<res;y++)for(let x=0;x<res;x++) b[y*res+x]=sampleQuadrant(x,y,res,corners); return b; }
+  return morphMask(res, corners, diskOffsets(radius));
+}
+const EDGE_NAMES=['rounded','sharp','beveled','rough'];
+// build a mask honouring the style's EDGE MODE:
+//   sharp    — hard blocky corners (no smoothing)
+//   rounded  — organic disk-rounded (forest)
+//   beveled  — 45° chamfered corners via a diamond kernel (masonry/urban)
+//   rough    — rounded then noise-jittered along the boundary (rubble/wasteland)
+function edgeMask(res, corners, style){
+  const mode=(style&&style.edge)||'rounded', r=(style&&style.roundRadius)||2;
+  if(mode==='sharp'){ const b=new Uint8Array(res*res);
+    for(let y=0;y<res;y++)for(let x=0;x<res;x++) b[y*res+x]=sampleQuadrant(x,y,res,corners); return b; }
+  let m = (mode==='beveled') ? morphMask(res, corners, diamondOffsets(r))
+                             : morphMask(res, corners, diskOffsets(Math.max(1, mode==='rough'?r-1:r)));
+  if(mode==='rough'){
+    const seed=(style.grainSeed||0)|0, out=new Uint8Array(m);
+    for(let y=0;y<res;y++)for(let x=0;x<res;x++){
+      const i=y*res+x, v=m[i];
+      // only jitter boundary pixels (a 4-neighbour differs)
+      const edge=(x>0&&m[i-1]!==v)||(x<res-1&&m[i+1]!==v)||(y>0&&m[i-res]!==v)||(y<res-1&&m[i+res]!==v);
+      if(edge && ihash(x,y,seed^0x5AB1E)<0.4) out[i]=v?0:1;
+    }
+    return out;
+  }
+  return m;
 }
 
 /* ---------- palettes from a grass + dirt hex ---------- */
@@ -104,11 +136,12 @@ function makePalettes(grassHex, dirtHex){
 }
 
 /* ---------- STYLE: the per-world texture personality ---------- */
-const STYLE_NAMES=['speckle','mottle','striate','cracked','woven','pebbled'];
+const STYLE_NAMES=['speckle','mottle','striate','cracked','woven','pebbled','checker','gradient','dither'];
 function deriveStyle(seedStr){
   const rng=mulberry32(hashStr(String(seedStr))^0x7A11E5);
   return {
     name: STYLE_NAMES[(rng()*STYLE_NAMES.length)|0],
+    edge: EDGE_NAMES[(rng()*EDGE_NAMES.length)|0],
     texScale: 3.0 + rng()*7.0,          // grain size
     texDensity: 0.26 + rng()*0.42,      // how much light/dark detail
     macroScale: 7.0 + rng()*16.0,       // big soft blotches
@@ -135,6 +168,14 @@ function detail(name, x, y, seed, ts, td, sx, sy){
   if(name==='cracked'){ const w=vnoise(x/ts*1.25+seed*0.03+n*0.8, y/ts*1.25+seed*0.02, seed^0xAB);
     if(Math.abs(w-0.5)<0.055*(0.6+td)) return -1;
     return n>1-td*0.4?1:0; }
+  if(name==='checker'){ const cs=Math.max(2,Math.round(ts)); const on=((Math.floor(x/cs)+Math.floor(y/cs))&1);
+    // tiled plaza slabs: alternating cells with a dark grout line + noise flecks
+    if((x%cs===0)||(y%cs===0)) return -1;
+    return on ? (n>0.82?1:0) : (n<0.2?-1:0); }
+  if(name==='gradient'){ const gg=vnoise(x/(ts*3)+seed*0.05, y/(ts*3)+seed*0.03, seed^0x77);
+    return gg<0.42-td*0.2?-1 : gg>0.58+td*0.2?1 : 0; }
+  if(name==='dither'){ const b=(x+ (y&1))&1; // ordered 1px dither over noise thresholds
+    if(n<td*0.5) return b?-1:0; if(n>1-td*0.5) return b?1:0; return 0; }
   return 0;
 }
 function paintTile(res, mask, seed, pal, style){
@@ -209,7 +250,7 @@ function makeTileset(opts){
   const pals=makePalettes(opts.grassHex, opts.dirtHex);
   const field=[], high=[], cliff=[], coll=new Array(16);
   for(let i=0;i<16;i++){
-    const mask=roundedFieldMask(res, cornersFromIndex(i), style.roundRadius);
+    const mask=edgeMask(res, cornersFromIndex(i), style);
     coll[i]=mask;
     field[i]=[]; high[i]=[]; cliff[i]=[];
     const base=seed + i*7919 + 500000;
@@ -225,8 +266,8 @@ function makeTileset(opts){
 return {
   mulberry32, vnoise, ihash, mix,
   diskOffsets, cornersFromIndex, cornerIndex, cellCorners, fieldCornerIndex,
-  computeVertexGrid, generateCAField, sampleQuadrant, roundedFieldMask,
-  makePalettes, deriveStyle, STYLE_NAMES, paintTile, paintCliff, makeTileset,
+  computeVertexGrid, generateCAField, sampleQuadrant, roundedFieldMask, edgeMask,
+  makePalettes, deriveStyle, STYLE_NAMES, EDGE_NAMES, paintTile, paintCliff, makeTileset,
   fieldTexel, rockTexel, surfaceTexel,
 };
 })();

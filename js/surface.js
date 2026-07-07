@@ -423,7 +423,7 @@ function genWorld(){
   queueHeroBake();
  }
  salvage=[];
- for(let i=0;i<5;i++)spawnSalvage();
+ for(let i=0;i<9;i++)spawnSalvage();
  refreshChron();
 }
 function spawnSalvage(){
@@ -1257,7 +1257,10 @@ function dailyTick(){
  }
  for(const id of Hero.relics){const r=TF.byId[id];if(r&&r.treasure)depositResource(r.treasure.res,r.treasure.amt,hero.x,hero.y)}
  // the garden keeps seeding fresh salvage for the Sage to find
- if(salvage.length<5&&chance(.3))spawnSalvage();
+ if(salvage.length<9&&chance(.35))spawnSalvage();
+ // the age turns, and the land with it
+ eraRebuildCheck();
+ if(surfEra&&chance(.05))tale([],pick(surfEra.lines));
  villageTick();
  upkeepTick();
 }
@@ -1323,11 +1326,15 @@ function iconFromBase(base,px){
  c.drawImage(base,0,0,px,px);
  return cv;  // a fresh node every call (safe to insert into the DOM)
 }
-function relicIcon(id,px){
- px=px||24;
+function relicBase(id){
+ if(!id)return null;
  let base=relicIconCache.get(id);
  if(!base){base=TF.bakeCatalog(id,32,0.5);relicIconCache.set(id,base)}
- return iconFromBase(base,px);
+ return base;
+}
+function relicIcon(id,px){
+ px=px||24;
+ return iconFromBase(relicBase(id),px);
 }
 // build a fully generated relic (random look + a real payload) for the Tech Forge
 function forgeRelic(){
@@ -1959,21 +1966,71 @@ function resize(){
 }
 window.addEventListener('resize',resize);resize();
 let tcv=null,dynCanvas=null,dctx=null;
+
+/* ================= eras =================
+   The world cycles slowly between a lush medieval forest and a sci-fi urban
+   wasteland and back — a full ping-pong takes ~1000 days. Each keyframe sets a
+   terrain palette, a TileGen texture+edge style, and how green (planted) the
+   land is; the surface interpolates between them and re-bakes its ground as the
+   age drifts. */
+const ERA_SEG_DAYS = 1000/6;   // 6 segments per full ping-pong ⇒ ~1000-day cycle
+const ERAS=[
+ {name:'The Verdant Age', grass:'#3f7a3a', dirt:'#3a2a18', style:'pebbled', edge:'rounded', green:1.00,
+  lines:['Green things lean toward the sun and ask nothing.','The forest is thinking, slowly, in leaves.','Moss keeps the only calendar that matters here.']},
+ {name:'The Age of Smoke', grass:'#6a6636', dirt:'#2a2216', style:'mottle', edge:'rough', green:0.66,
+  lines:['A haze hangs over the hedgerows; something is being built, or burned.','The bees smell of iron this season.','Machines cough somewhere past the treeline.']},
+ {name:'The Grey Age', grass:'#5c6360', dirt:'#20232a', style:'checker', edge:'beveled', green:0.32,
+  lines:['Straight lines creep across the meadow. The garden endures them.','Concrete remembers being sand, and resents it.','The paving grows faster than the grass now.']},
+ {name:'The Neon Waste', grass:'#3c4a56', dirt:'#12101a', style:'cracked', edge:'sharp', green:0.06,
+  lines:['Dead signage flickers in the bramble. The old net dreams beneath.','Chrome and moss have called a truce out here in the waste.','Nothing grows but the past, and it grows everywhere.']},
+];
+let eraOffset=0,tileSalt=0;   // editor knobs: shift the age / reroll the grain
+function eraFloat(){
+ const day=simMin/DAY+eraOffset, N=ERAS.length, seg=2*(N-1);
+ let t=(day/ERA_SEG_DAYS)%seg; if(t<0)t+=seg;
+ return t<(N-1)? t : (seg-t);                 // triangle 0..N-1..0
+}
+function lerpHex(a,b,t){const A=U.hexToRgb(a),B=U.hexToRgb(b);
+ return '#'+[0,1,2].map(i=>clamp(Math.round(A[i]+(B[i]-A[i])*t),0,255).toString(16).padStart(2,'0')).join('')}
+function eraState(){
+ const f=eraFloat(),N=ERAS.length,i=Math.min(Math.floor(f),N-1),frac=f-Math.floor(f);
+ const a=ERAS[i],b=ERAS[Math.min(i+1,N-1)],near=frac<0.5?a:b;
+ return {f,name:near.name,grass:lerpHex(a.grass,b.grass,frac),dirt:lerpHex(a.dirt,b.dirt,frac),
+  style:near.style,edge:near.edge,green:a.green+(b.green-a.green)*frac,lines:near.lines};
+}
+
 // the surface uses the shared TileGen engine, sampled at WORLD coordinates so
 // the ground flows seamlessly — grass and bramble-rock as two continuous
 // textures with organic rounded edges between them (cohesive, like the deep).
-let surfPals=null,surfStyle=null,surfSeedN=1,surfMasks=null;
+let surfPals=null,surfStyle=null,surfSeedN=1,surfMasks=null,surfEra=null;
 function bakeSurfaceTiles(){
- const gr=U.mulberry32((seed^0x5A17C0DE)>>>0);
- const gh=0.24+gr()*0.20;                                  // garden greens → teal
- const grassHex=U.hslToHex(gh,0.30+gr()*0.18,0.33+gr()*0.09);
- const dirtHex=U.hslToHex((gh+0.42+gr()*0.16)%1,0.22+gr()*0.14,0.09+gr()*0.05);
- surfStyle=TileGen.deriveStyle('surface-'+seed);
+ const es=eraState();surfEra=es;
+ surfStyle=TileGen.deriveStyle('surface-'+seed+'-'+tileSalt);
+ surfStyle.name=es.style; surfStyle.edge=es.edge;         // era decides look
  surfStyle.texDensity*=0.7; surfStyle.macroAmt*=0.7;       // calmer than the deep
- surfPals=TileGen.makePalettes(grassHex,dirtHex);
+ surfPals=TileGen.makePalettes(es.grass,es.dirt);
  surfSeedN=(seed>>>0)||1;
  surfMasks=[];
- for(let i=0;i<16;i++)surfMasks[i]=TileGen.roundedFieldMask(TILE,TileGen.cornersFromIndex(i),surfStyle.roundRadius);
+ for(let i=0;i<16;i++)surfMasks[i]=TileGen.edgeMask(TILE,TileGen.cornersFromIndex(i),surfStyle);
+}
+// re-mark every hand-edited tile so the dynamic overlay repaints after a rebake
+function repaintDynAll(){
+ modTiles.clear();
+ for(let i=0;i<W*H;i++){
+  if(farmGrid[i]||struct[i]===S_HOUSE||struct[i]===S_WALL||struct[i]===S_RUIN||struct[i]===S_FLOOR)modTiles.add(i);
+ }
+ terrainDirty=true;
+}
+// re-bake the ground when the age has drifted (throttled so fast-forward stays smooth)
+let lastEraBucket=-999,lastEraRebuildRT=0;
+function eraRebuildCheck(){
+ const bucket=Math.round(eraFloat()*8);
+ if(bucket===lastEraBucket)return;
+ const now=performance.now();
+ if(now-lastEraRebuildRT<2500)return;
+ lastEraBucket=bucket;lastEraRebuildRT=now;
+ buildTerrainLayer();
+ repaintDynAll();
 }
 // paint one cell's worth of continuous ground into ctx (grass, or rock where the mask is solid)
 function paintCellTexture(c,x,y,solidMask){
@@ -2004,11 +2061,12 @@ function buildTerrainLayer(){
   const si=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
   paintCellTexture(c,x,y,surfMasks[si]);
  }
- // Plant Forge meadow decor, stamped static into the open terrain
+ // Plant Forge meadow decor, thinning out as the age turns to wasteland
+ const green=surfEra?surfEra.green:1;
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
   if(map[idx(x,y)]!==0)continue;
   const h=hash2(x,y);
-  if(flora&&h>0.30&&h<0.40&&!nodeAt.has(idx(x,y))){
+  if(flora&&h>0.30&&h<0.30+0.10*green&&!nodeAt.has(idx(x,y))){
    const dvi=(x*7+y*13)%flora.decor.length;
    const dc=flora.decor[dvi];
    c.drawImage(dc,x*TILE+TILE/2-dc.width/2,y*TILE+TILE-dc.height+1);
@@ -2081,18 +2139,17 @@ const GLOW_WARM=mkGlow('rgba(255,190,90,0.55)'),GLOW_CYAN=mkGlow('rgba(150,230,1
 const GLOW_RED=mkGlow('rgba(210,60,70,0.5)'),GLOW_GREEN=mkGlow('rgba(90,220,140,0.45)');
 const GLOW_PINK=mkGlow('rgba(255,70,200,0.5)'),GLOW_BLUE=mkGlow('rgba(70,150,255,0.5)');
 function drawSalvage(c,sv,t){
- const px=sv.x,py=sv.y,bob=Math.sin(sv.t)*1.5;
+ const px=sv.x,py=sv.y,bob=Math.sin(sv.t)*1.6;
+ // ground shadow + neon halo, then the actual generated relic sprite at plant-level detail
+ c.fillStyle='rgba(0,0,0,0.30)';c.beginPath();c.ellipse(px,py+2,7,2.6,0,0,7);c.fill();
  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
- c.drawImage(GLOW_BLUE,px-14,py-16,28,28);c.globalCompositeOperation=go;
- c.save();c.translate(px,py+bob);
- // a battered supply crate with a blinking beacon
- c.fillStyle='#2a2f36';c.fillRect(-6,-6,12,10);
- c.fillStyle='#48525e';c.fillRect(-6,-6,12,3);
- c.fillStyle='#37e6ff';c.fillRect(-6,-2,12,1);
- c.fillStyle=(t%900<450)?'#7df9ff':'#243a5a';c.fillRect(-1,-9,2,2);
- c.fillStyle='rgba(0,0,0,0.4)';c.fillRect(-6,3,12,1);
- c.restore();
- if(cam.z>1.05){c.font='6px system-ui';c.textAlign='center';c.fillStyle='rgba(150,220,255,0.85)';c.fillText('salvage',px,py+13)}
+ c.drawImage(GLOW_BLUE,px-17,py-20,34,34);c.globalCompositeOperation=go;
+ const base=(sv.relic&&sv.relic._iconBase)||relicBase(sv.relic&&sv.relic.id);
+ const S=28;
+ if(base)c.drawImage(base,px-S/2,py+bob-S+5,S,S);
+ // a blinking beacon pip above it
+ if(t%900<450){c.fillStyle='#7df9ff';c.fillRect(px-1,py+bob-S+3,2,2)}
+ if(cam.z>1.05){c.font='6px system-ui';c.textAlign='center';c.fillStyle='rgba(150,220,255,0.85)';c.fillText(sv.relic?sv.relic.n:'salvage',px,py+11)}
 }
 function nodeStage(n){return n.amt<=0?0:clamp(Math.ceil(n.amt/n.max*3)-1,0,2)}
 function drawNode(c,n,t){
@@ -3067,7 +3124,7 @@ function frame(t){
  draw(t);
  if(t-uiT>(cine?260:450)){
   uiT=t;
-  $('clock').textContent='Day '+cday()+' · '+phase();
+  $('clock').textContent='Day '+cday()+' · '+(surfEra?surfEra.name:phase());
   $('pop').textContent='👥 '+people.length+(monsters.length?' · 👹'+monsters.length:'');
   $('hearts').textContent=speedIdx>=2?'🧘 the Sage meditates':heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
   if(cine&&selected)updateCine();
@@ -3173,7 +3230,11 @@ return {
    return d;
   },
   bloomAll:()=>{for(const n of nodes)n.amt=n.max;toast('Everything ripens at once. Unsettling, but generous.')},
-  rerollFlora:()=>{bakeFlora('garden-'+seed+'-'+((Math.random()*1e6)|0));buildTerrainLayer();toast('The flora reconsiders its whole aesthetic.')},
+  rerollFlora:()=>{bakeFlora('garden-'+seed+'-'+((Math.random()*1e6)|0));buildTerrainLayer();repaintDynAll();toast('The flora reconsiders its whole aesthetic.')},
+  era:()=>eraState(),
+  tileStyle:()=>({name:surfStyle&&surfStyle.name,edge:surfStyle&&surfStyle.edge}),
+  advanceEra:()=>{eraOffset+=ERA_SEG_DAYS;lastEraBucket=-999;buildTerrainLayer();repaintDynAll();const es=eraState();toast('The age turns → '+es.name)},
+  rerollTiles:()=>{tileSalt=(Math.random()*1e6)|0;buildTerrainLayer();repaintDynAll();toast('The ground reconsiders its texture. ('+surfStyle.name+' · '+surfStyle.edge+' edge)')},
   rerollFolk:()=>{for(const p of people){p.lookSeed='folk-'+p.id+'-'+((Math.random()*1e9)|0);queuePersonBake(p)}toast('Everyone wakes up feeling like someone slightly else.')},
   rerollHero:()=>{Hero.lookSeed='sage-'+((Math.random()*1e9)|0);queueHeroBake();toast('The Sage is reborn mid-stride.')},
   rerollMonsters:()=>{queueMonsterBakes();toast('The things below molt into new shapes.')},

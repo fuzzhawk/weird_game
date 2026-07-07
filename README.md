@@ -49,6 +49,17 @@ The Sage's hearts, level, and blade upgrades persist between the surface and
 every dungeon floor. Loot carried out of a dungeon is tipped into the nearest
 village granary.
 
+**Eras.** The surface world slowly cycles between a lush medieval forest and a
+sci-fi urban wasteland and back — a full ping-pong takes ~1000 days. As the age
+turns (The Verdant Age → The Age of Smoke → The Grey Age → The Neon Waste →
+…back), the terrain palette, texture, and edge style morph, plant life thins
+out toward the wasteland, and the current age shows in the top bar. The
+Gardener's Bench can turn the age or reroll the ground on demand.
+
+**Relics on the landscape.** Tech-Forge relics are scattered across the world
+as detailed generated sprites (with glow halos) at the same fidelity as the
+flora; walk over one to install it.
+
 ## Source layout
 
 | file | contents |

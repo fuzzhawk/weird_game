@@ -47,11 +47,14 @@ function drawForgePreview(){
 function reforge(){ forgePreview=A().forgeRelic(); drawForgePreview(); }
 function refresh(){
   if(!open)return;
+  const era=A().era?A().era():null, ts=A().tileStyle?A().tileStyle():null;
   // world line
-  $('edWorldNote').textContent='seed '+A().seed+' · '+A().people().length+' folk · '
+  $('edWorldNote').innerHTML='seed '+A().seed+' · '+A().people().length+' folk · '
     +A().monsters().length+' risen · '+A().dungeons().length+' understories · '
     +A().villages().length+' villages'+(A().peaceful?' · ☮ peace held':'')
-    +' · 🔩'+A().heroRelics().length+' sage augments';
+    +' · 🔩'+A().heroRelics().length+' sage augments'
+    +(era?'<br><b style="color:#a0e08f">'+era.name+'</b> ('+Math.round(era.green*100)+'% green)'
+      +(ts?' · tiles: '+ts.name+' / '+ts.edge+' edge':''):'');
   $('edPeaceBtn').textContent=A().peaceful?'☮ Peace: ON':'☮ Peace: off';
   drawForgePreview();
   renderSelected();
@@ -134,6 +137,10 @@ function init(){
   const pb=btn('☮ Peace: off',()=>{A().peaceful=!A().peaceful;refresh()});
   pb.id='edPeaceBtn';
   wg.appendChild(row(pb,btn('🌸 Ripen everything',()=>A().bloomAll())));
+  wg.appendChild(row(
+    btn('⏳ Turn the age',()=>{A().advanceEra();refresh()}),
+    btn('🎨 Reroll ground',()=>{A().rerollTiles();refresh()})
+  ));
   // --- spawn group ---
   $('edSpawnBtns').appendChild(row(
     btn('🚶 A wanderer arrives',()=>A().spawnSettler()),
