@@ -1959,20 +1959,34 @@ function resize(){
 }
 window.addEventListener('resize',resize);resize();
 let tcv=null,dynCanvas=null,dctx=null;
-// the surface now uses the shared TileGen engine: a per-world garden palette +
-// texture style, autotiled with organic rounded edges (grass over bramble-rock).
-let surfTS=null;
+// the surface uses the shared TileGen engine, sampled at WORLD coordinates so
+// the ground flows seamlessly — grass and bramble-rock as two continuous
+// textures with organic rounded edges between them (cohesive, like the deep).
+let surfPals=null,surfStyle=null,surfSeedN=1,surfMasks=null;
 function bakeSurfaceTiles(){
  const gr=U.mulberry32((seed^0x5A17C0DE)>>>0);
  const gh=0.24+gr()*0.20;                                  // garden greens → teal
- const grassHex=U.hslToHex(gh,0.30+gr()*0.20,0.32+gr()*0.10);
- const dirtHex=U.hslToHex((gh+0.42+gr()*0.16)%1,0.22+gr()*0.16,0.09+gr()*0.05);
- const style=TileGen.deriveStyle('surface-'+seed);
- surfTS=TileGen.makeTileset({seed:(seed>>>0)||1, res:TILE, grassHex, dirtHex, variants:6, style});
+ const grassHex=U.hslToHex(gh,0.30+gr()*0.18,0.33+gr()*0.09);
+ const dirtHex=U.hslToHex((gh+0.42+gr()*0.16)%1,0.22+gr()*0.14,0.09+gr()*0.05);
+ surfStyle=TileGen.deriveStyle('surface-'+seed);
+ surfStyle.texDensity*=0.7; surfStyle.macroAmt*=0.7;       // calmer than the deep
+ surfPals=TileGen.makePalettes(grassHex,dirtHex);
+ surfSeedN=(seed>>>0)||1;
+ surfMasks=[];
+ for(let i=0;i<16;i++)surfMasks[i]=TileGen.roundedFieldMask(TILE,TileGen.cornersFromIndex(i),surfStyle.roundRadius);
 }
-function tileVariant(x,y){ return ((x*13+y*7)>>>0)%(surfTS?surfTS.variants:1); }
+// paint one cell's worth of continuous ground into ctx (grass, or rock where the mask is solid)
+function paintCellTexture(c,x,y,solidMask){
+ const img=c.createImageData(TILE,TILE),data=img.data;
+ for(let ly=0;ly<TILE;ly++)for(let lx=0;lx<TILE;lx++){
+  const solid=solidMask?solidMask[ly*TILE+lx]===1:false;
+  const col=TileGen.surfaceTexel(surfPals,solid,x*TILE+lx,y*TILE+ly,surfSeedN,surfStyle);
+  const p=(ly*TILE+lx)*4;data[p]=col[0];data[p+1]=col[1];data[p+2]=col[2];data[p+3]=255;
+ }
+ c.putImageData(img,x*TILE,y*TILE);
+}
 function paintFloorTile(c,x,y){
- if(surfTS){ c.drawImage(surfTS.field[15][tileVariant(x,y)], x*TILE, y*TILE); return; }
+ if(surfPals){paintCellTexture(c,x,y,null);return;}
  const h=hash2(x,y),v=h*16;
  c.fillStyle='rgb('+(56+v)+','+(92+v*0.9)+','+(50+v*0.6)+')';
  c.fillRect(x*TILE,y*TILE,TILE,TILE);
@@ -1982,27 +1996,22 @@ function buildTerrainLayer(){
  tcv=document.createElement('canvas');
  tcv.width=W*TILE;tcv.height=H*TILE;
  const c=tcv.getContext('2d');c.imageSmoothingEnabled=false;
- // vertex grids for the grass field (open) and the rock field (solid)
- const openF=[],solidF=[];
- for(let y=0;y<H;y++){openF[y]=[];solidF[y]=[];for(let x=0;x<W;x++){const o=walkable(x,y);openF[y][x]=o;solidF[y][x]=!o}}
- const vgO=TileGen.computeVertexGrid(openF,H,W);
+ // rock field = solid cells; its rounded per-cell mask carves the organic edge
+ const solidF=[];
+ for(let y=0;y<H;y++){solidF[y]=[];for(let x=0;x<W;x++)solidF[y][x]=!walkable(x,y)}
  const vgS=TileGen.computeVertexGrid(solidF,H,W);
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const v=tileVariant(x,y);
-  const gi=TileGen.fieldCornerIndex(TileGen.cellCorners(vgO,x,y));
-  c.drawImage(surfTS.field[gi][v],x*TILE,y*TILE);
-  if(map[idx(x,y)]===1){
-   // overlay rock texture with organic rounded edges where the bramble sits
-   const si=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
-   c.drawImage(surfTS.cliff[si][v],x*TILE,y*TILE);
-  }else{
-   const h=hash2(x,y);
-   // Plant Forge meadow decor, stamped static into the terrain
-   if(flora&&h>0.30&&h<0.40&&!nodeAt.has(idx(x,y))){
-    const dvi=(x*7+y*13)%flora.decor.length;
-    const dc=flora.decor[dvi];
-    c.drawImage(dc,x*TILE+TILE/2-dc.width/2,y*TILE+TILE-dc.height+1);
-   }
+  const si=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
+  paintCellTexture(c,x,y,surfMasks[si]);
+ }
+ // Plant Forge meadow decor, stamped static into the open terrain
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  if(map[idx(x,y)]!==0)continue;
+  const h=hash2(x,y);
+  if(flora&&h>0.30&&h<0.40&&!nodeAt.has(idx(x,y))){
+   const dvi=(x*7+y*13)%flora.decor.length;
+   const dc=flora.decor[dvi];
+   c.drawImage(dc,x*TILE+TILE/2-dc.width/2,y*TILE+TILE-dc.height+1);
   }
  }
  dynCanvas=document.createElement('canvas');
