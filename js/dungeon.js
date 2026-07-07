@@ -207,8 +207,8 @@ function renderTileset(){
   const style=T.style||(T.style=TileGen.deriveStyle('floor-'+T.seed));
   for(let i=0;i<16;i++){
     const corners = fieldCornersFromIndex(i);
-    // edge roundness now comes from the floor's derived style, not a constant
-    const mask = roundedFieldMask(T.res, corners, style.roundRadius);
+    // edge MODE now comes from the floor's derived style (rounded/sharp/beveled/rough)
+    const mask = TileGen.edgeMask(T.res, corners, style);
     collMasks[i] = mask;
     const base = T.seed + fieldTiles[i].seedOffset;
     fieldTiles[i].variants = [];
