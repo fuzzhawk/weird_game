@@ -499,7 +499,9 @@ function edgeMask(res, corners, style){
 }
 
 /* ---------- palettes from a grass + dirt hex ---------- */
-function makePalettes(grassHex, dirtHex){
+function makePalettes(grassHex, dirtHex, opts){
+  opts=opts||{};
+  const rockLift = (opts.rockLift!==undefined)?opts.rockLift:0.18;  // how far rock is lifted above the dirt tone
   const low={ grassBase:hexToRgb(grassHex), grassLight:shade(grassHex,0.22), grassDark:shade(grassHex,-0.32),
               dirtBase:hexToRgb(dirtHex),  dirtLight:shade(dirtHex,0.24),  dirtDark:shade(dirtHex,-0.42) };
   const gh2=shade(grassHex,0.20); const ghHex='#'+gh2.map(v=>v.toString(16).padStart(2,'0')).join('');
@@ -508,7 +510,7 @@ function makePalettes(grassHex, dirtHex){
   const [dr,dg,db]=hexToRgb(dirtHex); const [dhh,ds,dl]=rgbToHsl(dr,dg,db);
   const [gr,gg,gb]=hexToRgb(grassHex); const [gh]=rgbToHsl(gr,gg,gb);
   const hue=dhh+(((gh-dhh+1.5)%1)-0.5)*0.15;
-  const rockBase=hslToHex((hue+1)%1, Math.max(0.08,ds*0.55), Math.min(0.44,dl+0.18));
+  const rockBase=hslToHex((hue+1)%1, Math.max(0.08,ds*0.55), Math.min(0.44,dl+rockLift));
   const rock={ base:hexToRgb(rockBase), dark:shade(rockBase,-0.30), light:shade(rockBase,0.20), deep:shade(rockBase,-0.5) };
   return {low, high, rock};
 }
@@ -2222,22 +2224,30 @@ function applyAff(p,o,d){
 }
 
 /* ================= flora (Plant Forge sprites) ================= */
-let flora=null, floraSeed='garden';
+let flora=null, floraDead=null, floraSeed='garden';
 function bakeFlora(seedBase){
  floraSeed=seedBase;
  const frng=U.mulberry32(U.hashStr(seedBase)^0xF10A);
  const F={berry:[],mush:[],tree:[],decor:[]};
+ // a parallel WITHERED set, dry and half-defoliated, that plants crossfade into
+ // as the age turns to wasteland (and back to green as the forest returns)
+ const D={berry:[],mush:[],tree:[],decor:[]};
  for(let v=0;v<3;v++){
   const s=(frng()*1e9)|0;
   F.berry.push([0,1,2].map(st=>PF.bake('bush',{bloomAmount:.9,palette:'meadow'},s,40,0.55+st*0.22)));
   F.mush.push([0,1,2].map(st=>PF.bake('mushroom',{palette:v===2?'cavernGlow':'autumn'},s+7,36,0.55+st*0.22)));
   F.tree.push([0,1,2].map(st=>PF.bake('sapling',{palette:v===1?'meadow':'forest'},s+13,72,0.62+st*0.19)));
+  D.berry.push([0,1,2].map(st=>PF.bake('bush',{bloomAmount:.1,leafDensity:.35,palette:'autumn'},s,40,0.5+st*0.2)));
+  D.mush.push([0,1,2].map(st=>PF.bake('mushroom',{palette:'autumn'},s+7,36,0.5+st*0.2)));
+  D.tree.push([0,1,2].map(st=>PF.bake('sapling',{leafDensity:.3,palette:'autumn'},s+13,72,0.55+st*0.17)));
  }
  const kinds=['grassTuft','wildflower','fern','vine','wildflower','grassTuft','fern','wildflower'];
  for(let i=0;i<8;i++){
-  F.decor.push(PF.bake(kinds[i],{palette:i===3?'duskViolet':'meadow'},(frng()*1e9)|0,24,0.75+frng()*0.25,frng()*6.28));
+  const s=(frng()*1e9)|0,ph=frng()*6.28;
+  F.decor.push(PF.bake(kinds[i],{palette:i===3?'duskViolet':'meadow'},s,24,0.75+frng()*0.25,ph));
+  D.decor.push(PF.bake(kinds[i],{leafDensity:.3,bloomAmount:0,palette:'autumn'},s,24,0.55,ph));
  }
- flora=F;
+ flora=F; floraDead=D;
 }
 
 /* ================= sprite baking (Creature Forge) ================= */
@@ -2386,9 +2396,11 @@ function genWorld(){
   queueHeroBake();
  }
  salvage=[];
- for(let i=0;i<9;i++)spawnSalvage();
+ for(let i=0;i<relicTarget();i++)spawnSalvage();
  refreshChron();
 }
+// relics surface as the world industrialises: few in the forest, many in the waste
+function relicTarget(){ return Math.round(1 + (1-eraGreen())*13); }
 function spawnSalvage(){
  for(let t=0;t<40;t++){
   const[x,y]=randOpenTile();
@@ -3219,8 +3231,12 @@ function dailyTick(){
   }
  }
  for(const id of Hero.relics){const r=TF.byId[id];if(r&&r.treasure)depositResource(r.treasure.res,r.treasure.amt,hero.x,hero.y)}
- // the garden keeps seeding fresh salvage for the Sage to find
- if(salvage.length<9&&chance(.35))spawnSalvage();
+ // relics surface as the age decays; the forest slowly reclaims stray tech
+ {
+  const tgt=relicTarget();
+  if(salvage.length<tgt&&chance(.5)){spawnSalvage();if(salvage.length&&chance(.3))tale([],'Something old works its way up through the soil, catching the light.')}
+  else if(salvage.length>tgt+3&&eraGreen()>0.6&&chance(.25))salvage.pop();
+ }
  // the age turns, and the land with it
  eraRebuildCheck();
  if(surfEra&&chance(.05))tale([],pick(surfEra.lines));
@@ -3233,8 +3249,15 @@ function stepSim(dt){
  simMin+=dt;
  const d=cday();
  if(d!==dayMark){dayMark=d;dailyTick()}
- for(const n of nodes){
-  if(n.amt<n.max){n.rt-=dt;if(n.rt<=0){n.amt++;n.rt=n.reg}}
+ // resource regrowth — stone always; plants only really regrow in green ages,
+ // and slowly wither back (never fully to nothing) as the wasteland takes over
+ {
+  const g=eraGreen();
+  for(const n of nodes){
+   if(n.t==='rock'){ if(n.amt<n.max){n.rt-=dt;if(n.rt<=0){n.amt++;n.rt=n.reg}} continue; }
+   if(n.amt<n.max){ n.rt-=dt*g; if(n.rt<=0){ n.amt++; n.rt=n.reg } }
+   if(g<0.35 && n.amt>1 && chance(dt*0.02*(0.4-g))) n.amt--;
+  }
  }
  for(const d of dungeons)if(d.restock&&simMin>=d.restock){d.loot=clamp(d.loot+0.4,0,1.3);d.danger=d.cleansed?d.danger:clamp(d.danger-0.04,.2,.95);d.restock=0}
  processExpeditions();
@@ -3937,16 +3960,19 @@ let tcv=null,dynCanvas=null,dctx=null;
    land is; the surface interpolates between them and re-bakes its ground as the
    age drifts. */
 const ERA_SEG_DAYS = 1000/6;   // 6 segments per full ping-pong ⇒ ~1000-day cycle
+// grass = OPEN ground (kept light), dirt = the tone BLOCKED bramble/rock is drawn
+// from (kept dark) — a strong value gap so walkable vs solid always reads clearly.
 const ERAS=[
- {name:'The Verdant Age', grass:'#3f7a3a', dirt:'#3a2a18', style:'pebbled', edge:'rounded', green:1.00,
+ {name:'The Verdant Age', grass:'#4c8a44', dirt:'#2e2010', style:'pebbled', edge:'rounded', green:1.00,
   lines:['Green things lean toward the sun and ask nothing.','The forest is thinking, slowly, in leaves.','Moss keeps the only calendar that matters here.']},
- {name:'The Age of Smoke', grass:'#6a6636', dirt:'#2a2216', style:'mottle', edge:'rough', green:0.66,
+ {name:'The Age of Smoke', grass:'#8a8248', dirt:'#1a140a', style:'mottle', edge:'rough', green:0.66,
   lines:['A haze hangs over the hedgerows; something is being built, or burned.','The bees smell of iron this season.','Machines cough somewhere past the treeline.']},
- {name:'The Grey Age', grass:'#5c6360', dirt:'#20232a', style:'checker', edge:'beveled', green:0.32,
+ {name:'The Grey Age', grass:'#848c85', dirt:'#12141b', style:'checker', edge:'beveled', green:0.32,
   lines:['Straight lines creep across the meadow. The garden endures them.','Concrete remembers being sand, and resents it.','The paving grows faster than the grass now.']},
- {name:'The Neon Waste', grass:'#3c4a56', dirt:'#12101a', style:'cracked', edge:'sharp', green:0.06,
+ {name:'The Neon Waste', grass:'#54677a', dirt:'#08060e', style:'cracked', edge:'sharp', green:0.06,
   lines:['Dead signage flickers in the bramble. The old net dreams beneath.','Chrome and moss have called a truce out here in the waste.','Nothing grows but the past, and it grows everywhere.']},
 ];
+function eraGreen(){ return surfEra?surfEra.green:1; }
 let eraOffset=0,tileSalt=0;   // editor knobs: shift the age / reroll the grain
 function eraFloat(){
  const day=simMin/DAY+eraOffset, N=ERAS.length, seg=2*(N-1);
@@ -3971,7 +3997,8 @@ function bakeSurfaceTiles(){
  surfStyle=TileGen.deriveStyle('surface-'+seed+'-'+tileSalt);
  surfStyle.name=es.style; surfStyle.edge=es.edge;         // era decides look
  surfStyle.texDensity*=0.7; surfStyle.macroAmt*=0.7;       // calmer than the deep
- surfPals=TileGen.makePalettes(es.grass,es.dirt);
+ // keep blocked rock much darker than open grass so the two always read apart
+ surfPals=TileGen.makePalettes(es.grass,es.dirt,{rockLift:0.05});
  surfSeedN=(seed>>>0)||1;
  surfMasks=[];
  for(let i=0;i<16;i++)surfMasks[i]=TileGen.edgeMask(TILE,TileGen.cornersFromIndex(i),surfStyle);
@@ -3999,9 +4026,17 @@ function eraRebuildCheck(){
 function paintCellTexture(c,x,y,solidMask){
  const img=c.createImageData(TILE,TILE),data=img.data;
  for(let ly=0;ly<TILE;ly++)for(let lx=0;lx<TILE;lx++){
-  const solid=solidMask?solidMask[ly*TILE+lx]===1:false;
-  const col=TileGen.surfaceTexel(surfPals,solid,x*TILE+lx,y*TILE+ly,surfSeedN,surfStyle);
-  const p=(ly*TILE+lx)*4;data[p]=col[0];data[p+1]=col[1];data[p+2]=col[2];data[p+3]=255;
+  const i=ly*TILE+lx;
+  const solid=solidMask?solidMask[i]===1:false;
+  let col=TileGen.surfaceTexel(surfPals,solid,x*TILE+lx,y*TILE+ly,surfSeedN,surfStyle);
+  // dark rim along the grass↔rock boundary (organic edge readability)
+  if(solidMask){
+   const s=solidMask[i];
+   const up=ly>0?solidMask[i-TILE]:s, dn=ly<TILE-1?solidMask[i+TILE]:s,
+         lf=lx>0?solidMask[i-1]:s, rt=lx<TILE-1?solidMask[i+1]:s;
+   if(up!==s||dn!==s||lf!==s||rt!==s) col=TileGen.mix(col,[0,0,0],0.42);
+  }
+  const p=i*4;data[p]=col[0];data[p+1]=col[1];data[p+2]=col[2];data[p+3]=255;
  }
  c.putImageData(img,x*TILE,y*TILE);
 }
@@ -4024,14 +4059,16 @@ function buildTerrainLayer(){
   const si=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
   paintCellTexture(c,x,y,surfMasks[si]);
  }
- // Plant Forge meadow decor, thinning out as the age turns to wasteland
+ // Plant Forge meadow decor — dies back to withered stalks as the age turns
+ // wasteland (living vs dead chosen per-tile by greenness), thinning a little too
  const green=surfEra?surfEra.green:1;
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
   if(map[idx(x,y)]!==0)continue;
   const h=hash2(x,y);
-  if(flora&&h>0.30&&h<0.30+0.10*green&&!nodeAt.has(idx(x,y))){
+  if(flora&&h>0.30&&h<0.30+0.06+0.06*green&&!nodeAt.has(idx(x,y))){
    const dvi=(x*7+y*13)%flora.decor.length;
-   const dc=flora.decor[dvi];
+   const alive=hash2(x+3,y+5)<green;                 // green ages keep them living
+   const dc=(alive?flora:floraDead).decor[dvi];
    c.drawImage(dc,x*TILE+TILE/2-dc.width/2,y*TILE+TILE-dc.height+1);
   }
  }
@@ -4127,11 +4164,14 @@ function drawNode(c,n,t){
   return;
  }
  if(flora){
-  const bank=flora[n.t==='berry'?'berry':n.t==='mush'?'mush':'tree'];
-  const vset=bank[(n.x*7+n.y*13)%bank.length];
-  const img=vset[nodeStage(n)];
-  if(n.amt<=0)c.globalAlpha=0.45;
-  c.drawImage(img,px-img.width/2,n.y*TILE+TILE-img.height+2);
+  const key=n.t==='berry'?'berry':n.t==='mush'?'mush':'tree';
+  const vi=(n.x*7+n.y*13)%flora[key].length, st=nodeStage(n);
+  const imgL=flora[key][vi][st], imgD=floraDead[key][vi][st];
+  const base=(n.amt<=0)?0.5:1;
+  const g=clamp(eraGreen()*1.25,0,1);         // crossfade living → withered as the age turns
+  const drawAt=(img)=>c.drawImage(img,px-img.width/2,n.y*TILE+TILE-img.height+2);
+  c.globalAlpha=base*g; drawAt(imgL);
+  c.globalAlpha=base*(1-g); drawAt(imgD);
   c.globalAlpha=1;
   return;
  }
@@ -5195,6 +5235,8 @@ return {
   bloomAll:()=>{for(const n of nodes)n.amt=n.max;toast('Everything ripens at once. Unsettling, but generous.')},
   rerollFlora:()=>{bakeFlora('garden-'+seed+'-'+((Math.random()*1e6)|0));buildTerrainLayer();repaintDynAll();toast('The flora reconsiders its whole aesthetic.')},
   era:()=>eraState(),
+  eraStats:()=>({green:eraGreen(),salvage:salvage.length,relicTarget:relicTarget(),
+    nodeFood:nodes.filter(n=>n.yield==='food').reduce((a,n)=>a+n.amt,0)}),
   tileStyle:()=>({name:surfStyle&&surfStyle.name,edge:surfStyle&&surfStyle.edge}),
   advanceEra:()=>{eraOffset+=ERA_SEG_DAYS;lastEraBucket=-999;buildTerrainLayer();repaintDynAll();const es=eraState();toast('The age turns → '+es.name)},
   rerollTiles:()=>{tileSalt=(Math.random()*1e6)|0;buildTerrainLayer();repaintDynAll();toast('The ground reconsiders its texture. ('+surfStyle.name+' · '+surfStyle.edge+' edge)')},
