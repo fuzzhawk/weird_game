@@ -15,13 +15,23 @@ button:active{transform:translateY(1px)}
 
 /* ================= SURFACE (the garden) ================= */
 #cvS{position:fixed;inset:0;touch-action:none}
-#top{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:8px 10px;padding-top:calc(8px + env(safe-area-inset-top));background:linear-gradient(rgba(10,16,9,.9),rgba(10,16,9,0));z-index:5;pointer-events:none}
+#top{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;padding-top:calc(8px + env(safe-area-inset-top));background:linear-gradient(rgba(10,16,9,.9),rgba(10,16,9,0));z-index:5;pointer-events:none}
 #top>*{pointer-events:auto}
+#tinfo{display:flex;flex-direction:column;line-height:1.15;min-width:0}
+#tline{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
 #clock{font-weight:650;font-size:13px;letter-spacing:.02em}
+#era{font-size:11px;color:#a0e08f;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52vw}
 #pop{opacity:.75;font-size:12px}
-#hearts{font-size:12px;color:#ffb3c0;letter-spacing:.06em;margin-left:6px}
+#hearts{font-size:12px;color:#ffb3c0;letter-spacing:.06em}
 .sp{display:flex;gap:4px;margin-left:auto}
+#sui #top button{padding:6px 8px;font-size:12.5px}
 #sui .sp button.on,#sui .cspd button.on{background:#cfe37a;color:#1c2414;border-color:#cfe37a;font-weight:700}
+@media (max-width:430px){
+  #top{gap:5px;padding-left:8px;padding-right:8px}
+  #sui #top button{padding:6px 7px;font-size:12px}
+  .sp{gap:3px}
+  #era{max-width:40vw}
+}
 #toasts{position:fixed;top:54px;left:50%;transform:translateX(-50%);z-index:20;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;width:min(92vw,440px)}
 .toast{background:rgba(20,28,17,.94);border:1px solid #4a6640;border-radius:12px;padding:8px 13px;font-size:12.5px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,.5);animation:tin .25s ease;max-width:100%}
 .toast.card{border-color:#8a76c2;color:#d9cff2}
@@ -174,8 +184,10 @@ button:active{transform:translateY(1px)}
 <div id="sui">
   <canvas id="cvS"></canvas>
   <div id="top">
-    <div><div id="clock">Day 1</div><div id="pop">👥 0</div></div>
-    <div id="hearts">♥♥♥♥♥</div>
+    <div id="tinfo">
+      <div id="tline"><span id="clock">Day 1</span><span id="pop">👥 0</span><span id="hearts">♥♥♥♥♥</span></div>
+      <div id="era"></div>
+    </div>
     <div class="sp">
       <button data-s="0">⏸</button><button data-s="1" class="on">1×</button><button data-s="2">16×</button><button data-s="3">500×</button>
     </div>

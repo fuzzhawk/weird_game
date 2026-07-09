@@ -1283,8 +1283,7 @@ function dailyTick(){
   if(animals.length<at&&chance(.5))spawnAnimal();
   else if(animals.length>at+2&&chance(.15)){const a=animals[ri(0,animals.length-1)];if(a)a.dead=true}
  }
- // the age turns, and the land with it
- eraRebuildCheck();
+ // the age turns, and the land with it (the ground re-composites live in frame())
  if(surfEra&&chance(.05))tale([],pick(surfEra.lines));
  villageTick();
  upkeepTick();
@@ -2136,7 +2135,16 @@ function resize(){
  cv.style.width=cw+'px';cv.style.height=ch+'px';
 }
 window.addEventListener('resize',resize);resize();
-let tcv=null,dynCanvas=null,dctx=null;
+let tcv=null,tctx=null,dynCanvas=null,dctx=null;
+// three pre-baked full-world terrain textures (forest / grey / neon-waste) that
+// the live ground is composited from, per cell, through an urbanization mask. The
+// mask blooms out of village centres as the age industrialises and recedes as
+// nature returns — so eras no longer re-bake the ground mid-play (no freeze).
+let terLayers=[null,null,null],terPals=[null,null,null],terStyle=[null,null,null];
+let decorList=null,solidCornerIdx=null;
+let urbanBaked=null,villageStamp='';
+let terBuild=null,terScan=0;
+const URBAN_LEVELS=12;
 
 /* ================= eras =================
    The world cycles slowly between a lush medieval forest and a sci-fi urban
@@ -2157,6 +2165,9 @@ const ERAS=[
  {name:'The Neon Waste', grass:'#54677a', dirt:'#08060e', style:'cracked', edge:'sharp', green:0.06,
   lines:['Dead signage flickers in the bramble. The old net dreams beneath.','Chrome and moss have called a truce out here in the waste.','Nothing grows but the past, and it grows everywhere.']},
 ];
+// the three fixed keyframes the terrain layers are painted from (forest / grey /
+// waste). The live age just slides an urbanization mask between them.
+const LAYER_KF=[ERAS[0],ERAS[2],ERAS[3]];
 function eraGreen(){ return surfEra?surfEra.green:1; }
 let eraOffset=0,tileSalt=0;   // editor knobs: shift the age / reroll the grain
 function eraFloat(){
@@ -2177,16 +2188,24 @@ function eraState(){
 // the ground flows seamlessly — grass and bramble-rock as two continuous
 // textures with organic rounded edges between them (cohesive, like the deep).
 let surfPals=null,surfStyle=null,surfSeedN=1,surfMasks=null,surfEra=null;
+// prepare the shared silhouette masks + per-layer palettes/styles. All three
+// layers share ONE edge style so their rock outlines line up exactly and the
+// per-cell crossfade between them stays clean (only palette + surface texture
+// differ from age to age).
 function bakeSurfaceTiles(){
- const es=eraState();surfEra=es;
  surfStyle=TileGen.deriveStyle('surface-'+seed+'-'+tileSalt);
- surfStyle.name=es.style; surfStyle.edge=es.edge;         // era decides look
+ surfStyle.name=LAYER_KF[0].style; surfStyle.edge=LAYER_KF[0].edge;
  surfStyle.texDensity*=0.7; surfStyle.macroAmt*=0.7;       // calmer than the deep
- // keep blocked rock much darker than open grass so the two always read apart
- surfPals=TileGen.makePalettes(es.grass,es.dirt,{rockLift:0.05});
  surfSeedN=(seed>>>0)||1;
  surfMasks=[];
  for(let i=0;i<16;i++)surfMasks[i]=TileGen.edgeMask(TILE,TileGen.cornersFromIndex(i),surfStyle);
+ // per-layer palette (keep blocked rock much darker than open grass) + texture style
+ for(let k=0;k<3;k++){
+  terPals[k]=TileGen.makePalettes(LAYER_KF[k].grass,LAYER_KF[k].dirt,{rockLift:0.05});
+  terStyle[k]={...surfStyle, name:LAYER_KF[k].style};
+ }
+ surfPals=terPals[0];
+ surfEra=eraState();
 }
 // re-mark every hand-edited tile so the dynamic overlay repaints after a rebake
 function repaintDynAll(){
@@ -2196,24 +2215,13 @@ function repaintDynAll(){
  }
  terrainDirty=true;
 }
-// re-bake the ground when the age has drifted (throttled so fast-forward stays smooth)
-let lastEraBucket=-999,lastEraRebuildRT=0;
-function eraRebuildCheck(){
- const bucket=Math.round(eraFloat()*8);
- if(bucket===lastEraBucket)return;
- const now=performance.now();
- if(now-lastEraRebuildRT<2500)return;
- lastEraBucket=bucket;lastEraRebuildRT=now;
- buildTerrainLayer();
- repaintDynAll();
-}
-// paint one cell's worth of continuous ground into ctx (grass, or rock where the mask is solid)
-function paintCellTexture(c,x,y,solidMask){
+// paint one cell of continuous ground into ctx (grass, or rock where the mask is solid)
+function paintCellTextureTo(c,x,y,solidMask,pals,style){
  const img=c.createImageData(TILE,TILE),data=img.data;
  for(let ly=0;ly<TILE;ly++)for(let lx=0;lx<TILE;lx++){
   const i=ly*TILE+lx;
   const solid=solidMask?solidMask[i]===1:false;
-  let col=TileGen.surfaceTexel(surfPals,solid,x*TILE+lx,y*TILE+ly,surfSeedN,surfStyle);
+  let col=TileGen.surfaceTexel(pals,solid,x*TILE+lx,y*TILE+ly,surfSeedN,style);
   // dark rim along the grass↔rock boundary (organic edge readability)
   if(solidMask){
    const s=solidMask[i];
@@ -2225,41 +2233,127 @@ function paintCellTexture(c,x,y,solidMask){
  }
  c.putImageData(img,x*TILE,y*TILE);
 }
+function paintCellTexture(c,x,y,solidMask){ paintCellTextureTo(c,x,y,solidMask,surfPals,surfStyle); }
 function paintFloorTile(c,x,y){
  if(surfPals){paintCellTexture(c,x,y,null);return;}
  const h=hash2(x,y),v=h*16;
  c.fillStyle='rgb('+(56+v)+','+(92+v*0.9)+','+(50+v*0.6)+')';
  c.fillRect(x*TILE,y*TILE,TILE,TILE);
 }
+// ground clutter is drawn (and crossfaded living→dead) at render time now, so a
+// bloom of waste withers the meadow locally without touching the baked layers.
+function buildDecorList(){
+ decorList=[];
+ if(!flora)return;
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const i=idx(x,y);
+  if(map[i]!==0||nodeAt.has(i))continue;
+  const h=hash2(x,y);
+  if(h>0.30&&h<0.42) decorList.push({x,y,i,vi:(x*7+y*13)%flora.decor.length});
+ }
+}
+// bake a horizontal band of one terrain layer
+function bakeLayerBand(k,y0,y1){
+ const c=terLayers[k].getContext('2d');c.imageSmoothingEnabled=false;
+ const pals=terPals[k],style=terStyle[k];
+ for(let y=y0;y<y1;y++)for(let x=0;x<W;x++)
+  paintCellTextureTo(c,x,y,surfMasks[solidCornerIdx[idx(x,y)]],pals,style);
+}
+// stream the two extra layers in over frames so world creation doesn't hitch
+function stepTerrainBuild(){
+ if(!terBuild)return;
+ const BAND=8; let budget=2;
+ while(budget-->0 && terBuild){
+  const y2=Math.min(H,terBuild.y+BAND);
+  bakeLayerBand(terBuild.k,terBuild.y,y2);
+  if(y2>=H){ terBuild = terBuild.k<2 ? {k:terBuild.k+1,y:0} : null; if(urbanBaked)urbanBaked.fill(-1); }
+  else terBuild.y=y2;
+ }
+}
+// how strongly the age wants to urbanise (0 in the verdant forest, ~1 in the waste)
+function urbanDrive(){ return clamp(1-eraGreen(),0,1); }
+const URBAN_R=Math.hypot(W,H), URBAN_F=7, UBS=4;  // feather (cells); UBS = block size (>>2)
+let uCW=0,urbanDistC=null,lastUrbanRT=0;
+function urbanAt(i){
+ const D=urbanDrive();
+ if(D<=0)return 0;
+ if(!urbanDistC)return D;                     // no villages yet → uniform tide
+ const x=i%W,y=(i/W)|0;
+ return clamp((D*(URBAN_R+URBAN_F)-urbanDistC[(y>>2)*uCW+(x>>2)])/URBAN_F,0,1);
+}
+function urbanBucket(i){ return Math.round(urbanAt(i)*URBAN_LEVELS); }
+// distance (in cells) from each block to the nearest village centre; the waste
+// blooms out of these centres and recedes toward them as nature returns. Computed
+// on a coarse block grid and throttled — the frontier is soft & slow, so per-cell
+// precision and per-frame freshness aren't needed (keeps 500× fast-forward smooth).
+function ensureUrbanDist(){
+ const stamp=villages.map(v=>v.cx+','+v.cy).join(';');
+ if(stamp===villageStamp)return;
+ const now=performance.now();
+ if(urbanDistC&&now-lastUrbanRT<300)return;    // don't churn the field at high speed
+ villageStamp=stamp; lastUrbanRT=now;
+ if(!villages.length){urbanDistC=null;return;}
+ uCW=Math.ceil(W/UBS); const uCH=Math.ceil(H/UBS);
+ urbanDistC=new Float32Array(uCW*uCH);
+ for(let by=0;by<uCH;by++)for(let bx=0;bx<uCW;bx++){
+  const cx=bx*UBS+UBS/2, cy=by*UBS+UBS/2;
+  let best=1e9;
+  for(const v of villages){const dx=cx-v.cx,dy=cy-v.cy,d=Math.sqrt(dx*dx+dy*dy);if(d<best)best=d}
+  urbanDistC[by*uCW+bx]=best;
+ }
+}
+// composite one cell of tcv: forest base, then grey then waste layered on top
+// with per-cell alpha driven by the urbanization mask
+function compositeCell(i){
+ const x=i%W,y=(i/W)|0,px=x*TILE,py=y*TILE,u=urbanAt(i);
+ const a1=clamp(u*2,0,1),a2=clamp((u-0.5)*2,0,1);
+ tctx.globalAlpha=1;tctx.drawImage(terLayers[0],px,py,TILE,TILE,px,py,TILE,TILE);
+ if(a1>0&&terLayers[1]){tctx.globalAlpha=a1;tctx.drawImage(terLayers[1],px,py,TILE,TILE,px,py,TILE,TILE);}
+ if(a2>0&&terLayers[2]){tctx.globalAlpha=a2;tctx.drawImage(terLayers[2],px,py,TILE,TILE,px,py,TILE,TILE);}
+ tctx.globalAlpha=1;
+ urbanBaked[i]=urbanBucket(i);
+}
+function compositeAll(){
+ tctx.globalAlpha=1;tctx.drawImage(terLayers[0],0,0);   // fast base for the forest majority
+ for(let i=0;i<W*H;i++){ urbanBaked[i]=urbanBucket(i); if(urbanBaked[i]>0)compositeCell(i); }
+}
+// per-frame: keep the live era fresh, stream layer bakes, and recomposite only
+// the cells whose urbanization bucket drifted (bounded → the bloom animates
+// smoothly instead of freezing the map).
+function terrainTick(){
+ surfEra=eraState();
+ if(!tctx)return;
+ stepTerrainBuild();
+ ensureUrbanDist();
+ let budget=terBuild?200:900;
+ for(let n=0;n<W*H && budget>0;n++){
+  const i=terScan; terScan=(terScan+1)%(W*H);
+  if(urbanBaked[i]!==urbanBucket(i)){compositeCell(i);budget--;}
+ }
+}
 function buildTerrainLayer(){
  bakeSurfaceTiles();
- tcv=document.createElement('canvas');
- tcv.width=W*TILE;tcv.height=H*TILE;
- const c=tcv.getContext('2d');c.imageSmoothingEnabled=false;
- // rock field = solid cells; its rounded per-cell mask carves the organic edge
+ // rock silhouette: per-cell edge-mask index from the walkable/solid vertex grid
  const solidF=[];
  for(let y=0;y<H;y++){solidF[y]=[];for(let x=0;x<W;x++)solidF[y][x]=!walkable(x,y)}
  const vgS=TileGen.computeVertexGrid(solidF,H,W);
- for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const si=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
-  paintCellTexture(c,x,y,surfMasks[si]);
- }
- // Plant Forge meadow decor — dies back to withered stalks as the age turns
- // wasteland (living vs dead chosen per-tile by greenness), thinning a little too
- const green=surfEra?surfEra.green:1;
- for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  if(map[idx(x,y)]!==0)continue;
-  const h=hash2(x,y);
-  if(flora&&h>0.30&&h<0.30+0.06+0.06*green&&!nodeAt.has(idx(x,y))){
-   const dvi=(x*7+y*13)%flora.decor.length;
-   const alive=hash2(x+3,y+5)<green;                 // green ages keep them living
-   const dc=(alive?flora:floraDead).decor[dvi];
-   c.drawImage(dc,x*TILE+TILE/2-dc.width/2,y*TILE+TILE-dc.height+1);
-  }
- }
- dynCanvas=document.createElement('canvas');
- dynCanvas.width=W*TILE;dynCanvas.height=H*TILE;
+ solidCornerIdx=new Int16Array(W*H);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++)
+  solidCornerIdx[idx(x,y)]=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
+ // allocate the three layer canvases + the composited output + the dyn overlay
+ for(let k=0;k<3;k++){const cv=document.createElement('canvas');cv.width=W*TILE;cv.height=H*TILE;terLayers[k]=cv;}
+ tcv=document.createElement('canvas');tcv.width=W*TILE;tcv.height=H*TILE;
+ tctx=tcv.getContext('2d');tctx.imageSmoothingEnabled=false;
+ dynCanvas=document.createElement('canvas');dynCanvas.width=W*TILE;dynCanvas.height=H*TILE;
  dctx=dynCanvas.getContext('2d');
+ buildDecorList();
+ // bake the forest layer now (needed immediately); grey & waste stream in
+ bakeLayerBand(0,0,H);
+ terBuild={k:1,y:0}; terScan=0;
+ // prime the composited ground against the current age
+ urbanDistC=null;villageStamp='';lastUrbanRT=0;urbanBaked=new Int16Array(W*H).fill(-1);
+ ensureUrbanDist();
+ compositeAll();
  terrainDirty=true;
 }
 function houseColor(i){
@@ -2278,7 +2372,7 @@ function paintDynTile(c,i){
   if(ripe){c.fillStyle='#e8d06a';for(let r=0;r<4;r++)for(let k=0;k<3;k++)c.fillRect(px+2+k*5,py+1+r*4,2,2)}
   return;
  }
- if(map[i]===0){paintFloorTile(c,x,y);return}
+ if(map[i]===0){if(tctx)c.clearRect(px,py,TILE,TILE);else paintFloorTile(c,x,y);return}
  const s=struct[i];
  if(s===S_HOUSE){
   const rc=houseColor(i);
@@ -2484,6 +2578,19 @@ function draw(t){
  const vx0=Math.max(0,((cam.x-cw/(2*z))/TILE|0)-3),vx1=Math.min(W-1,((cam.x+cw/(2*z))/TILE|0)+3);
  const vy0=Math.max(0,((cam.y-ch/(2*z))/TILE|0)-3),vy1=Math.min(H-1,((cam.y+ch/(2*z))/TILE|0)+3);
  const nf=nightFactor();
+ // ground clutter: living meadow undergrowth that withers (and thins) locally as
+ // the waste blooms over it, greens back as nature returns
+ if(decorList&&flora){
+  for(const d of decorList){
+   if(d.x<vx0||d.x>vx1||d.y<vy0||d.y>vy1)continue;
+   const u=urbanAt(d.i), g=clamp((1-u)*1.25,0,1);
+   const dcL=flora.decor[d.vi],dcD=floraDead.decor[d.vi];
+   const bx=d.x*TILE+TILE/2, by=d.y*TILE+TILE;
+   if(g>0.02){ctx.globalAlpha=g;ctx.drawImage(dcL,bx-dcL.width/2,by-dcL.height+1)}
+   if(g<0.98){ctx.globalAlpha=(1-g)*(1-0.55*clamp((u-0.75)/0.25,0,1));ctx.drawImage(dcD,bx-dcD.width/2,by-dcD.height+1)}
+   ctx.globalAlpha=1;
+  }
+ }
  for(const n of nodes){
   if(n.x<vx0||n.x>vx1||n.y<vy0||n.y>vy1)continue;
   drawNode(ctx,n,t);
@@ -3328,13 +3435,20 @@ function frame(t){
  const sp=SPEEDS[speedIdx];
  if(sp>0){
   acc=Math.min(acc+rdt*sp*RATE,500);
+  // time-box the fast-forward catch-up: at 500× a single frame could otherwise
+  // run hundreds of sim sub-steps and stall for >100ms. Cap the wall-clock the
+  // loop may spend so the frame stays smooth; leftover time is simply dropped
+  // (acc is re-capped next frame), so the sim self-throttles to what fits.
+  const simDeadline=performance.now()+9;
   while(acc>0){
    const st=Math.min(2,acc);
    stepSim(st);
    acc-=st;
+   if(acc>0&&performance.now()>=simDeadline)break;
   }
  }
  processBakeQueue();
+ terrainTick();
  updateHero(rdt);
  if(cine){
   cam.z+=(cineZoomTarget-cam.z)*0.09;
@@ -3342,7 +3456,8 @@ function frame(t){
  draw(t);
  if(t-uiT>(cine?260:450)){
   uiT=t;
-  $('clock').textContent='Day '+cday()+' · '+(surfEra?surfEra.name:phase());
+  $('clock').textContent='Day '+cday();
+  $('era').textContent=(surfEra?surfEra.name:phase());
   $('pop').textContent='👥 '+people.length+(animals.length?' · 🐾'+animals.length:'')+(monsters.length?' · 👹'+monsters.length:'');
   $('hearts').textContent=speedIdx>=2?'🧘 the Sage meditates':heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
   if(cine&&selected)updateCine();
@@ -3461,8 +3576,8 @@ return {
   forgeAnimal:()=>{const made=AF.make(null,'forge-'+((Math.random()*1e9)|0));made._preview=CFHelp.bakeCreature(made.params,48,['walk']);return made},
   spawnAnimalMade:(made)=>spawnAnimal(made&&made.key,made),
   populateFauna:()=>{const at=animalTarget();let n=0;while(animals.length<at&&n++<40)if(!spawnAnimal())break;toast('The green fills with life.')},
-  tileStyle:()=>({name:surfStyle&&surfStyle.name,edge:surfStyle&&surfStyle.edge}),
-  advanceEra:()=>{eraOffset+=ERA_SEG_DAYS;lastEraBucket=-999;buildTerrainLayer();repaintDynAll();const es=eraState();toast('The age turns → '+es.name)},
+  tileStyle:()=>({name:surfEra&&surfEra.style,edge:surfEra&&surfEra.edge}),
+  advanceEra:()=>{eraOffset+=ERA_SEG_DAYS;surfEra=eraState();const es=surfEra;toast('The age turns → '+es.name+' — the waste blooms from the villages.')},
   rerollTiles:()=>{tileSalt=(Math.random()*1e6)|0;buildTerrainLayer();repaintDynAll();toast('The ground reconsiders its texture. ('+surfStyle.name+' · '+surfStyle.edge+' edge)')},
   rerollFolk:()=>{for(const p of people){p.lookSeed='folk-'+p.id+'-'+((Math.random()*1e9)|0);queuePersonBake(p)}toast('Everyone wakes up feeling like someone slightly else.')},
   rerollHero:()=>{Hero.lookSeed='sage-'+((Math.random()*1e9)|0);queueHeroBake();toast('The Sage is reborn mid-stride.')},
