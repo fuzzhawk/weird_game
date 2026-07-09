@@ -64,6 +64,10 @@ light and blocked bramble stays dark, so walkable vs solid always reads),
 plants **wither and die back** toward the wasteland (nodes crossfade to dry
 husks, food grows scarce) and green again as the forest returns, and **relics
 surface** as the world industrialises (few in the forest, many in the waste).
+The world is pre-rendered as three layered textures (forest / grey / waste)
+blended per-cell through an **urbanization mask that blooms out of the villages**
+as the age industrialises and recedes back toward them as nature returns — so the
+ground re-composites live, cell by cell, instead of re-baking and stalling.
 The current age shows in the top bar; the Gardener's Bench can turn the age or
 reroll the ground on demand.
 
