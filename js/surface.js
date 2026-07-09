@@ -2142,7 +2142,7 @@ let tcv=null,tctx=null,dynCanvas=null,dctx=null;
 // nature returns — so eras no longer re-bake the ground mid-play (no freeze).
 let terLayers=[null,null,null],terPals=[null,null,null],terStyle=[null,null,null];
 let decorList=null,solidCornerIdx=null;
-let urbanDist=null,urbanBaked=null,villageStamp='';
+let urbanBaked=null,villageStamp='';
 let terBuild=null,terScan=0;
 const URBAN_LEVELS=12;
 
@@ -2272,28 +2272,35 @@ function stepTerrainBuild(){
 }
 // how strongly the age wants to urbanise (0 in the verdant forest, ~1 in the waste)
 function urbanDrive(){ return clamp(1-eraGreen(),0,1); }
-const URBAN_R=Math.hypot(W,H), URBAN_F=7;   // feather (cells) at the bloom frontier
+const URBAN_R=Math.hypot(W,H), URBAN_F=7, UBS=4;  // feather (cells); UBS = block size (>>2)
+let uCW=0,urbanDistC=null,lastUrbanRT=0;
 function urbanAt(i){
  const D=urbanDrive();
  if(D<=0)return 0;
- if(!urbanDist)return D;                     // no villages yet → uniform tide
- return clamp((D*(URBAN_R+URBAN_F)-urbanDist[i])/URBAN_F,0,1);
+ if(!urbanDistC)return D;                     // no villages yet → uniform tide
+ const x=i%W,y=(i/W)|0;
+ return clamp((D*(URBAN_R+URBAN_F)-urbanDistC[(y>>2)*uCW+(x>>2)])/URBAN_F,0,1);
 }
 function urbanBucket(i){ return Math.round(urbanAt(i)*URBAN_LEVELS); }
-// distance (in cells) from each tile to the nearest village centre; the waste
-// blooms out of these centres and recedes back toward them as nature returns
+// distance (in cells) from each block to the nearest village centre; the waste
+// blooms out of these centres and recedes toward them as nature returns. Computed
+// on a coarse block grid and throttled — the frontier is soft & slow, so per-cell
+// precision and per-frame freshness aren't needed (keeps 500× fast-forward smooth).
 function ensureUrbanDist(){
  const stamp=villages.map(v=>v.cx+','+v.cy).join(';');
  if(stamp===villageStamp)return;
- villageStamp=stamp;
- if(!villages.length){urbanDist=null;if(urbanBaked)urbanBaked.fill(-1);return;}
- urbanDist=new Float32Array(W*H);
- for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+ const now=performance.now();
+ if(urbanDistC&&now-lastUrbanRT<300)return;    // don't churn the field at high speed
+ villageStamp=stamp; lastUrbanRT=now;
+ if(!villages.length){urbanDistC=null;return;}
+ uCW=Math.ceil(W/UBS); const uCH=Math.ceil(H/UBS);
+ urbanDistC=new Float32Array(uCW*uCH);
+ for(let by=0;by<uCH;by++)for(let bx=0;bx<uCW;bx++){
+  const cx=bx*UBS+UBS/2, cy=by*UBS+UBS/2;
   let best=1e9;
-  for(const v of villages){const dx=x-v.cx,dy=y-v.cy,d=Math.sqrt(dx*dx+dy*dy);if(d<best)best=d}
-  urbanDist[idx(x,y)]=best;
+  for(const v of villages){const dx=cx-v.cx,dy=cy-v.cy,d=Math.sqrt(dx*dx+dy*dy);if(d<best)best=d}
+  urbanDistC[by*uCW+bx]=best;
  }
- if(urbanBaked)urbanBaked.fill(-1);           // frontier moved → recomposite
 }
 // composite one cell of tcv: forest base, then grey then waste layered on top
 // with per-cell alpha driven by the urbanization mask
@@ -2344,7 +2351,7 @@ function buildTerrainLayer(){
  bakeLayerBand(0,0,H);
  terBuild={k:1,y:0}; terScan=0;
  // prime the composited ground against the current age
- urbanDist=null;villageStamp='';urbanBaked=new Int16Array(W*H).fill(-1);
+ urbanDistC=null;villageStamp='';lastUrbanRT=0;urbanBaked=new Int16Array(W*H).fill(-1);
  ensureUrbanDist();
  compositeAll();
  terrainDirty=true;
@@ -3428,10 +3435,16 @@ function frame(t){
  const sp=SPEEDS[speedIdx];
  if(sp>0){
   acc=Math.min(acc+rdt*sp*RATE,500);
+  // time-box the fast-forward catch-up: at 500× a single frame could otherwise
+  // run hundreds of sim sub-steps and stall for >100ms. Cap the wall-clock the
+  // loop may spend so the frame stays smooth; leftover time is simply dropped
+  // (acc is re-capped next frame), so the sim self-throttles to what fits.
+  const simDeadline=performance.now()+9;
   while(acc>0){
    const st=Math.min(2,acc);
    stepSim(st);
    acc-=st;
+   if(acc>0&&performance.now()>=simDeadline)break;
   }
  }
  processBakeQueue();
