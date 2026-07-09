@@ -2562,25 +2562,33 @@ function nightFactor(){
 
 /* ================= main draw ================= */
 function draw(t){
- ctx.setTransform(dpr,0,0,dpr,0,0);
- ctx.fillStyle='#131f12';ctx.fillRect(0,0,cw,ch);
  const z=cam.z;
  if(cine&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
  else if(follow&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
  else{cam.x+=(hero.x-cam.x)*0.12;cam.y+=(hero.y-cam.y)*0.12}
  cam.x=clamp(cam.x,Math.min(cw/(2*z),W*TILE/2),Math.max(W*TILE-cw/(2*z),W*TILE/2));
  cam.y=clamp(cam.y,Math.min(ch/(2*z),H*TILE/2),Math.max(H*TILE-ch/(2*z),H*TILE/2));
+ // only clear the letterbox when the viewport actually spills past the world
+ // edges (zoomed out) — otherwise the ground fully covers it, so skip the fill
+ const halfW=cw/(2*z),halfH=ch/(2*z);
+ if(cam.x-halfW<0||cam.x+halfW>W*TILE||cam.y-halfH<0||cam.y+halfH>H*TILE){
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#131f12';ctx.fillRect(0,0,cw,ch);
+ }
  ctx.setTransform(z*dpr,0,0,z*dpr,dpr*(cw/2-cam.x*z),dpr*(ch/2-cam.y*z));
  ctx.imageSmoothingEnabled=false;
- if(tcv)ctx.drawImage(tcv,0,0);
+ const vx0=Math.max(0,((cam.x-halfW)/TILE|0)-3),vx1=Math.min(W-1,((cam.x+halfW)/TILE|0)+3);
+ const vy0=Math.max(0,((cam.y-halfH)/TILE|0)-3),vy1=Math.min(H-1,((cam.y+halfH)/TILE|0)+3);
+ // blit only the on-screen slab of the ground / structure overlay
+ const bsx=vx0*TILE,bsy=vy0*TILE,bsw=(vx1-vx0+1)*TILE,bsh=(vy1-vy0+1)*TILE;
+ if(tcv)ctx.drawImage(tcv,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
  if(terrainDirty){paintDyn();terrainDirty=false}
- if(dynCanvas)ctx.drawImage(dynCanvas,0,0);
- const vx0=Math.max(0,((cam.x-cw/(2*z))/TILE|0)-3),vx1=Math.min(W-1,((cam.x+cw/(2*z))/TILE|0)+3);
- const vy0=Math.max(0,((cam.y-ch/(2*z))/TILE|0)-3),vy1=Math.min(H-1,((cam.y+ch/(2*z))/TILE|0)+3);
+ if(dynCanvas)ctx.drawImage(dynCanvas,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
  const nf=nightFactor();
  // ground clutter: living meadow undergrowth that withers (and thins) locally as
- // the waste blooms over it, greens back as nature returns
- if(decorList&&flora){
+ // the waste blooms over it, greens back as nature returns. It's sub-tile detail,
+ // so skip it entirely when zoomed out — invisible there, and it's the heaviest
+ // per-frame draw loop.
+ if(decorList&&flora&&z>0.7){
   for(const d of decorList){
    if(d.x<vx0||d.x>vx1||d.y<vy0||d.y>vy1)continue;
    const u=urbanAt(d.i), g=clamp((1-u)*1.25,0,1);
