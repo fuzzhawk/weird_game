@@ -66,6 +66,15 @@ sending to a phone. No server or network needed.
   stubs of wall, and collaborate to lay **tidy flagstone lanes** connecting
   every building to a central plaza — so a grown settlement reads as a kept,
   connected place rather than scattered huts in the bramble.
+- **Towns rise and fall.** Settlements can **die out** — to old age, famine, or
+  the things from below — and when a town's people are all gone it collapses into
+  a lasting **ruin**: its buildings stay standing as rubble, and a raidable
+  **Ruins of …** site opens at its heart, holding the old town's treasure and
+  **quests**, with **monsters** moved into the empty streets (walk up to **RAID**
+  it). When the whole map falls silent, a **founding expedition** of settlers
+  comes over the hills to raise a new town from the ashes — an endless cycle of
+  civilisations. The Gardener's Bench can *land an expedition* or *doom the town*
+  on demand.
 - Speed controls (⏸/1×/16×/500×) fast-forward the sim; at 16×+ the Sage
   meditates and is ignored by monsters.
 
