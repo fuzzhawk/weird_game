@@ -92,10 +92,11 @@ button:active{transform:translateY(1px)}
 #cine .cspd{position:absolute;bottom:calc(9vh + 14px);right:14px;pointer-events:auto;display:flex;gap:5px}
 #cine .nav{position:absolute;bottom:calc(9vh + 14px);left:14px;pointer-events:auto;display:flex;gap:5px}
 /* surface context buttons + dialog */
-#sTalkBtn,#sDescendBtn{position:fixed;left:50%;transform:translateX(-50%);
+#sTalkBtn,#sDescendBtn,#sEnterBtn{position:fixed;left:50%;transform:translateX(-50%);
   display:none;background:#1a3524;color:#cfe8cf;border:2px solid #3fae54;border-radius:10px;
   padding:12px 26px;font-size:14px;letter-spacing:1px;z-index:6;box-shadow:0 4px 16px rgba(0,0,0,.6)}
 #sTalkBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 96px)}
+#sEnterBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 148px);background:#2a2016;border-color:#c79a5a;color:#f0d9b0}
 #sDescendBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 44px);background:#241a35;border-color:#8a63c9;color:#d9cff2}
 #sDialog{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);
   display:none;background:rgba(16,24,14,0.95);border:2px solid #3fae54;border-radius:12px;
@@ -240,6 +241,7 @@ button:active{transform:translateY(1px)}
   </div>
 
   <button id="sTalkBtn">💬 TALK</button>
+  <button id="sEnterBtn">🚪 ENTER</button>
   <button id="sDescendBtn">🕳 DESCEND</button>
   <div id="sDialog">
     <div id="sDialogName"></div>
@@ -2105,8 +2107,10 @@ let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[];
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
 let cam={x:W*TILE/2,y:H*TILE/2,z:1.4};
 let selected=null,follow=false,cine=false;
+let interior=null,enterTarget=null;   // house interiors: bigger on the inside
 let chron=[];
 let terrainDirty=true,modTiles=new Set();
+let pavedTiles=new Set();          // tidied stone lanes the village lays between buildings
 let peaceful=false;               // editor toggle: the garden holds its breath
 let lastInspect=null;             // {type,obj} — what the editor may rewrite
 let onEnterDungeon=null;          // set by main.js
@@ -2130,9 +2134,9 @@ const HERO_SPEED=132, HERO_RANGE=56, HERO_ARC=Math.PI*0.85;
 
 /* ================= terrain editing ================= */
 function markMod(i){modTiles.add(i);terrainDirty=true;regionsDirty=true}
-function setSolid(x,y,type){const i=idx(x,y);map[i]=1;struct[i]=type;farmGrid[i]=0;markMod(i)}
+function setSolid(x,y,type){const i=idx(x,y);map[i]=1;struct[i]=type;farmGrid[i]=0;pavedTiles.delete(i);markMod(i)}
 function carveFloor(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_FLOOR;markMod(i)}
-function revertTile(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_ROCK;farmGrid[i]=0;markMod(i)}
+function revertTile(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_ROCK;farmGrid[i]=0;pavedTiles.delete(i);markMod(i)}
 function computeRegions(){
  if(!region)region=new Int32Array(W*H);
  region.fill(-1);
@@ -2392,10 +2396,10 @@ function processBakeQueue(){
 function genWorld(){
  map=new Uint8Array(W*H);bld=new Int16Array(W*H).fill(-1);
  struct=new Uint8Array(W*H);farmGrid=new Uint8Array(W*H);farmTimer=new Float32Array(W*H);farmTiles=new Set();
- modTiles=new Set();terrainDirty=true;regionsDirty=true;
+ modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
  people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];chron=[];usedNames=new Set();
- simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
+ simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  bakeFlora('garden-'+seed);
  queueMonsterBakes();
@@ -3121,8 +3125,8 @@ function doTask(p,dt){
     if(moveAlong(p,dt))t.arr=true;else break;
    }
    t.h=(t.h||0)+dt;
-   if(chance(dt*0.03))emote(p,j.type==='mine'?'⛏':j.type==='wall'?'🌿':j.type==='harvest'?'🌾':'🌱');
-   if(t.h>=(j.type==='wall'?6:12)){doVillageJob(p,v,j);p.task=null}
+   if(chance(dt*0.03))emote(p,{mine:'⛏',wall:'🌿',harvest:'🌾',clear:'⛏',tidywall:'🧹',pave:'🧱'}[j.type]||'🌱');
+   if(t.h>=(j.type==='wall'||j.type==='pave'||j.type==='tidywall'?6:12)){doVillageJob(p,v,j);p.task=null}
    break;
   }
   default:p.task=null;
@@ -3151,7 +3155,49 @@ function doVillageJob(p,v,j){
    if(chance(.12))tale([p],p.name+' brought in a good harvest from the '+v.name+' plots.');
   }
   drop();
+ }else if(j.type==='clear'){
+  const nd=nodeAt.get(i);
+  if(nd&&nd.t==='rock'){removeNode(nd);v.stock.stone+=2;p.inv.stone++}
+  else if(!walkable(j.x,j.y)&&clearableSolid(j.x,j.y)){carveFloor(j.x,j.y);v.stock.stone++;p.inv.stone++}
+  drop();
+  if(chance(.14))tale([p],p.name+' cleared loose rock from the edges of '+v.name+', tidying the ground.');
+ }else if(j.type==='tidywall'){
+  if(struct[i]===S_WALL)carveFloor(j.x,j.y);
+  drop();
+  if(chance(.2))tale([p],p.name+' pulled down a stray stub of hedge-wall around '+v.name+'.');
+ }else if(j.type==='pave'){
+  pavePath(j.x,j.y);drop();
  }
+}
+// remove a resource node from the world entirely (cleared, not just depleted)
+function removeNode(nd){
+ const i=idx(nd.x,nd.y),k=nodes.indexOf(nd);
+ if(k>=0)nodes.splice(k,1);
+ nodeAt.delete(i);markMod(i);
+}
+// a solid tile the village may clear: bramble/rock terrain only — never a
+// building, wall, ruin, resource node, or dungeon mouth
+function clearableSolid(x,y){
+ const i=idx(x,y);
+ if(walkable(x,y))return false;
+ if(struct[i]===S_WALL||struct[i]===S_HOUSE||struct[i]===S_RUIN)return false;
+ if(bld[i]>=0||nodeAt.has(i)||dungeonAt(x,y))return false;
+ return true;
+}
+// lay (or keep) a tidy stone lane on a tile, clearing bramble underneath it first
+function pavePath(x,y){
+ const i=idx(x,y);
+ if(!walkable(x,y)){ if(!clearableSolid(x,y))return false; carveFloor(x,y); }
+ if(nodeAt.has(i)||bld[i]>=0||farmGrid[i])return false;
+ pavedTiles.add(i);markMod(i);return true;
+}
+// an L-shaped run of tiles from (x0,y0) to (x1,y1) — the skeleton of a lane
+function laneTiles(x0,y0,x1,y1){
+ const out=[];const sx=Math.sign(x1-x0),sy=Math.sign(y1-y0);
+ for(let x=x0;x!==x1;x+=sx||1){out.push([x,y0]);if(!sx)break}
+ for(let y=y0;y!==y1;y+=sy||1){out.push([x1,y]);if(!sy)break}
+ out.push([x1,y1]);
+ return out;
 }
 
 /* ================= romance & interaction ================= */
@@ -4072,6 +4118,9 @@ function planVillage(v){
   if(j.type==='mine')return !walkable(j.x,j.y);
   if(j.type==='till')return walkable(j.x,j.y)&&farmGrid[idx(j.x,j.y)]===0;
   if(j.type==='harvest')return farmGrid[idx(j.x,j.y)]===2;
+  if(j.type==='clear')return nodeAt.has(idx(j.x,j.y))||!walkable(j.x,j.y);
+  if(j.type==='tidywall')return struct[idx(j.x,j.y)]===S_WALL;
+  if(j.type==='pave')return !pavedTiles.has(idx(j.x,j.y));
   return false;
  });
  const [cx,cy]=claimCenter(v.claim),cl=v.claim;
@@ -4097,7 +4146,7 @@ function planVillage(v){
   const ix0=cl.x0+WALL_THICK+1,iy0=cl.y0+WALL_THICK+1,ix1=cl.x1-WALL_THICK-1,iy1=cl.y1-WALL_THICK-1;
   outer:for(let y=iy0;y<=iy1;y++)for(let x=ix0;x<=ix1;x++){
    const i=idx(x,y);
-   if(walkable(x,y)&&farmGrid[i]===0&&bld[i]<0&&!nodeAt.has(i)&&struct[i]!==S_WALL&&!v.jobs.some(j=>j.x===x&&j.y===y)){
+   if(walkable(x,y)&&farmGrid[i]===0&&bld[i]<0&&!nodeAt.has(i)&&struct[i]!==S_WALL&&!pavedTiles.has(i)&&!v.jobs.some(j=>j.x===x&&j.y===y)){
     v.jobs.push({type:'till',x,y});if(++added>=6)break outer;
    }
   }
@@ -4110,6 +4159,52 @@ function planVillage(v){
   for(let tries=0;tries<18;tries++){
    const x=ri(cl.x0+WALL_THICK,cl.x1-WALL_THICK),y=ri(cl.y0+WALL_THICK,cl.y1-WALL_THICK),i=idx(x,y);
    if(!walkable(x,y)&&struct[i]!==S_WALL&&struct[i]!==S_HOUSE&&struct[i]!==S_RUIN&&bld[i]<0&&!nodeAt.has(i)&&!dungeonAt(x,y)){v.jobs.push({type:'mine',x,y});break}
+  }
+ }
+ // --- tidy the settlement: clear loose rock in a ring around the claim, and
+ //     pull down stray/isolated stubs of hedge-wall left over from old plans ---
+ const fortWalls=fort.walls, RING=4;
+ const has=(x,y)=>v.jobs.some(j=>j.x===x&&j.y===y);
+ if(v.jobs.filter(j=>j.type==='clear').length<6){
+  let added=0;
+  outerC:for(let y=cl.y0-RING;y<=cl.y1+RING&&added<6;y++)for(let x=cl.x0-RING;x<=cl.x1+RING;x++){
+   if(!inB(x,y))continue;
+   const inClaim=x>=cl.x0&&x<=cl.x1&&y>=cl.y0&&y<=cl.y1;
+   if(inClaim)continue;                        // the ring only — outside the walls
+   const i=idx(x,y);
+   if(has(x,y))continue;
+   const isRockNode=nodeAt.has(i)&&nodeAt.get(i).t==='rock';
+   if(isRockNode||clearableSolid(x,y)){v.jobs.push({type:'clear',x,y});if(++added>=6)break outerC}
+  }
+ }
+ if(v.jobs.filter(j=>j.type==='tidywall').length<4){
+  let added=0;
+  outerW:for(let y=cl.y0-1;y<=cl.y1+1&&added<4;y++)for(let x=cl.x0-1;x<=cl.x1+1;x++){
+   if(!inB(x,y))continue;
+   const i=idx(x,y);
+   if(struct[i]!==S_WALL||has(x,y))continue;
+   // only stray leftover walls (not on the current perimeter) — never tear down a
+   // wall the village is actively raising as part of its fort plan
+   if(!fortWalls.has(x+','+y)){v.jobs.push({type:'tidywall',x,y});added++}
+  }
+ }
+ // --- collaborate on a common plaza + lanes that connect every building to it,
+ //     so the town stays open and easy to move through (runs alongside the walls) ---
+ if(v.jobs.filter(j=>j.type==='pave').length<10){
+  const paveJob=(x,y)=>{
+   if(!inB(x,y)||has(x,y))return;
+   const i=idx(x,y);
+   if(pavedTiles.has(i)||nodeAt.has(i)||bld[i]>=0||farmGrid[i]||struct[i]===S_WALL||struct[i]===S_HOUSE||struct[i]===S_RUIN||dungeonAt(x,y))return;
+   v.jobs.push({type:'pave',x,y});
+  };
+  // a small open plaza at the heart of town
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)paveJob(cx+dx,cy+dy);
+  // a lane from each home's doorstep to the plaza
+  for(const b of v.homes){
+   if(b.gone||b.ruined||!b.done)continue;
+   const dx=b.x+((b.w/2)|0), dy=b.y+b.h;   // the tile just in front of the door
+   for(const[lx,ly]of laneTiles(dx,dy,cx,cy))paveJob(lx,ly);
+   if(v.jobs.filter(j=>j.type==='pave').length>=10)break;
   }
  }
 }
@@ -4284,7 +4379,7 @@ function bakeSurfaceTiles(){
 function repaintDynAll(){
  modTiles.clear();
  for(let i=0;i<W*H;i++){
-  if(farmGrid[i]||struct[i]===S_HOUSE||struct[i]===S_WALL||struct[i]===S_RUIN||struct[i]===S_FLOOR)modTiles.add(i);
+  if(farmGrid[i]||pavedTiles.has(i)||struct[i]===S_HOUSE||struct[i]===S_WALL||struct[i]===S_RUIN||struct[i]===S_FLOOR)modTiles.add(i);
  }
  terrainDirty=true;
 }
@@ -4312,6 +4407,19 @@ function paintFloorTile(c,x,y){
  const h=hash2(x,y),v=h*16;
  c.fillStyle='rgb('+(56+v)+','+(92+v*0.9)+','+(50+v*0.6)+')';
  c.fillRect(x*TILE,y*TILE,TILE,TILE);
+}
+// a tidy flagstone lane the village lays between its buildings
+function paintPaved(c,x,y){
+ const px=x*TILE,py=y*TILE,h=hash2(x*3+1,y*3+2),v=(h*14)|0;
+ c.fillStyle='rgb('+(120+v)+','+(116+v)+','+(108+v)+')';
+ c.fillRect(px,py,TILE,TILE);
+ // grout seams — a soft 2×2 flagstone grid, offset by row
+ c.fillStyle='rgba(40,38,34,0.55)';
+ const off=(y&1)?TILE/2:0;
+ c.fillRect(px,py+TILE/2-1,TILE,1);
+ c.fillRect(px+((off)|0),py,1,TILE/2);
+ c.fillRect(px+(((off+TILE/2)%TILE)|0),py+TILE/2,1,TILE/2);
+ c.fillStyle='rgba(255,255,255,0.06)';c.fillRect(px,py,TILE,1);
 }
 // ground clutter is drawn (and crossfaded living→dead) at render time now, so a
 // bloom of waste withers the meadow locally without touching the baked layers.
@@ -4445,7 +4553,10 @@ function paintDynTile(c,i){
   if(ripe){c.fillStyle='#e8d06a';for(let r=0;r<4;r++)for(let k=0;k<3;k++)c.fillRect(px+2+k*5,py+1+r*4,2,2)}
   return;
  }
- if(map[i]===0){if(tctx)c.clearRect(px,py,TILE,TILE);else paintFloorTile(c,x,y);return}
+ if(map[i]===0){
+  if(pavedTiles.has(i)){paintPaved(c,x,y);return}
+  if(tctx)c.clearRect(px,py,TILE,TILE);else paintFloorTile(c,x,y);return;
+ }
  const s=struct[i];
  if(s===S_HOUSE){
   const rc=houseColor(i);
@@ -4635,6 +4746,7 @@ function nightFactor(){
 
 /* ================= main draw ================= */
 function draw(t){
+ if(interior){drawInterior(t);return}
  const z=cam.z;
  if(cine&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
  else if(follow&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
@@ -4799,6 +4911,246 @@ function draw(t){
   ctx.fillText('the garden begins you again…',cw/2,ch/2+18);
  }
 }
+/* ================= house interiors (bigger on the inside) =================
+   Walk up to a home/shop/lean-to and step inside a generated room — larger than
+   its footprint — with furniture and its residents pottering about. The surface
+   sim keeps running outside while you're in here. */
+const ENTER_TP={home:1,shelter:1,biz:1};
+function doorTileOf(b){ return [b.x+((b.w/2)|0), b.y+b.h]; }   // the tile just outside the door
+function enterLabel(b){ return b.name||(b.tp==='home'?'the cottage':b.tp==='shelter'?'the lean-to':'the shop'); }
+function enterableAt(px,py){
+ let best=null,bd=(TILE*1.7)**2;
+ for(const b of buildings){
+  if(b.gone||b.ruined||!b.done||!ENTER_TP[b.tp])continue;
+  const[dx,dy]=doorTileOf(b),wx=dx*TILE+TILE/2,wy=dy*TILE+TILE/2;
+  const d=dist2(px,py,wx,wy);
+  if(d<bd){bd=d;best=b}
+ }
+ return best;
+}
+function freeSpotInt(intr,rng){
+ const rnd=rng||Math.random;
+ for(let t=0;t<80;t++){
+  const x=1+((rnd()*(intr.gw-2))|0), y=1+((rnd()*(intr.gh-2))|0);
+  if(!intr.solid[intr.si(x,y)])return[x,y];
+ }
+ return[1,1];
+}
+function makeInterior(b){
+ const gw=clamp(b.w*3+4,9,17), gh=clamp(b.h*3+3,8,13);
+ const solid=new Uint8Array(gw*gh), si=(x,y)=>y*gw+x;
+ for(let x=0;x<gw;x++){solid[si(x,0)]=1;solid[si(x,gh-1)]=1}
+ for(let y=0;y<gh;y++){solid[si(0,y)]=1;solid[si(gw-1,y)]=1}
+ const dcx=(gw/2)|0;
+ solid[si(dcx,gh-1)]=0;solid[si(dcx-1,gh-1)]=0;      // 2-wide doorway on the south wall
+ const intr={b,gw,gh,solid,si,door:[dcx,gh-1],doorGap:[dcx,dcx-1],furniture:[],occupants:[],
+   name:enterLabel(b), floor:b.tp==='biz'?'#4a4152':'#5a4230', wall:b.tp==='biz'?'#332c40':'#3a2f22'};
+ const rng=U.mulberry32(U.hashStr('interior-'+b.id));
+ const put=(x,y,w,h,kind,blk)=>{
+  intr.furniture.push({x,y,w,h,kind});
+  if(blk)for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)if(xx>0&&yy>0&&xx<gw-1&&yy<gh-1)solid[si(xx,yy)]=1;
+ };
+ if(b.tp==='biz'){
+  put(2,1,gw-4,1,'counter',1);
+  put(1,3,1,Math.max(1,gh-5),'shelf',1);
+  put(gw-2,3,1,Math.max(1,gh-5),'shelf',1);
+  put(dcx-1,gh-3,2,1,'rug',0);
+  put(3,gh-3,1,1,'crate',1);
+ }else{
+  put(1,1,2,1,'bed',1);
+  put(gw-3,1,2,1,'shelf',1);
+  put((gw/2|0)-1,(gh/2|0),2,1,'table',1);
+  put(gw-2,gh-3,1,1,'hearth',1);
+  put(dcx-1,gh-3,2,2,'rug',0);
+ }
+ const owners=(b.owners||[]).map(id=>allById.get(id)).filter(o=>o&&!o.dead&&o.sprite);
+ for(const o of owners.slice(0,3)){
+  const s=freeSpotInt(intr,rng);
+  intr.occupants.push({name:o.name,sprite:o.sprite,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,
+    tx:0,ty:0,dir:0,animClock:0,wait:rng()*2.5,moving:false});
+ }
+ return intr;
+}
+function intCanStand(x,y){
+ const intr=interior;if(!intr)return false;
+ const tx=(x/TILE)|0,ty=(y/TILE)|0;
+ if(tx<0||ty<0||tx>=intr.gw||ty>=intr.gh)return false;
+ return intr.solid[intr.si(tx,ty)]===0;
+}
+function intHeroCanStand(x,y){
+ const r=4.5;
+ if(!intCanStand(x,y))return false;
+ for(let i=0;i<4;i++){const a=i*Math.PI/2+Math.PI/4;if(!intCanStand(x+Math.cos(a)*r,y+Math.sin(a)*r))return false}
+ return true;
+}
+function intMoveHero(dx,dy){
+ const steps=Math.max(1,Math.ceil(Math.max(Math.abs(dx),Math.abs(dy))/3)),sx=dx/steps,sy=dy/steps;
+ for(let i=0;i<steps;i++){
+  if(sx&&intHeroCanStand(hero.x+sx,hero.y))hero.x+=sx;
+  if(sy&&intHeroCanStand(hero.x,hero.y+sy))hero.y+=sy;
+ }
+ hero.x=clamp(hero.x,3,interior.gw*TILE-3);
+ hero.y=clamp(hero.y,3,interior.gh*TILE-3);
+}
+function enterInterior(b){
+ if(interior||cine||!b||b.gone||b.ruined)return;
+ interior=makeInterior(b);
+ hero._sx=hero.x;hero._sy=hero.y;hero._scz=cam.z;
+ const[dx,dy]=interior.door;
+ hero.x=dx*TILE+TILE/2;hero.y=(dy-1)*TILE+TILE/2;hero.moving=false;
+ cam.x=hero.x;cam.y=hero.y;cam.z=Math.max(2.2,cam.z);
+ stick=null;inDialog=false;follow=false;
+ toast('You step inside '+interior.name+'.');
+}
+function exitInterior(){
+ if(!interior)return;
+ const b=interior.b;
+ const[ddx,ddy]=doorTileOf(b);
+ const s=(!b.gone&&nearOpen(ddx,ddy))||[Math.round(hero._sx/TILE)||ddx,Math.round(hero._sy/TILE)||ddy];
+ interior=null;
+ hero.x=s[0]*TILE+TILE/2;hero.y=s[1]*TILE+TILE/2;hero.moving=false;
+ cam.x=hero.x;cam.y=hero.y;if(hero._scz)cam.z=hero._scz;
+ stick=null;
+ toast('You step back out into the air.');
+}
+function updateOcc(o,rdt){
+ o.wait-=rdt;
+ if(!o.moving&&o.wait<=0){const s=freeSpotInt(interior);o.tx=s[0]*TILE+TILE/2;o.ty=s[1]*TILE+TILE/2;o.moving=true}
+ if(o.moving){
+  const dx=o.tx-o.x,dy=o.ty-o.y,d=Math.hypot(dx,dy);
+  if(d<3){o.moving=false;o.wait=1+Math.random()*3.5}
+  else{
+   const spd=32*rdt,nx=o.x+dx/d*spd,ny=o.y+dy/d*spd;
+   if(intCanStand(nx,o.y))o.x=nx;
+   if(intCanStand(o.x,ny))o.y=ny;
+   o.dir=CFHelp.angToDir(Math.atan2(dy,dx));o.animClock+=rdt;
+  }
+ }
+}
+function updateInteriorScene(rdt){
+ if(interior.b.gone||interior.b.ruined){exitInterior();return}
+ let mx=0,my=0;
+ if(stick&&!inDialog){
+  let dx=stick.x-stick.ox,dy=stick.y-stick.oy;
+  const d=Math.hypot(dx,dy);
+  if(d>STICK_RADIUS){const ex=(d-STICK_RADIUS)/d;stick.ox+=dx*ex;stick.oy+=dy*ex;dx=stick.x-stick.ox;dy=stick.y-stick.oy}
+  const m=Math.min(d/STICK_RADIUS,1);
+  if(d>4){mx=dx/d*m;my=dy/d*m;hero.face=Math.atan2(dy,dx)}
+ }
+ const spd=HERO_SPEED*Hero.speedMul*0.9,vx=mx*spd,vy=my*spd;
+ hero.moving=Math.hypot(vx,vy)>6;
+ if(hero.moving){
+  intMoveHero(vx*rdt,vy*rdt);
+  hero.dir=CFHelp.angToDir(Math.atan2(vy,vx));
+  hero.anim=Math.hypot(mx,my)>0.85?'run':'walk';hero.animClock+=rdt;
+ }else hero.anim='walk';
+ for(const o of interior.occupants)updateOcc(o,rdt);
+ // stepping into the doorway leads back outside
+ if(((hero.y/TILE)|0)>=interior.gh-1)exitInterior();
+ uiProxT-=rdt;if(uiProxT<=0){uiProxT=0.2;updateContextButtons()}
+}
+function drawFurniture(c,f){
+ const px=f.x*TILE,py=f.y*TILE,w=f.w*TILE,h=f.h*TILE;
+ if(f.kind==='rug'){
+  c.fillStyle='#7a3b4a';c.fillRect(px+1,py+1,w-2,h-2);
+  c.fillStyle='#a8586a';c.fillRect(px+3,py+3,w-6,h-6);
+  c.fillStyle='#e0c07a';c.fillRect(px+w/2-1,py+2,2,h-4);return;
+ }
+ if(f.kind==='bed'){
+  c.fillStyle='#6a4a30';c.fillRect(px,py,w,h);
+  c.fillStyle='#c9d3dd';c.fillRect(px+1,py+1,w-2,h-3);           // sheets
+  c.fillStyle='#e8eef4';c.fillRect(px+1,py+1,5,h-3);              // pillow
+  c.fillStyle='#8a6a4a';c.fillRect(px,py+h-2,w,2);return;
+ }
+ if(f.kind==='table'){
+  c.fillStyle='#7a5a3a';c.fillRect(px,py+1,w,h-1);
+  c.fillStyle='#5a3f28';c.fillRect(px+1,py+h-2,2,2);c.fillRect(px+w-3,py+h-2,2,2);
+  c.fillStyle='#caa25a';c.fillRect(px+w/2-2,py+2,4,3);return;     // a bowl
+ }
+ if(f.kind==='hearth'){
+  c.fillStyle='#4b4640';c.fillRect(px,py,w,h);
+  c.fillStyle='#1a1410';c.fillRect(px+2,py+3,w-4,h-4);
+  const fl=0.6+0.4*Math.sin(performance.now()*0.01);
+  c.fillStyle='rgba(255,150,50,'+(0.6+fl*0.4)+')';c.fillRect(px+3,py+h-5,w-6,3);
+  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+  c.drawImage(GLOW_WARM,px-6,py-6,w+12,h+12);c.globalCompositeOperation=go;return;
+ }
+ if(f.kind==='shelf'){
+  c.fillStyle='#5a4530';c.fillRect(px,py,w,h);
+  c.fillStyle='#3f2f1f';for(let yy=0;yy<h;yy+=5)c.fillRect(px,py+yy,w,1);
+  c.fillStyle='#9ab0c0';for(let yy=1;yy<h;yy+=5)for(let xx=1;xx<w-1;xx+=3)c.fillRect(px+xx,py+yy,2,3);return;
+ }
+ if(f.kind==='counter'){
+  c.fillStyle='#6a5236';c.fillRect(px,py,w,h);
+  c.fillStyle='#8a6a44';c.fillRect(px,py,w,2);
+  c.fillStyle='#3f2f1f';c.fillRect(px,py+h-1,w,1);return;
+ }
+ if(f.kind==='crate'){
+  c.fillStyle='#7a5c38';c.fillRect(px,py,w,h);
+  c.fillStyle='#5a4028';c.strokeStyle='#5a4028';c.lineWidth=1;
+  c.strokeRect(px+0.5,py+0.5,w-1,h-1);c.beginPath();c.moveTo(px,py);c.lineTo(px+w,py+h);c.stroke();return;
+ }
+ c.fillStyle='#6a5236';c.fillRect(px,py,w,h);
+}
+function drawInterior(t){
+ const intr=interior;
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+ ctx.fillStyle='#0c0a07';ctx.fillRect(0,0,cw,ch);
+ const z=cam.z;
+ cam.x+=(hero.x-cam.x)*0.16;cam.y+=(hero.y-cam.y)*0.16;
+ const wpx=intr.gw*TILE,wph=intr.gh*TILE;
+ cam.x=clamp(cam.x,Math.min(cw/(2*z),wpx/2),Math.max(wpx-cw/(2*z),wpx/2));
+ cam.y=clamp(cam.y,Math.min(ch/(2*z),wph/2),Math.max(wph-ch/(2*z),wph/2));
+ ctx.setTransform(z*dpr,0,0,z*dpr,dpr*(cw/2-cam.x*z),dpr*(ch/2-cam.y*z));
+ ctx.imageSmoothingEnabled=false;
+ // floorboards everywhere
+ for(let y=0;y<intr.gh;y++)for(let x=0;x<intr.gw;x++){
+  const px=x*TILE,py=y*TILE,v=(hash2(x*2+5,y*3+1)*14)|0;
+  const base=U.hexToRgb(intr.floor);
+  ctx.fillStyle='rgb('+(base[0]+v-4)+','+(base[1]+v-4)+','+(base[2]+v-4)+')';
+  ctx.fillRect(px,py,TILE,TILE);
+  ctx.fillStyle='rgba(0,0,0,0.14)';ctx.fillRect(px,py+TILE-1,TILE,1);
+ }
+ // walls (border) with a doorway gap on the south side
+ const isDoor=(x,y)=>y===intr.gh-1&&intr.doorGap.includes(x);
+ for(let y=0;y<intr.gh;y++)for(let x=0;x<intr.gw;x++){
+  if(x!==0&&y!==0&&x!==intr.gw-1&&y!==intr.gh-1)continue;
+  if(isDoor(x,y))continue;
+  const px=x*TILE,py=y*TILE,wb=U.hexToRgb(intr.wall);
+  ctx.fillStyle=intr.wall;ctx.fillRect(px,py,TILE,TILE);
+  ctx.fillStyle='rgb('+(wb[0]+14)+','+(wb[1]+14)+','+(wb[2]+14)+')';ctx.fillRect(px,py,TILE,3);
+ }
+ // threshold mat at the doorway
+ for(const gx of intr.doorGap){ctx.fillStyle='#3a2c1a';ctx.fillRect(gx*TILE+1,(intr.gh-1)*TILE+2,TILE-2,TILE-3)}
+ // rugs first (they sit under everyone), then the rest of the furniture
+ for(const f of intr.furniture)if(f.kind==='rug')drawFurniture(ctx,f);
+ for(const f of intr.furniture)if(f.kind!=='rug')drawFurniture(ctx,f);
+ // residents + the Sage, painter-sorted
+ const ds=[];
+ for(const o of intr.occupants)ds.push({y:o.y,f:()=>{
+  ctx.save();ctx.translate(o.x,o.y);
+  ctx.fillStyle='rgba(0,0,0,0.3)';ctx.beginPath();ctx.ellipse(0,1,5,2,0,0,7);ctx.fill();
+  CFHelp.drawCreatureSprite(ctx,o.sprite,0,3,o.dir,'walk',o.moving?o.animClock:0);
+  ctx.restore();
+ }});
+ ds.push({y:hero.y,f:()=>drawHero(t)});
+ ds.sort((a,b)=>a.y-b.y);
+ for(const d of ds)d.f();
+ // cosy vignette
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+ const g=ctx.createRadialGradient(cw/2,ch*0.45,ch*0.22,cw/2,ch*0.5,ch*0.72);
+ g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(6,4,2,0.55)');
+ ctx.fillStyle=g;ctx.fillRect(0,0,cw,ch);
+ // joystick
+ if(stick){
+  ctx.strokeStyle='rgba(232,240,227,0.25)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(stick.ox,stick.oy,STICK_RADIUS,0,7);ctx.stroke();
+  const dx=stick.x-stick.ox,dy=stick.y-stick.oy,d=Math.hypot(dx,dy);
+  const cl=Math.min(d,STICK_RADIUS),a=Math.atan2(dy,dx);
+  ctx.fillStyle='rgba(240,217,176,0.4)';
+  ctx.beginPath();ctx.arc(stick.ox+Math.cos(a)*cl,stick.oy+Math.sin(a)*cl,20,0,7);ctx.fill();
+ }
+}
 function drawDungeon(c,d,t){
  const px=d.x*TILE+TILE/2,py=d.y*TILE+TILE/2;
  const go=c.globalCompositeOperation;
@@ -4879,7 +5231,7 @@ function moveHero(dx,dy){
  hero.y=clamp(hero.y,TILE,H*TILE-TILE);
 }
 function heroSlash(ang){
- if(hero.down||heroSlashCd>0||inDialog)return;
+ if(hero.down||heroSlashCd>0||inDialog||interior)return;
  heroSlashCd=0.18;
  hero.face=ang;hero.dir=CFHelp.angToDir(ang);
  hero.atkT=0.42;hero.atkClock=0;
@@ -4891,6 +5243,7 @@ function updateHero(rdt){
  heroSlashCd-=rdt;
  hero.ifr=Math.max(0,hero.ifr-rdt);
  hero.hurtFlash=Math.max(0,hero.hurtFlash-rdt);
+ if(interior){updateInteriorScene(rdt);return}
  if(hero.down){
   hero.downT+=rdt;
   if(hero.downT>2.6){
@@ -4974,7 +5327,13 @@ function updateHero(rdt){
 }
 let uiProxT=0,talkTarget=null,descendTarget=null;
 function updateContextButtons(){
- talkTarget=null;descendTarget=null;
+ const eb=$('sEnterBtn');
+ if(interior){
+  $('sTalkBtn').style.display='none';$('sDescendBtn').style.display='none';
+  eb.style.display='block';eb.textContent='🚪 EXIT — '+interior.name;
+  return;
+ }
+ talkTarget=null;descendTarget=null;enterTarget=null;
  if(!hero.down&&!inDialog&&speedIdx<=1){
   let bd=44*44;
   for(const p of people){
@@ -4985,12 +5344,15 @@ function updateContextButtons(){
   for(const d of dungeons){
    if(dist2(d.x*TILE+TILE/2,d.y*TILE+TILE/2,hero.x,hero.y)<40*40){descendTarget=d;break}
   }
+  enterTarget=enterableAt(hero.x,hero.y);
  }
  const tb=$('sTalkBtn'),db=$('sDescendBtn');
  tb.style.display=talkTarget?'block':'none';
  if(talkTarget)tb.textContent='💬 TALK — '+talkTarget.name;
  db.style.display=descendTarget?'block':'none';
  if(descendTarget)db.textContent=(descendTarget.cleansed?'🌿 REVISIT — ':'🕳 DESCEND — ')+descendTarget.name;
+ eb.style.display=enterTarget?'block':'none';
+ if(enterTarget)eb.textContent='🚪 ENTER — '+enterLabel(enterTarget);
 }
 
 /* ================= player↔NPC dialogue (philosophy on demand) ================= */
@@ -5053,6 +5415,7 @@ function startTalk(p){
  $('sDialog').style.display='block';
  $('sTalkBtn').style.display='none';
  $('sDescendBtn').style.display='none';
+ $('sEnterBtn').style.display='none';
 }
 function advanceTalk(){
  dlgIdx++;
@@ -5116,6 +5479,12 @@ cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('wheel',e=>{e.preventDefault();cam.z=clamp(cam.z*(e.deltaY<0?1.1:0.9),0.6,3.2)},{passive:false});
 function tapAt(sx,sy){
+ if(interior){
+  // tapping a resident inside just gives a little flavour
+  const wx=cam.x+(sx-cw/2)/cam.z,wy=cam.y+(sy-ch/2)/cam.z;
+  for(const o of interior.occupants)if(dist2(wx,wy,o.x,o.y)<12*12){toast(o.name+' is home, and glad of the company.');return}
+  return;
+ }
  const wx=cam.x+(sx-cw/2)/cam.z,wy=cam.y+(sy-ch/2)/cam.z;
  let best=null,bd=1e18;
  for(const p of people){
@@ -5430,6 +5799,7 @@ function setSpeed(idx2){
 }
 document.querySelectorAll('#sui .sp button,#sui .cspd button').forEach(b=>{b.onclick=()=>setSpeed(+b.dataset.s)});
 $('sTalkBtn').onclick=()=>startTalk(talkTarget);
+$('sEnterBtn').onclick=()=>{if(interior)exitInterior();else if(enterTarget)enterInterior(enterTarget)};
 $('sDescendBtn').onclick=()=>{if(descendTarget&&onEnterDungeon)onEnterDungeon(descendTarget)};
 $('sDialog').onclick=advanceTalk;
 
@@ -5614,7 +5984,8 @@ return {
   get lastInspect(){return lastInspect},
   get selected(){return selected},
   get hero(){return hero},
-  people:()=>people,monsters:()=>monsters,villages:()=>villages,dungeons:()=>dungeons,nodes:()=>nodes,
+  people:()=>people,monsters:()=>monsters,villages:()=>villages,dungeons:()=>dungeons,nodes:()=>nodes,buildings:()=>buildings,
+  get interior(){return interior},
   toast,tale,
   spawnSettler:()=>arrive(),
   spawnMonster:(type)=>{

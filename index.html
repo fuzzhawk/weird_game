@@ -92,10 +92,11 @@ button:active{transform:translateY(1px)}
 #cine .cspd{position:absolute;bottom:calc(9vh + 14px);right:14px;pointer-events:auto;display:flex;gap:5px}
 #cine .nav{position:absolute;bottom:calc(9vh + 14px);left:14px;pointer-events:auto;display:flex;gap:5px}
 /* surface context buttons + dialog */
-#sTalkBtn,#sDescendBtn{position:fixed;left:50%;transform:translateX(-50%);
+#sTalkBtn,#sDescendBtn,#sEnterBtn{position:fixed;left:50%;transform:translateX(-50%);
   display:none;background:#1a3524;color:#cfe8cf;border:2px solid #3fae54;border-radius:10px;
   padding:12px 26px;font-size:14px;letter-spacing:1px;z-index:6;box-shadow:0 4px 16px rgba(0,0,0,.6)}
 #sTalkBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 96px)}
+#sEnterBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 148px);background:#2a2016;border-color:#c79a5a;color:#f0d9b0}
 #sDescendBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 44px);background:#241a35;border-color:#8a63c9;color:#d9cff2}
 #sDialog{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);
   display:none;background:rgba(16,24,14,0.95);border:2px solid #3fae54;border-radius:12px;
@@ -240,6 +241,7 @@ button:active{transform:translateY(1px)}
   </div>
 
   <button id="sTalkBtn">💬 TALK</button>
+  <button id="sEnterBtn">🚪 ENTER</button>
   <button id="sDescendBtn">🕳 DESCEND</button>
   <div id="sDialog">
     <div id="sDialogName"></div>

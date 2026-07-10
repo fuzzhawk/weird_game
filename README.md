@@ -40,6 +40,9 @@ sending to a phone. No server or network needed.
 - **drag** = walk (floating joystick) · **quick swipe** = slash
 - **tap** anything = inspect it · **pinch** = zoom
 - walk up to a villager → **TALK** (philosophy on demand)
+- walk up to a home, shop, or lean-to → **ENTER** — houses are **bigger on the
+  inside**: step into a generated, furnished room where the residents potter
+  about; the doorway (or the button) leads back out
 - walk onto an Understory mouth → **DESCEND**
 - **🛠** opens the **Gardener's Bench**: randomize the world / set a seed,
   spawn wanderers & monsters, open new dungeons, toggle peace, reroll all
@@ -49,6 +52,11 @@ sending to a phone. No server or network needed.
 - The surface is mostly peaceful; things occasionally crawl up out of
   un-cleansed Understories. Villagers fight, flee, and mount their own
   expeditions, as before.
+- **Villages tidy themselves.** Beyond hedging walls and farming, settlers now
+  clear loose rock from the ground around the town, pull down stray leftover
+  stubs of wall, and collaborate to lay **tidy flagstone lanes** connecting
+  every building to a central plaza — so a grown settlement reads as a kept,
+  connected place rather than scattered huts in the bramble.
 - Speed controls (⏸/1×/16×/500×) fast-forward the sim; at 16×+ the Sage
   meditates and is ignored by monsters.
 
