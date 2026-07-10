@@ -4187,14 +4187,27 @@ function chatBubbles(p,o){
 
 /* ================= rendering ================= */
 const cv=$('cvS'),ctx=cv.getContext('2d');
-let dpr=1,cw=0,ch=0;
+let dpr=1,dprBase=1,cw=0,ch=0,renderScale=1;
 function resize(){
- dpr=Math.min(2,window.devicePixelRatio||1);
+ dprBase=Math.min(2,window.devicePixelRatio||1);
+ dpr=dprBase*renderScale;
  cw=window.innerWidth;ch=window.innerHeight;
- cv.width=cw*dpr;cv.height=ch*dpr;
+ cv.width=Math.max(1,Math.round(cw*dpr));cv.height=Math.max(1,Math.round(ch*dpr));
  cv.style.width=cw+'px';cv.style.height=ch+'px';
 }
 window.addEventListener('resize',resize);resize();
+// adaptive render resolution: on weak GPUs the per-frame fill (ground + overlay +
+// sprites at dpr2) is the bottleneck. Measure the ACTUAL work time each frame and
+// gently drop the backing-store resolution when it's sustained-heavy (stepping
+// back up when there's headroom). Frame-gap can't reveal headroom on a 60Hz
+// display — it's clamped to ~16.7ms even with spare GPU — so we key off work time.
+let workEMA=8,resCool=60;
+function adaptRes(ms){
+ workEMA+=(ms-workEMA)*0.08;
+ if(resCool>0){resCool--;return;}
+ if(workEMA>13.5&&renderScale>0.6){renderScale=Math.max(0.6,+(renderScale-0.15).toFixed(2));resize();resCool=90;workEMA=8}
+ else if(workEMA<6.5&&renderScale<1){renderScale=Math.min(1,+(renderScale+0.15).toFixed(2));resize();resCool=90;workEMA=8}
+}
 let tcv=null,tctx=null,dynCanvas=null,dctx=null;
 // three pre-baked full-world terrain textures (forest / grey / neon-waste) that
 // the live ground is composited from, per cell, through an urbanization mask. The
@@ -5499,6 +5512,7 @@ function reseed(newSeed){
 /* ================= main loop (driven by main.js) ================= */
 let last=performance.now(),acc=0,uiT=0;
 function frame(t){
+ const f0=performance.now();
  const rdt=Math.min(0.1,(t-last)/1000);last=t;
  const sp=SPEEDS[speedIdx];
  if(sp>0){
@@ -5539,6 +5553,7 @@ function frame(t){
    if(((t/450)|0)%5===0)renderRels(selected);
   }
  }
+ adaptRes(performance.now()-f0);
 }
 
 /* ================= crossing between worlds ================= */
