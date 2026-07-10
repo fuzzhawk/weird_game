@@ -290,5 +290,108 @@ function bake(params, drawSize, anims){
  return { FRAMES, params:P, native:S, scale, box, fps:{walk:8,run:11,attack:10,talk:6} };
 }
 
-return {KEYS, HINTS, make, bake, pick, speciesName};
+/* ============================================================
+   FLYERS — birds & insects that fly above the world, some in flocks.
+   A separate generator + top-down flapping-wing sprite renderer; the
+   world code (surface.js) floats them over the terrain with a shadow
+   and steers flock species with simple boids.
+   ============================================================ */
+const FLY_PRE=['flit','gleam','dusk','ember','azure','thistle','mote','glint','hush','sable','copper','sun','moon','drift','spark','rime','loam','verd'];
+const FLY_BIRD=['wing','finch','lark','crest','plume','swift','jay','pip','warble','tern','starling','martlet'];
+const FLY_BUG=['wing','fly','moth','beetle','dart','gnat','hover','flit','chafer','midge','skimmer','lacewing'];
+function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+function flyerName(rng,kind){ return cap(pick(rng,FLY_PRE)+pick(rng,kind==='bird'?FLY_BIRD:FLY_BUG)); }
+
+// makeFlyer(key|null, seed) → an invented flying species (key = 'bird'|'bug' hint)
+function makeFlyer(key, seed){
+ const rng=mulberry32(hashStr('flyer-'+seed));
+ const kind=(key==='bird'||key==='bug')?key:(chance(rng,.55)?'bird':'bug');
+ const flock=chance(rng, kind==='bird'?0.72:0.5);
+ const size = kind==='bird'? rr(rng,0.42,0.72) : rr(rng,0.3,0.52);
+ const params={
+  size:48, kind, frames:4, outline:true,
+  bodyLen: kind==='bird'? rr(rng,5,9) : rr(rng,4,7),
+  bodyWid: kind==='bird'? rr(rng,2.3,3.7) : rr(rng,1.8,3.1),
+  wingSpan: kind==='bird'? rr(rng,7,12.5) : rr(rng,5.5,9.5),
+  wingShape: kind==='bird'? pick(rng,['pointed','round','long']) : 'bug',
+  wingPairs: kind==='bird'?1:2,
+  tailType: kind==='bird'? pick(rng,['fan','fork','long','short']) : pick(rng,['none','none','stinger']),
+  beak: kind==='bird', antennae: kind==='bug',
+  hue: Math.round(rng()*360),
+  sat: kind==='bird'? Math.round(rr(rng,46,86)) : Math.round(rr(rng,22,70)),
+  lit: kind==='bird'? Math.round(rr(rng,42,64)) : Math.round(rr(rng,32,56)),
+  wingLit: Math.round(rr(rng,58,86)),
+  accent: Math.round(rng()*360),
+  seed:'flyer-'+seed,
+ };
+ const spec={ label:flyerName(rng,kind), kind, temper: flock?'flock':'flitting', dmg:0,
+  spd: kind==='bird'? rr(rng,1.7,2.6) : rr(rng,1.2,2.0),
+  elev: kind==='bird'? Math.round(rr(rng,16,30)) : Math.round(rr(rng,10,22)),
+  flock };
+ return { flyer:true, key:kind, kind, params, name:pick(rng,GIVEN), spec, sizeScale:size };
+}
+
+// top-down flapping flyer, oriented to 8 directions (centred in the box; the
+// world draws it elevated above its ground shadow)
+function renderFlyer(P, dir, frame){
+ const S=P.size, g=new Raster(S);
+ const D=DIRS[dir]; let fdx=D.fx, fdy=D.fy; const fl=Math.hypot(fdx,fdy)||1; fdx/=fl; fdy/=fl;
+ const KY=0.82, F=[fdx,fdy*KY], Pp=[-fdy,fdx*KY];
+ const base=hsl(P.hue,P.sat,P.lit), dark=shade(base,-0.3);
+ const wingCol = P.kind==='bug'? hsl(P.hue,Math.round(P.sat*0.5),P.wingLit) : shade(base,0.08);
+ const wingDark = shade(wingCol,-0.24);
+ const beakC=hsl(40,60,58), eyeC={r:20,g:16,b:22}, accent=hsl(P.accent,70,58);
+ const cx=S*0.5, cy=S*0.5;
+ const N=P.frames||4, ph=(frame/N)*Math.PI*2, flap=Math.sin(ph);
+ const bl=P.bodyLen*0.5;
+ const nose=[cx+F[0]*bl, cy+F[1]*bl], tail=[cx-F[0]*bl, cy-F[1]*bl];
+ const drawWing=(side,pairOff)=>{
+  const span=P.wingSpan*(P.kind==='bug'?0.82:1);
+  const fold=flap*span*0.42, sweep=-0.22-Math.abs(flap)*0.16;
+  const rx=cx+F[0]*pairOff, ry=cy+F[1]*pairOff;
+  const tx=rx+Pp[0]*span*side + F[0]*span*sweep;
+  const ty=ry+Pp[1]*span*side + F[1]*span*sweep - fold*(P.kind==='bug'?0.5:1);
+  if(P.kind==='bug'){ g.fillEllipse((rx+tx)/2,(ry+ty)/2,span*0.32,span*0.19,wingCol,3); }
+  else { g.fillTri(rx,ry-1.1,rx,ry+1.1,tx,ty,wingCol,3); g.capsule(rx,ry,tx,ty,0.9,wingDark,3); }
+ };
+ if(P.wingPairs===2){ drawWing(-1,bl*0.5);drawWing(1,bl*0.5); drawWing(-1,-bl*0.25);drawWing(1,-bl*0.25); }
+ else { drawWing(-1,0); drawWing(1,0); }
+ if(P.kind==='bug'){
+  g.fillEllipse(cx,cy,P.bodyWid*0.5,P.bodyLen*0.52,base,1);
+  g.fillEllipse((cx+nose[0])/2,(cy+nose[1])/2,P.bodyWid*0.42,P.bodyWid*0.5,shade(base,-0.1),1);
+  g.fillEllipse(nose[0],nose[1],P.bodyWid*0.42,P.bodyWid*0.42,dark,6);
+  for(const s of [-1,1]) g.capsule(nose[0],nose[1],nose[0]+F[0]*2.2+Pp[0]*1.6*s,nose[1]+F[1]*2.2+Pp[1]*1.6*s,0.5,dark,7);
+  if(P.tailType==='stinger') g.fillTri(tail[0]-0.8,tail[1],tail[0]+0.8,tail[1],tail[0]-F[0]*2.4,tail[1]-F[1]*2.4,accent,5);
+ } else {
+  g.capsule(tail[0],tail[1],nose[0],nose[1],P.bodyWid*0.5,base,1);
+  g.fillEllipse(nose[0],nose[1],P.bodyWid*0.52,P.bodyWid*0.52,base,6);
+  if(P.beak) g.fillTri(nose[0]+Pp[0]*0.8,nose[1]+Pp[1]*0.8,nose[0]-Pp[0]*0.8,nose[1]-Pp[1]*0.8,nose[0]+F[0]*2.4,nose[1]+F[1]*2.4,beakC,6);
+  g.fillEllipse(nose[0]+Pp[0]*0.9,nose[1]+Pp[1]*0.9,0.7,0.7,eyeC,11);
+  const ty=P.tailType, tl=ty==='long'?4.5:2.6;
+  if(ty==='fork'){ g.fillTri(tail[0],tail[1],tail[0]-F[0]*tl+Pp[0]*1.6,tail[1]-F[1]*tl+Pp[1]*1.6,tail[0]-F[0]*tl-Pp[0]*1.6,tail[1]-F[1]*tl-Pp[1]*1.6,shade(base,-0.12),5); }
+  else if(ty!=='short'){ g.fillTri(tail[0]+Pp[0]*1.7,tail[1]+Pp[1]*1.7,tail[0]-Pp[0]*1.7,tail[1]-Pp[1]*1.7,tail[0]-F[0]*tl,tail[1]-F[1]*tl,shade(base,-0.1),5); }
+ }
+ if(P.outline){ const snap=g.col.slice(), out=shade(base,-0.6);
+  for(let y=0;y<S;y++)for(let x=0;x<S;x++){ const i=y*S+x; if(snap[i])continue;
+   const n=(x>0&&snap[i-1])||(x<S-1&&snap[i+1])||(y>0&&snap[i-S])||(y<S-1&&snap[i+S]);
+   if(n){g.col[i]=out;g.tag[i]=18;} } }
+ return g;
+}
+function bakeFlyer(params, drawSize){
+ const P={size:48, frames:4, outline:true, ...params};
+ const S=P.size, scale=Math.max(1,Math.round((drawSize||48)/S)), box=S*scale, n=P.frames||4;
+ const FRAMES={walk:[]};
+ for(let d=0;d<8;d++){ const arr=[];
+  for(let f=0;f<n;f++){ const r=renderFlyer(P,d,f); const id=rasterToImageData(r);
+   const tmp=document.createElement('canvas');tmp.width=S;tmp.height=S;
+   tmp.getContext('2d').putImageData(new ImageData(id.data,S,S),0,0);
+   const cv=document.createElement('canvas');cv.width=box;cv.height=box;
+   const cc=cv.getContext('2d');cc.imageSmoothingEnabled=false;cc.drawImage(tmp,0,0,box,box);
+   arr.push(cv); }
+  FRAMES.walk.push(arr);
+ }
+ return { FRAMES, params:P, native:S, scale, box, fps:{walk:12} };
+}
+
+return {KEYS, HINTS, make, bake, pick, speciesName, makeFlyer, bakeFlyer, flyerName};
 })();

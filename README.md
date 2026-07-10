@@ -35,6 +35,11 @@ A unified game built from the four prototypes in this repo:
   Fauna populate the surface (more in green ages, fewer in the waste), can be
   inspected, are huntable by the Sage, and can be generated / released from the
   Gardener's Bench.
+  The Forge also invents **flying creatures** — **birds and insects** with their
+  own top-down flapping-wing sprites. They drift above the world (each casts a
+  ground shadow), scatter when the Sage walks through them, and many **flock**
+  together via simple boids (cohesion / alignment / separation). The Gardener's
+  Bench can forge a flyer, release a flock, or fill the skies.
 
 ## Play
 

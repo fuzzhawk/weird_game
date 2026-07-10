@@ -41,7 +41,8 @@ let struct,farmGrid,farmTimer;
 let farmTiles=new Set();
 let region,regionsDirty=true;
 let people=[],allById=new Map(),buildings=[];
-let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[];
+let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[];
+let flockSeq=1;
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
 let cam={x:W*TILE/2,y:H*TILE/2,z:1.4};
 let selected=null,follow=false,cine=false;
@@ -326,6 +327,10 @@ function processBakeQueue(){
   }else if(job.kind==='animal'){
    const a=job.a;if(a.dead)return;
    a.sprite=AF.bake(a.made.params,48,['walk','attack']);   // four-legged quad rig
+  }else if(job.kind==='flyer'){
+   const made=job.made;if(made._sprite)return;
+   made._sprite=AF.bakeFlyer(made.params,48);              // shared across a flock
+   made._baking=false;
   }
  }catch(e){/* a failed bake falls back to the painted sprite */}
 }
@@ -439,6 +444,9 @@ function genWorld(){
  for(let i=0;i<relicTarget();i++)spawnSalvage();
  animals=[];
  for(let i=0;i<animalTarget();i++)spawnAnimal();
+ flyers=[];flockSeq=1;
+ for(let i=0;i<3;i++)spawnFlock();
+ for(let i=0;i<4;i++)spawnFlyer();
  refreshChron();
 }
 // relics surface as the world industrialises: few in the forest, many in the waste
@@ -1327,6 +1335,12 @@ function dailyTick(){
   if(animals.length<at&&chance(.5))spawnAnimal();
   else if(animals.length>at+2&&chance(.15)){const a=animals[ri(0,animals.length-1)];if(a)a.dead=true}
  }
+ // flyers likewise — flocks arrive on the wing, thin out toward the waste
+ {
+  const ft=flyerTarget();
+  if(flyers.length<ft){ if(chance(.35))spawnFlock(); else if(chance(.6))spawnFlyer(); }
+  else if(flyers.length>ft+6&&chance(.2)){const fl=flyers[ri(0,flyers.length-1)];if(fl)fl.dead=true}
+ }
  // the age turns, and the land with it (the ground re-composites live in frame())
  if(surfEra&&chance(.05))tale([],pick(surfEra.lines));
  villageTick();
@@ -1352,6 +1366,7 @@ function stepSim(dt){
  processExpeditions();
  updateMonsters(dt);
  updateAnimals(dt);
+ updateFlyers(dt);
  ripenAll(dt);
  for(let i=people.length-1;i>=0;i--){
   const p=people[i];
@@ -1945,6 +1960,88 @@ function updateAnimal(a,dt){
 }
 function updateAnimals(dt){
  for(let i=animals.length-1;i>=0;i--){const a=animals[i];if(a.dead){animals.splice(i,1);continue}updateAnimal(a,dt)}
+}
+
+/* ================= flyers: birds & insects, some in flocks ================= */
+function flyerTarget(){ return Math.round(6 + eraGreen()*20); }   // skies busier in green ages
+function spawnFlyer(key,made,flockId,x,y){
+ made=made||AF.makeFlyer(key||null, seed+'-fly-'+nextId+'-'+((R()*1e9)|0));
+ if(x===undefined){const s=randOpenTile();x=s[0]*TILE+TILE/2;y=s[1]*TILE+TILE/2}
+ const s=made.spec;
+ const fl={id:nextId++,made,kind:made.kind,name:made.name,spec:s,label:s.label,
+  x,y,vx:rf(-0.6,0.6),vy:rf(-0.6,0.6),dirIdx:0,animClock:R()*4,
+  elev:s.elev,spd:s.spd||1.8,flock:!!s.flock,flockId:flockId||('solo'+nextId),
+  goal:null,goalT:0,sizeScale:made.sizeScale,dead:false};
+ flyers.push(fl);
+ if(made._preview&&!made._sprite)made._sprite=made._preview;    // reuse editor bake
+ if(!made._sprite&&!made._baking){made._baking=true;bakeQueue.push({kind:'flyer',made})}
+ return fl;
+}
+function spawnFlock(){
+ const made=AF.makeFlyer(null, seed+'-flk-'+((R()*1e9)|0));   // one species, shared sprite
+ const fid='flk'+(flockSeq++), n=ri(5,9);
+ const s=randOpenTile(),bx=s[0]*TILE,by=s[1]*TILE;
+ for(let i=0;i<n;i++){
+  spawnFlyer(made.kind,made,fid,clamp(bx+rf(-3.5,3.5)*TILE,TILE,W*TILE-TILE),clamp(by+rf(-3.5,3.5)*TILE,TILE,H*TILE-TILE));
+ }
+ return made;
+}
+function updateFlyer(fl,dt){
+ fl.animClock+=dt*0.16;
+ let ax=0,ay=0;
+ if(fl.flock){
+  let cx=0,cy=0,avx=0,avy=0,n=0,sx=0,sy=0;
+  for(const o of flyers){
+   if(o===fl||o.dead||o.flockId!==fl.flockId)continue;
+   const d=dist2(fl.x,fl.y,o.x,o.y);
+   if(d<(9*TILE)**2){cx+=o.x;cy+=o.y;avx+=o.vx;avy+=o.vy;n++;
+    if(d<(2.0*TILE)**2){const dd=Math.sqrt(d)||1;sx+=(fl.x-o.x)/dd;sy+=(fl.y-o.y)/dd}}
+  }
+  if(n){cx/=n;cy/=n;avx/=n;avy/=n;
+   ax+=(cx-fl.x)*0.0012+(avx-fl.vx)*0.03+sx*0.7;     // cohesion + alignment + separation
+   ay+=(cy-fl.y)*0.0012+(avy-fl.vy)*0.03+sy*0.7;
+  }
+ }
+ // a drifting waypoint keeps them roaming
+ if(!fl.goal||simMin>=fl.goalT||dist2(fl.x,fl.y,fl.goal[0],fl.goal[1])<(1.5*TILE)**2){
+  fl.goal=[clamp(fl.x+rf(-9,9)*TILE,2*TILE,(W-2)*TILE),clamp(fl.y+rf(-9,9)*TILE,2*TILE,(H-2)*TILE)];
+  fl.goalT=simMin+rf(20,70);
+ }
+ const gdx=fl.goal[0]-fl.x,gdy=fl.goal[1]-fl.y,gl=Math.hypot(gdx,gdy)||1;
+ ax+=gdx/gl*0.06;ay+=gdy/gl*0.06;
+ // scatter from the Sage (and any prowling predator would do, but keep it light)
+ if(heroTargetable()){const d=dist2(fl.x,fl.y,hero.x,hero.y);if(d<(2.6*TILE)**2){const dd=Math.sqrt(d)||1;ax+=(fl.x-hero.x)/dd*2.0;ay+=(fl.y-hero.y)/dd*2.0}}
+ // soft world bounds
+ const m=2.5*TILE;
+ if(fl.x<m)ax+=0.08;else if(fl.x>W*TILE-m)ax-=0.08;
+ if(fl.y<m)ay+=0.08;else if(fl.y>H*TILE-m)ay-=0.08;
+ fl.vx+=ax*dt;fl.vy+=ay*dt;
+ const spd=Math.hypot(fl.vx,fl.vy),max=WALK*fl.spd*0.9,min=max*0.45;
+ if(spd>max){fl.vx=fl.vx/spd*max;fl.vy=fl.vy/spd*max}
+ else if(spd<min&&spd>1e-4){fl.vx=fl.vx/spd*min;fl.vy=fl.vy/spd*min}
+ fl.x=clamp(fl.x+fl.vx*dt,3,W*TILE-3);
+ fl.y=clamp(fl.y+fl.vy*dt,3,H*TILE-3);
+ if(Math.hypot(fl.vx,fl.vy)>0.02)fl.dirIdx=CFHelp.angToDir(Math.atan2(fl.vy,fl.vx));
+}
+function updateFlyers(dt){
+ for(let i=flyers.length-1;i>=0;i--){const fl=flyers[i];if(fl.dead){flyers.splice(i,1);continue}updateFlyer(fl,dt)}
+}
+function drawFlyer(c,fl,t){
+ const bob=Math.sin(t*0.004+fl.id*1.3)*2;
+ const s=fl.sizeScale;
+ // ground shadow — shrinks with altitude to sell the height
+ c.fillStyle='rgba(0,0,0,0.20)';
+ c.beginPath();c.ellipse(fl.x,fl.y,4.5*s,1.7*s,0,0,7);c.fill();
+ const spr=fl.made._sprite;
+ if(spr){
+  const F=spr.FRAMES.walk[fl.dirIdx||0]||spr.FRAMES.walk[0];
+  const nn=F.length;let f=Math.floor((fl.animClock||0)*(spr.fps.walk||12))%nn;if(f<0)f+=nn;
+  const img=F[f];if(img){const w=img.width*s,h=img.height*s;
+   c.drawImage(img,Math.round(fl.x-w/2),Math.round(fl.y-fl.elev-bob-h/2),w,h)}
+ }else{
+  c.fillStyle=fl.kind==='bird'?'#c9d3dd':'#5a5040';
+  c.fillRect(fl.x-2,fl.y-fl.elev-bob-2,4,3);
+ }
 }
 function drawAnimal(c,a,t){
  const px=a.x,py=a.y,s=a.sizeScale;
@@ -2801,6 +2898,14 @@ function draw(t){
  if(!hero.down)drawables.push({y:hero.y,f:()=>drawHero(t)});
  drawables.sort((a,b)=>a.y-b.y);
  for(const d of drawables)d.f();
+ // flyers ride above everything (with a ground shadow), sorted among themselves
+ const airborne=[];
+ for(const fl of flyers){
+  if(fl.x/TILE<vx0-3||fl.x/TILE>vx1+3||fl.y/TILE<vy0-3||fl.y/TILE>vy1+3)continue;
+  airborne.push(fl);
+ }
+ airborne.sort((a,b)=>a.y-b.y);
+ for(const fl of airborne)drawFlyer(ctx,fl,t);
  if(SPEEDS[speedIdx]<=16){
   for(const p of ppl){
    if(p.bubble&&p.bubble.until>performance.now())drawBubble(ctx,p);
@@ -3923,7 +4028,7 @@ return {
   get lastInspect(){return lastInspect},
   get selected(){return selected},
   get hero(){return hero},
-  people:()=>people,monsters:()=>monsters,villages:()=>villages,dungeons:()=>dungeons,nodes:()=>nodes,buildings:()=>buildings,
+  people:()=>people,monsters:()=>monsters,villages:()=>villages,dungeons:()=>dungeons,nodes:()=>nodes,buildings:()=>buildings,animals:()=>animals,flyers:()=>flyers,
   get interior(){return interior},
   toast,tale,
   spawnSettler:()=>arrive(),
@@ -3967,8 +4072,11 @@ return {
   animalCount:()=>animals.length,
   spawnAnimal:(key)=>spawnAnimal(key),
   forgeAnimal:()=>{const made=AF.make(null,'forge-'+((Math.random()*1e9)|0));made._preview=AF.bake(made.params,48,['walk']);return made},
-  spawnAnimalMade:(made)=>spawnAnimal(made&&made.key,made),
+  spawnAnimalMade:(made)=>made&&made.flyer?spawnFlyer(made.kind,made):spawnAnimal(made&&made.key,made),
   populateFauna:()=>{const at=animalTarget();let n=0;while(animals.length<at&&n++<40)if(!spawnAnimal())break;toast('The green fills with life.')},
+  forgeFlyer:()=>{const made=AF.makeFlyer(null,'forge-'+((Math.random()*1e9)|0));made._preview=AF.bakeFlyer(made.params,48);return made},
+  releaseFlock:()=>{spawnFlock();toast('A flock takes to the wing.')},
+  populateFlyers:()=>{const ft=flyerTarget();let g=0;while(flyers.length<ft&&g++<50){if(chance(.4))spawnFlock();else spawnFlyer()}toast('The skies fill with wings.')},
   tileStyle:()=>({name:surfEra&&surfEra.style,edge:surfEra&&surfEra.edge}),
   advanceEra:()=>{eraOffset+=ERA_SEG_DAYS;surfEra=eraState();const es=surfEra;toast('The age turns → '+es.name+' — the waste blooms from the villages.')},
   rerollTiles:()=>{tileSalt=(Math.random()*1e6)|0;buildTerrainLayer();repaintDynAll();toast('The ground reconsiders its texture. ('+surfStyle.name+' · '+surfStyle.edge+' edge)')},
