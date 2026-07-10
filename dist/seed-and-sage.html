@@ -4187,14 +4187,27 @@ function chatBubbles(p,o){
 
 /* ================= rendering ================= */
 const cv=$('cvS'),ctx=cv.getContext('2d');
-let dpr=1,cw=0,ch=0;
+let dpr=1,dprBase=1,cw=0,ch=0,renderScale=1;
 function resize(){
- dpr=Math.min(2,window.devicePixelRatio||1);
+ dprBase=Math.min(2,window.devicePixelRatio||1);
+ dpr=dprBase*renderScale;
  cw=window.innerWidth;ch=window.innerHeight;
- cv.width=cw*dpr;cv.height=ch*dpr;
+ cv.width=Math.max(1,Math.round(cw*dpr));cv.height=Math.max(1,Math.round(ch*dpr));
  cv.style.width=cw+'px';cv.style.height=ch+'px';
 }
 window.addEventListener('resize',resize);resize();
+// adaptive render resolution: on weak GPUs the per-frame fill (ground + overlay +
+// sprites at dpr2) is the bottleneck. Measure the ACTUAL work time each frame and
+// gently drop the backing-store resolution when it's sustained-heavy (stepping
+// back up when there's headroom). Frame-gap can't reveal headroom on a 60Hz
+// display — it's clamped to ~16.7ms even with spare GPU — so we key off work time.
+let workEMA=8,resCool=60;
+function adaptRes(ms){
+ workEMA+=(ms-workEMA)*0.08;
+ if(resCool>0){resCool--;return;}
+ if(workEMA>13.5&&renderScale>0.6){renderScale=Math.max(0.6,+(renderScale-0.15).toFixed(2));resize();resCool=90;workEMA=8}
+ else if(workEMA<6.5&&renderScale<1){renderScale=Math.min(1,+(renderScale+0.15).toFixed(2));resize();resCool=90;workEMA=8}
+}
 let tcv=null,tctx=null,dynCanvas=null,dctx=null;
 // three pre-baked full-world terrain textures (forest / grey / neon-waste) that
 // the live ground is composited from, per cell, through an urbanization mask. The
@@ -4622,25 +4635,33 @@ function nightFactor(){
 
 /* ================= main draw ================= */
 function draw(t){
- ctx.setTransform(dpr,0,0,dpr,0,0);
- ctx.fillStyle='#131f12';ctx.fillRect(0,0,cw,ch);
  const z=cam.z;
  if(cine&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
  else if(follow&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
  else{cam.x+=(hero.x-cam.x)*0.12;cam.y+=(hero.y-cam.y)*0.12}
  cam.x=clamp(cam.x,Math.min(cw/(2*z),W*TILE/2),Math.max(W*TILE-cw/(2*z),W*TILE/2));
  cam.y=clamp(cam.y,Math.min(ch/(2*z),H*TILE/2),Math.max(H*TILE-ch/(2*z),H*TILE/2));
+ // only clear the letterbox when the viewport actually spills past the world
+ // edges (zoomed out) — otherwise the ground fully covers it, so skip the fill
+ const halfW=cw/(2*z),halfH=ch/(2*z);
+ if(cam.x-halfW<0||cam.x+halfW>W*TILE||cam.y-halfH<0||cam.y+halfH>H*TILE){
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#131f12';ctx.fillRect(0,0,cw,ch);
+ }
  ctx.setTransform(z*dpr,0,0,z*dpr,dpr*(cw/2-cam.x*z),dpr*(ch/2-cam.y*z));
  ctx.imageSmoothingEnabled=false;
- if(tcv)ctx.drawImage(tcv,0,0);
+ const vx0=Math.max(0,((cam.x-halfW)/TILE|0)-3),vx1=Math.min(W-1,((cam.x+halfW)/TILE|0)+3);
+ const vy0=Math.max(0,((cam.y-halfH)/TILE|0)-3),vy1=Math.min(H-1,((cam.y+halfH)/TILE|0)+3);
+ // blit only the on-screen slab of the ground / structure overlay
+ const bsx=vx0*TILE,bsy=vy0*TILE,bsw=(vx1-vx0+1)*TILE,bsh=(vy1-vy0+1)*TILE;
+ if(tcv)ctx.drawImage(tcv,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
  if(terrainDirty){paintDyn();terrainDirty=false}
- if(dynCanvas)ctx.drawImage(dynCanvas,0,0);
- const vx0=Math.max(0,((cam.x-cw/(2*z))/TILE|0)-3),vx1=Math.min(W-1,((cam.x+cw/(2*z))/TILE|0)+3);
- const vy0=Math.max(0,((cam.y-ch/(2*z))/TILE|0)-3),vy1=Math.min(H-1,((cam.y+ch/(2*z))/TILE|0)+3);
+ if(dynCanvas)ctx.drawImage(dynCanvas,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
  const nf=nightFactor();
  // ground clutter: living meadow undergrowth that withers (and thins) locally as
- // the waste blooms over it, greens back as nature returns
- if(decorList&&flora){
+ // the waste blooms over it, greens back as nature returns. It's sub-tile detail,
+ // so skip it entirely when zoomed out — invisible there, and it's the heaviest
+ // per-frame draw loop.
+ if(decorList&&flora&&z>0.7){
   for(const d of decorList){
    if(d.x<vx0||d.x>vx1||d.y<vy0||d.y>vy1)continue;
    const u=urbanAt(d.i), g=clamp((1-u)*1.25,0,1);
@@ -5491,6 +5512,7 @@ function reseed(newSeed){
 /* ================= main loop (driven by main.js) ================= */
 let last=performance.now(),acc=0,uiT=0;
 function frame(t){
+ const f0=performance.now();
  const rdt=Math.min(0.1,(t-last)/1000);last=t;
  const sp=SPEEDS[speedIdx];
  if(sp>0){
@@ -5531,6 +5553,7 @@ function frame(t){
    if(((t/450)|0)%5===0)renderRels(selected);
   }
  }
+ adaptRes(performance.now()-f0);
 }
 
 /* ================= crossing between worlds ================= */
