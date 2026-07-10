@@ -164,6 +164,10 @@ function init(){
     btn('🕳 Open an Understory',()=>A().digDungeon())
   ));
   $('edSpawnBtns').appendChild(row(
+    btn('⛺ Land an expedition',()=>A().landExpedition()),
+    btn('☠ Doom the town',()=>{if(confirm('Let this town die out? Its cities fall to ruin.'))A().collapseTown()},'warn')
+  ));
+  $('edSpawnBtns').appendChild(row(
     btn('🐛 Root grub',()=>A().spawnMonster('grub'),'warn'),
     btn('🦂 Pale creeper',()=>A().spawnMonster('lurker'),'warn'),
     btn('👹 Horror',()=>A().spawnMonster('horror'),'warn')

@@ -43,6 +43,7 @@ let region,regionsDirty=true;
 let people=[],allById=new Map(),buildings=[];
 let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[];
 let flockSeq=1;
+let civFallen=false,expeditionDay=0;   // settlements can die out; an expedition reseeds a new town
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
 let cam={x:W*TILE/2,y:H*TILE/2,z:1.4};
 let selected=null,follow=false,cine=false;
@@ -342,7 +343,7 @@ function genWorld(){
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
  people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];chron=[];usedNames=new Set();
- simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
+ simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  bakeFlora('garden-'+seed);
  queueMonsterBakes();
@@ -725,6 +726,79 @@ function ruinBuilding(b){
  if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
  const what=b.tp==='biz'?b.name:'a '+b.tp;
  tale([],'With no one to tend it, '+what+' fell to ruin, and the vines moved in without asking.');
+}
+// turn a building into a lasting ruin — it stays standing (as rubble) instead of
+// crumbling back into the green, so a dead town reads as a derelict city
+function makeAncientRuin(b){
+ if(b.gone||b.tp==='grave')return;
+ if(!b.ruined){
+  b.ruined=true;
+  for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++)if(bld[idx(x,y)]===b.i)setSolid(x,y,S_RUIN);
+ }
+ b.ancient=true;b.emptySince=simMin;
+ for(const id of b.owners){const p=allById.get(id);if(p&&p.home===b)p.home=null}
+ b.owners=[];
+ if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
+}
+// a town whose people are all gone falls into ruin: its buildings become lasting
+// rubble and a raidable ruin-site opens at its heart (quests, the town's lost
+// treasure, and monsters that move into the empty streets)
+function makeRuin(v){
+ if(!v||cday()-v.founded<4)return null;                 // spare fledgling clusters
+ const R2=((v.rad+6)*TILE)**2;
+ const bs=buildings.filter(b=>!b.gone&&b.tp!=='grave'&&dist2(b.x*TILE,b.y*TILE,v.cx*TILE,v.cy*TILE)<R2);
+ if(bs.length<3)return null;                             // too small to be a "city"
+ for(const b of bs)makeAncientRuin(b);
+ const c=nearOpen(Math.round(v.cx),Math.round(v.cy))||[Math.round(v.cx),Math.round(v.cy)];
+ if(dungeonAt(c[0],c[1]))return null;
+ const d=makeDungeon(c[0],c[1]);
+ d.ruin=true; usedDun.delete(d.name); d.name='The Ruins of '+v.name;
+ d.danger=rf(.3,.55); d.depth=ri(2,4); d.loot=rf(.95,1.3);
+ for(let i=0;i<ri(1,3);i++)spawnMonster(d);              // something moves in
+ tale([], v.name+' has fallen silent — its people gone, its lanes surrendered to the vines. Only the ruins remain, keeping the old town’s treasure… and something has moved into the empty streets.',true);
+ return d;
+}
+// choose a fresh, open site for a new settlement, away from the old ruins
+function pickSettleSite(){
+ let best=null,bd=-1;
+ for(let t=0;t<60;t++){
+  const[x,y]=randOpenTile();
+  if(x<8||y<8||x>W-8||y>H-8)continue;
+  let near=1e9;for(const d of dungeons){const dd=dist2(x,y,d.x,d.y);if(dd<near)near=dd}
+  if(near>bd){bd=near;best=[x,y]}
+ }
+ return best||randOpenTile();
+}
+// a founding party comes over the hills to raise a new town from the ashes
+function foundingExpedition(){
+ civFallen=false;expeditionDay=0;
+ const spot=pickSettleSite(),n=ri(4,7),party=[];
+ for(let i=0;i<n;i++){
+  const s=nearOpen(clamp(spot[0]+ri(-3,3),2,W-3),clamp(spot[1]+ri(-3,3),2,H-3))||spot;
+  const p=newPerson({x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,age:ri(19,40)});
+  p.inv.wood+=ri(5,9);p.inv.stone+=ri(2,5);p.inv.food+=ri(2,4);   // provisions to break ground
+  party.push(p);
+ }
+ tale(party,'An expedition of '+n+' comes over the far hills — carrying seed, salvage, and stubborn hope — to raise a new town where the old world ended.',true);
+ if(party[0])drawCard(party[0],'On the founding of a new town, the garden');
+ return party;
+}
+// keep the civilisation alive with newcomers; but let it fall when attrition wins,
+// and reseed the map with a founding expedition once everyone is gone
+function maintainCivilization(){
+ const n=people.reduce((c,p)=>c+(p.dead?0:1),0);
+ if(n<=0){
+  if(!civFallen){
+   civFallen=true;expeditionDay=cday()+ri(3,7);
+   tale([],'The last hearth has gone cold; the final voice in the garden has fallen quiet. The meadow keeps its own counsel now, tending the ruins of everything that argued here. In time, new questions will come walking over the hills.',true);
+  }
+  if(cday()>=expeditionDay&&chance(.6))foundingExpedition();
+  return;
+ }
+ civFallen=false;
+ const hasHome=buildings.some(b=>!b.gone&&!b.ruined&&(b.tp==='home'||b.tp==='shelter'));
+ if(hasHome){ if(n<8&&chance(.2))arrive(); else if(n<24&&chance(.045))arrive(); }
+ else if(n<6&&chance(.1))arrive();                        // a young party still gathering
 }
 function crumbleBuilding(b){
  if(b.gone)return;
@@ -1312,8 +1386,7 @@ function dailyTick(){
    else if(g==='quiet'&&p.home&&!p.home.gone&&p.home.tp==='home'&&p.age>=50)completeGoal(p);
   }
  }
- if(people.length<10&&chance(.4))arrive();
- else if(people.length<26&&chance(.08))arrive();
+ maintainCivilization();   // newcomers in good times; a fall + founding expedition when the town dies out
  // tech relics pay out their treasure trickle to whoever carries them
  for(const p of people){
   if(p.dead)continue;
@@ -2144,7 +2217,11 @@ function detectVillages(){
   live.push(v);
  }
  for(let i=villages.length-1;i>=0;i--)if(!live.includes(villages[i])){
-  for(const p of people)if(p.vid===villages[i].id)p.vid=null;
+  const v=villages[i];
+  for(const p of people)if(p.vid===v.id)p.vid=null;
+  // a town abandoned with no living soul left near it collapses into raidable ruins
+  const nearLiving=people.some(p=>!p.dead&&dist2(p.x,p.y,v.cx*TILE,v.cy*TILE)<((v.rad+8)*TILE)**2);
+  if(!nearLiving)makeRuin(v);
   villages.splice(i,1);
  }
 }
@@ -2282,7 +2359,7 @@ function upkeepTick(){
    if(empty){if(!b.emptySince)b.emptySince=simMin;else if(simMin-b.emptySince>RUIN_DELAY)ruinBuilding(b)}
    else b.emptySince=0;
   }else{
-   if(simMin-b.emptySince>CRUMBLE_DELAY)crumbleBuilding(b);
+   if(!b.ancient&&simMin-b.emptySince>CRUMBLE_DELAY)crumbleBuilding(b);   // ancient ruins persist
   }
  }
 }
@@ -3195,8 +3272,27 @@ function drawInterior(t){
   ctx.beginPath();ctx.arc(stick.ox+Math.cos(a)*cl,stick.oy+Math.sin(a)*cl,20,0,7);ctx.fill();
  }
 }
+function drawRuinMarker(c,d,t,px,py){
+ const go=c.globalCompositeOperation;
+ c.globalCompositeOperation='screen';
+ c.drawImage(d.cleansed?GLOW_GREEN:GLOW_RED,px-22,py-24,44,44);
+ c.globalCompositeOperation=go;
+ c.fillStyle='rgba(0,0,0,0.28)';c.beginPath();c.ellipse(px,py+7,11,3.2,0,0,7);c.fill();
+ // tumbled rubble + a broken pillar with a dark doorway into the ruins
+ c.fillStyle='#6c6a63';c.fillRect(px-10,py+3,7,4);c.fillRect(px+4,py+2,7,5);c.fillRect(px-3,py+5,6,3);
+ c.fillStyle='#7d7b72';c.fillRect(px-9,py-9,5,14);c.fillRect(px+4,py-6,5,11);
+ c.fillStyle='#565349';c.fillRect(px-9,py-9,5,2);c.fillRect(px+4,py-6,5,2);   // broken tops
+ c.fillStyle='#57544b';c.fillRect(px-3,py-8,7,13);
+ c.fillStyle='#0b0d0a';c.beginPath();c.moveTo(px-2.5,py+5);c.lineTo(px-2.5,py-3);c.arc(px+.5,py-3,3,Math.PI,0);c.lineTo(px+3.5,py+5);c.closePath();c.fill();
+ const fl=0.6+0.4*Math.sin(t*0.02+d.id);
+ if(!d.cleansed){c.fillStyle='rgba(255,'+(120+fl*60|0)+',60,'+(0.6+fl*0.3)+')';c.fillRect(px-1,py-1,2,2)}
+ else{c.fillStyle='#7de3a0';c.fillRect(px-1,py-1,2,2)}
+ if(d.inside.size){c.fillStyle='#e8c065';c.font='6px system-ui';c.textAlign='center';c.fillText('🔦'+d.inside.size,px,py-16)}
+ if(cam.z>1.05){c.font='6.5px Georgia';c.textAlign='center';c.fillStyle='rgba(225,205,190,0.85)';c.fillText(d.name,px,py+16)}
+}
 function drawDungeon(c,d,t){
  const px=d.x*TILE+TILE/2,py=d.y*TILE+TILE/2;
+ if(d.ruin){drawRuinMarker(c,d,t,px,py);return}
  const go=c.globalCompositeOperation;
  c.globalCompositeOperation='screen';
  c.drawImage(d.cleansed?GLOW_GREEN:GLOW_RED,px-24,py-24,48,48);
@@ -3394,7 +3490,7 @@ function updateContextButtons(){
  tb.style.display=talkTarget?'block':'none';
  if(talkTarget)tb.textContent='💬 TALK — '+talkTarget.name;
  db.style.display=descendTarget?'block':'none';
- if(descendTarget)db.textContent=(descendTarget.cleansed?'🌿 REVISIT — ':'🕳 DESCEND — ')+descendTarget.name;
+ if(descendTarget)db.textContent=(descendTarget.cleansed?'🌿 REVISIT — ':descendTarget.ruin?'🏚 RAID — ':'🕳 DESCEND — ')+descendTarget.name;
  eb.style.display=enterTarget?'block':'none';
  if(enterTarget)eb.textContent='🚪 ENTER — '+enterLabel(enterTarget);
 }
@@ -3637,7 +3733,11 @@ function inspectDungeon(d){
   ['Relics recovered',String(d.relicsFound)],
   ['Treasure left',d.loot>0.9?'rich':d.loot>0.5?'picked over':'nearly stripped']
  ];
- showInspect('🕳',d.name,(d.cleansed?'quiet now':dangerWord(d.danger))+' · '+d.depth+' floors',rows,d.cleansed?'The mouth breathes evenly now. Whatever argued down there has conceded — for a season, anyway.':'A cold breath rises from the dark, smelling of unfinished arguments. Walk close and the Sage may DESCEND.');
+ const icon=d.ruin?'🏚':'🕳';
+ const body=d.ruin
+  ?(d.cleansed?'The ruins are quiet now — the old town’s bones bleached clean, its last threat put down. Only the wind keeps house here.':'The dead town’s streets are choked with vine and rubble, and its lost treasure still waits in the deep rooms — guarded now by whatever crawled in after the people left. Walk close and the Sage may RAID it.')
+  :(d.cleansed?'The mouth breathes evenly now. Whatever argued down there has conceded — for a season, anyway.':'A cold breath rises from the dark, smelling of unfinished arguments. Walk close and the Sage may DESCEND.');
+ showInspect(icon,d.name,(d.ruin?'ruined town · ':'')+(d.cleansed?'quiet now':dangerWord(d.danger))+' · '+d.depth+' floors',rows,body);
 }
 function inspectTile(tx,ty){
  lastInspect=null;
@@ -4032,6 +4132,13 @@ return {
   get interior(){return interior},
   toast,tale,
   spawnSettler:()=>arrive(),
+  landExpedition:()=>{foundingExpedition();toast('A founding expedition arrives over the hills.')},
+  collapseTown:()=>{
+   // hasten the end: doom the current folk so the town falls to ruin
+   const folk=people.filter(p=>!p.dead);
+   for(const p of folk)die(p,'age');
+   toast(folk.length?'A quiet ending settles over the town…':'No one left to fall.');
+  },
   spawnMonster:(type)=>{
    const live=dungeons.filter(d=>!d.cleansed);
    const d=live.length?pick(live):(dungeons.length?pick(dungeons):null);
