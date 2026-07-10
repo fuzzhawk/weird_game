@@ -51,12 +51,16 @@ function drawAnimalPreview(){
   const c=cv.getContext('2d'); c.imageSmoothingEnabled=false; c.clearRect(0,0,cv.width,cv.height);
   const F=animalPreview._preview.FRAMES.walk[0], n=F.length;
   const img=F[Math.floor(performance.now()*0.006)%n];
-  const s=(animalPreview.sizeScale||1)*1.05, w=img.width*s, h=img.height*s;
+  const s=(animalPreview.sizeScale||1)*(animalPreview.flyer?2.3:1.05), w=img.width*s, h=img.height*s;
   c.drawImage(img,(cv.width-w)/2,(cv.height-h)/2,w,h);
   $('edAnimalName').textContent=animalPreview.name+' the '+animalPreview.spec.label;
-  $('edAnimalTemper').textContent=animalPreview.spec.temper+(animalPreview.spec.dmg?' · bite '+animalPreview.spec.dmg:' · harmless');
+  if(animalPreview.flyer)
+    $('edAnimalTemper').textContent=(animalPreview.kind==='bird'?'🐦 bird':'🦋 insect')+(animalPreview.spec.flock?' · flocks together':' · solitary');
+  else
+    $('edAnimalTemper').textContent=animalPreview.spec.temper+(animalPreview.spec.dmg?' · bite '+animalPreview.spec.dmg:' · harmless');
 }
 function reforgeAnimal(){ animalPreview=A().forgeAnimal(); drawAnimalPreview(); }
+function reforgeFlyer(){ animalPreview=A().forgeFlyer(); drawAnimalPreview(); }
 function refresh(){
   if(!open)return;
   const era=A().era?A().era():null, ts=A().tileStyle?A().tileStyle():null;
@@ -196,8 +200,13 @@ function init(){
     btn('🎲 Reforge',()=>reforgeAnimal(),'big')
   ));
   $('edAnimalBtns').appendChild(row(
-    btn('🐾 Release into the world',()=>{A().spawnAnimalMade(animalPreview);reforgeAnimal()}),
+    btn('🐾 Release into the world',()=>{A().spawnAnimalMade(animalPreview);animalPreview.flyer?reforgeFlyer():reforgeAnimal()}),
     btn('🌿 Populate fauna',()=>A().populateFauna())
+  ));
+  $('edAnimalBtns').appendChild(row(
+    btn('🐦 Forge a flyer',()=>reforgeFlyer()),
+    btn('🕊 Release a flock',()=>A().releaseFlock()),
+    btn('🦋 Fill the skies',()=>A().populateFlyers())
   ));
   const glyphs={deer:'🦌',rabbit:'🐇',fowl:'🐓',boar:'🐗',fox:'🦊',wolf:'🐺'};
   const sp=$('edAnimalSpecies'); const chips=[];

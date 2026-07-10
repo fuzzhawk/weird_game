@@ -25,12 +25,21 @@ A unified game built from the four prototypes in this repo:
   salvage caches the Sage walks over, and can be generated & gifted by hand
   from the Gardener's Bench.
 - **Animal Forge** (`js/animals.js`, new) → a procedural generator for
-  **fauna** (deer, rabbit, fowl, boar, fox, wolf), built as Creature-Forge
-  "beast" recipes with a **temperament** driving a simple AI: prey **wander &
-  flee**, predators **hunt**, and a cornered boar **gores**. Fauna populate the
-  surface (more in green ages, fewer in the waste), can be inspected, are
-  huntable by the Sage, and can be generated / released from the Gardener's
-  Bench.
+  **four-legged fauna**. Every reroll **invents a brand-new species** — a fresh
+  quadruped build (body, legs, neck, head, snout, ears, horns, tail, hide,
+  colours) rendered by a dedicated 8-direction quadruped rig, with a made-up
+  species name and stats derived from the build, plus a **temperament** driving
+  a simple AI: prey **wander & flee**, predators **hunt**, and a cornered
+  neutral **gores**. (The familiar deer / rabbit / fowl / boar / fox / wolf
+  chips are light presets that still reroll into something novel each time.)
+  Fauna populate the surface (more in green ages, fewer in the waste), can be
+  inspected, are huntable by the Sage, and can be generated / released from the
+  Gardener's Bench.
+  The Forge also invents **flying creatures** — **birds and insects** with their
+  own top-down flapping-wing sprites. They drift above the world (each casts a
+  ground shadow), scatter when the Sage walks through them, and many **flock**
+  together via simple boids (cohesion / alignment / separation). The Gardener's
+  Bench can forge a flyer, release a flock, or fill the skies.
 
 ## Play
 
