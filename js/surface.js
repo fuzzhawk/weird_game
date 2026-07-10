@@ -325,7 +325,7 @@ function processBakeQueue(){
    surfMon[job.type]=CFHelp.bakeCreature(surfMonsterParams(job.type),sizes[job.type],['walk','attack']);
   }else if(job.kind==='animal'){
    const a=job.a;if(a.dead)return;
-   a.sprite=CFHelp.bakeCreature(a.made.params,48,['walk','attack']);
+   a.sprite=AF.bake(a.made.params,48,['walk','attack']);   // four-legged quad rig
   }
  }catch(e){/* a failed bake falls back to the painted sprite */}
 }
@@ -1832,9 +1832,10 @@ function spawnAnimal(key,made){
   spot=[x,y];
  }
  if(!spot)return null;
- // natural spawns skew heavily toward prey — a few hunters keep it lively
- if(!key&&!made){const bag=['deer','deer','deer','rabbit','rabbit','rabbit','fowl','fowl','boar','boar','fox','wolf'];key=pick(bag)}
- made=made||AF.make(key,seed+'-'+nextId+'-'+((R()*1e9)|0));
+ // natural spawns mostly invent brand-new species; the rest lean on the familiar
+ // archetypes (which themselves reroll into something novel each time)
+ if(!key&&!made&&R()<0.4){const bag=['deer','deer','rabbit','rabbit','boar','fox','wolf'];key=pick(bag)}
+ made=made||AF.make(key||null,seed+'-'+nextId+'-'+((R()*1e9)|0));
  const s=made.spec;
  const a={id:nextId++,made,key:made.key,spec:s,name:made.name,temper:s.temper,
   x:spot[0]*TILE+TILE/2,y:spot[1]*TILE+TILE/2,fx:1,dirIdx:0,animClock:R()*4,anim:'walk',
@@ -3965,7 +3966,7 @@ return {
   animals:()=>animals,
   animalCount:()=>animals.length,
   spawnAnimal:(key)=>spawnAnimal(key),
-  forgeAnimal:()=>{const made=AF.make(null,'forge-'+((Math.random()*1e9)|0));made._preview=CFHelp.bakeCreature(made.params,48,['walk']);return made},
+  forgeAnimal:()=>{const made=AF.make(null,'forge-'+((Math.random()*1e9)|0));made._preview=AF.bake(made.params,48,['walk']);return made},
   spawnAnimalMade:(made)=>spawnAnimal(made&&made.key,made),
   populateFauna:()=>{const at=animalTarget();let n=0;while(animals.length<at&&n++<40)if(!spawnAnimal())break;toast('The green fills with life.')},
   tileStyle:()=>({name:surfEra&&surfEra.style,edge:surfEra&&surfEra.edge}),
