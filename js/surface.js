@@ -264,6 +264,7 @@ function applyAff(p,o,d){
 
 /* ================= flora (Plant Forge sprites) ================= */
 let flora=null, floraDead=null, floraSeed='garden';
+let floraSpecies=null, fert=null, farmSp=null;   // plant catalogue, soil fertility, per-farm crop
 function bakeFlora(seedBase){
  floraSeed=seedBase;
  const frng=U.mulberry32(U.hashStr(seedBase)^0xF10A);
@@ -287,6 +288,159 @@ function bakeFlora(seedBase){
   D.decor.push(PF.bake(kinds[i],{leafDensity:.3,bloomAmount:0,palette:'autumn'},s,24,0.55,ph));
  }
  flora=F; floraDead=D;
+ floraSpecies=makeFloraSpecies(seedBase);
+}
+
+/* ================= living ecosystem: soil, species, seeds =================
+   Every world grows its own catalogue of plant SPECIES, each with a food/wood
+   yield, an optional stat-boost it grants whoever eats or tends it, and growth
+   traits (how fertile a soil it needs, how hardy, how fast it spreads). Some are
+   useless "weeds". A per-tile FERTILITY field (procedurally eroded into valleys)
+   decides what grows where; farming depletes it and fallow land heals it — so
+   villages come to weed out the dross and monocrop their favourite. */
+const BOOST_STATS=['work','luck','charm','social','speed','fert'];
+const PLANT_PRE=['thought','vigor','dun','glim','sun','moon','bram','fen','sorrel','whisper','ember','frost','clover','marrow','gloom','honey','bitter','silver','dusk','quick','deep','wild'];
+const PSUF_FOOD=['fruit','berry','root','pod','melon','grain','plum','gourd'];
+const PSUF_HERB=['leaf','bloom','wort','sage','balm','petal','spice'];
+const PSUF_MUSH=['cap','morel','bonnet','puff','gill','shroom'];
+const PSUF_WOOD=['cane','pine','bough','ash','willow'];
+const PSUF_WEED=['thistle','nettle','bane','tare','rush','burr','weed'];
+function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+function makeFloraSpecies(seedBase){
+ const rng=U.mulberry32(U.hashStr(seedBase)^0x5EED5);
+ const rr=(a,b)=>a+rng()*(b-a), rint=(a,b)=>a+((rng()*(b-a+1))|0), pk=a=>a[(rng()*a.length)|0];
+ const N=rint(7,9), tmpl=['food','food','herb','herb','tree'];
+ while(tmpl.length<N) tmpl.push(pk(['food','herb','weed','weed','mush']));
+ for(let i=tmpl.length-1;i>0;i--){const j=(rng()*(i+1))|0;[tmpl[i],tmpl[j]]=[tmpl[j],tmpl[i]];}
+ const sps=[];
+ for(let i=0;i<N;i++){
+  const tp=tmpl[i];
+  let kind,preset,cell,palette,foodYield,wood=false,weed=false,suf;
+  if(tp==='tree'){ kind='tree';preset='sapling';cell=72;foodYield=rint(1,2);wood=true;palette=pk(['forest','meadow','autumn']);suf=pk(PSUF_WOOD); }
+  else if(tp==='weed'){ kind=pk(['berry','mush']);preset=pk(['fern','grassTuft','cactus']);cell=kind==='mush'?36:40;foodYield=0;weed=true;palette=pk(['autumn','desert','duskViolet']);suf=pk(PSUF_WEED); }
+  else if(tp==='mush'){ kind='mush';preset=pk(['mushroom','glowcap']);cell=36;foodYield=rint(1,3);palette=preset==='glowcap'?'cavernGlow':pk(['autumn','meadow']);suf=pk(PSUF_MUSH); }
+  else if(tp==='herb'){ kind='berry';preset=pk(['wildflower','vine','bush']);cell=40;foodYield=rint(0,2);palette=pk(['meadow','duskViolet','forest']);suf=pk(PSUF_HERB); }
+  else { kind='berry';preset='bush';cell=40;foodYield=rint(2,4);palette=pk(['meadow','forest']);suf=pk(PSUF_FOOD); }
+  const boost=(!weed&&!wood&&(tp==='herb'||rng()<0.35))?{stat:pk(BOOST_STATS),v:+(0.15+rng()*0.4).toFixed(2)}:null;
+  const bakeSet=(dead)=>{ const s=(rng()*1e9)|0;
+   const ov=dead?{palette:'autumn',bloomAmount:0.08,leafDensity:0.35}:{palette,bloomAmount:weed?0.05:(boost?0.9:0.5)};
+   return [0,1,2].map(st=>PF.bake(preset,ov,s+i*97,cell,(dead?0.5:0.55)+st*0.2)); };
+  sps.push({ i, key:'sp'+i, name:cap(pk(PLANT_PRE))+suf, kind, preset, cell, palette,
+   yield:foodYield, wood, weed, boost,
+   fertNeed: weed?rr(0.05,0.3):rr(0.28,0.72), hardy: weed?rr(0.6,1):rr(0.1,0.6),
+   spread: weed?rr(0.5,0.9):rr(0.2,0.5), ripen: rr(1.0,2.2),
+   glyph: wood?'🌲':weed?'🌿':kind==='mush'?'🍄':(boost?'🌸':'🍇'),
+   L:bakeSet(false), D:bakeSet(true) });
+ }
+ return sps;
+}
+// how well a species grows in soil of fertility f (hardy species tolerate poor soil)
+function plantSuit(sp,f){ return clamp(1-Math.abs(f-sp.fertNeed)*(2-sp.hardy), 0, 1); }
+// a village's appetite for a species: food + prized stat-boosts, weeds worthless
+function speciesScore(sp){
+ if(sp.weed) return -1;
+ if(sp.wood) return sp.yield*0.4;
+ let s=sp.yield*1.0;
+ if(sp.boost) s+=3+sp.boost.v*7;
+ return s*(0.7+(1-sp.fertNeed)*0.4);
+}
+function bestCropFor(seedStock){
+ let best=null,bs=-1e9;
+ for(const sp of floraSpecies){
+  if(sp.weed||sp.wood)continue;
+  if(seedStock && !(seedStock[sp.key]>0))continue;
+  const sc=speciesScore(sp);
+  if(sc>bs){bs=sc;best=sp}
+ }
+ return best;
+}
+
+/* ---------- fertility field: procedural elevation → moisture → soil, eroded ---------- */
+function valNoise(seed){
+ // smooth value noise on a coarse lattice, bilinearly upsampled to the map
+ const G=12, gr=new Float32Array((G+1)*(G+1)), rng=U.mulberry32(U.hashStr('fld-'+seed+'-'+seed));
+ for(let i=0;i<gr.length;i++)gr[i]=rng();
+ const out=new Float32Array(W*H);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const gx=x/W*G, gy=y/H*G, x0=gx|0, y0=gy|0, fx=gx-x0, fy=gy-y0;
+  const a=gr[y0*(G+1)+x0],b=gr[y0*(G+1)+x0+1],c=gr[(y0+1)*(G+1)+x0],d=gr[(y0+1)*(G+1)+x0+1];
+  const sx=fx*fx*(3-2*fx), sy=fy*fy*(3-2*fy);
+  out[idx(x,y)]=(a+(b-a)*sx)*(1-sy)+(c+(d-c)*sx)*sy;
+ }
+ return out;
+}
+function genFertility(){
+ fert=new Float32Array(W*H);
+ const elev=valNoise(seed*2+1), moist=valNoise(seed*7+3);
+ for(let i=0;i<W*H;i++){
+  // damp lowland loam is richest; dry uplands are poorer
+  fert[i]=clamp(0.24 + moist[i]*0.52 + (1-elev[i])*0.30 - 0.12, 0, 1);
+ }
+ // gentle hydraulic erosion: a little fertility creeps downhill into the valleys
+ for(let pass=0;pass<2;pass++){
+  const nf=fert.slice();
+  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){
+   const i=idx(x,y), e=elev[i]; let lx=x,ly=y,le=e;
+   for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ const ne=elev[idx(x+dx,y+dy)]; if(ne<le){le=ne;lx=x+dx;ly=y+dy} }
+   if(lx!==x||ly!==y){ const move=fert[i]*0.08; nf[i]-=move; nf[idx(lx,ly)]+=move; }
+  }
+  fert=nf;
+ }
+ // solid bramble/rock is barren; open ground keeps its eroded soil
+ for(let i=0;i<W*H;i++){ fert[i]=map[i]?clamp(fert[i]*0.4,0,1):clamp(fert[i],0,1); }
+}
+function fertAt(x,y){ return fert?fert[idx(x,y)]:0.5; }
+// pick a species suited to soil of fertility f (weeds win the poor ground)
+function pickSpeciesFor(f){
+ if(!floraSpecies||!floraSpecies.length)return null;
+ const w=[]; let tot=0;
+ for(const sp of floraSpecies){ const s=plantSuit(sp,f)*(sp.weed?0.65:1)+0.02; w.push(s); tot+=s; }
+ if(tot<=0)return null;
+ let r=R()*tot;
+ for(let i=0;i<w.length;i++){ r-=w[i]; if(r<=0)return floraSpecies[i]; }
+ return floraSpecies[floraSpecies.length-1];
+}
+// grow a plant of species sp at (x,y): a node carrying its kind, yield and regrow
+function plantNode(x,y,sp){
+ const wood=sp.wood, mx=wood?ri(3,5):ri(2,4);
+ const nd={x,y,t:sp.kind,sp:sp.i,amt:mx,max:mx,rt:0,
+   reg:Math.round((wood?900:460)*sp.ripen), yield:wood?'wood':'food'};
+ nodes.push(nd); nodeAt.set(idx(x,y),nd);
+ return nd;
+}
+function speciesOf(n){ return (n&&n.sp!=null&&floraSpecies)?floraSpecies[n.sp]:null; }
+// tending a plant grants its stat-boost for a while and drops a seed into the
+// village stock (so a town can hoard and later sow the best of what it finds)
+function harvestPlant(p,sp){
+ if(sp.boost) buff(p, sp.boost.stat, sp.boost.v, 1.6, 'plant-'+sp.key);
+ if(p.vid){ const v=villages.find(vv=>vv.id===p.vid); if(v){ (v.seed=v.seed||{})[sp.key]=(v.seed[sp.key]||0)+1; } }
+}
+// the village's chosen monocrop: the most useful food/herb it has seed for,
+// re-considered every few days as its seed stores and tastes shift
+function cropOf(v){
+ if(v._cropDay===undefined||cday()-v._cropDay>6||v.crop==null){
+  let best=bestCropFor(v.seed)||bestCropFor(null);   // knows the ideal even before it has the seed
+  v.crop=best?best.i:null; v._cropDay=cday();
+ }
+ return (v.crop!=null&&floraSpecies)?floraSpecies[v.crop]:null;
+}
+function cropRipen(crop,i){ const f=fert?fert[i]:0.5; return FARM_RIPEN*crop.ripen*(1.4-0.7*f); }
+// slow ecology: fallow soil heals back toward a baseline, and wild plants
+// self-seed into suited empty ground next to their own kind (weeds included —
+// which is what gives the villagers something to weed out)
+function ecologyTick(){
+ if(!fert||!floraSpecies)return;
+ const green=eraGreen(), canSeed=nodes.length<W*H*0.05;   // don't let the wild flora overrun
+ for(let s=0;s<240;s++){
+  const x=ri(1,W-2), y=ri(1,H-2), i=idx(x,y);
+  if(map[i])continue;
+  if(!farmGrid[i]) fert[i]=clamp(fert[i]+(0.6-fert[i])*0.02,0,1);   // wild land recovers
+  if(green>0.4 && !nodeAt.has(i) && !farmGrid[i] && bld[i]<0 && struct[i]!==S_WALL && !pavedTiles.has(i) && !dungeonAt(x,y)){
+   let src=null;
+   for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const nd=nodeAt.get(idx(x+dx,y+dy));if(nd&&nd.sp!=null){src=floraSpecies[nd.sp];break}}
+   if(canSeed && src && plantSuit(src,fertAt(x,y))>0.4 && chance(src.spread*0.15)) { plantNode(x,y,src); markMod(i); }
+  }
+ }
 }
 
 /* ================= sprite baking (Creature Forge) ================= */
@@ -339,7 +493,7 @@ function processBakeQueue(){
 /* ================= world generation ================= */
 function genWorld(){
  map=new Uint8Array(W*H);bld=new Int16Array(W*H).fill(-1);
- struct=new Uint8Array(W*H);farmGrid=new Uint8Array(W*H);farmTimer=new Float32Array(W*H);farmTiles=new Set();
+ struct=new Uint8Array(W*H);farmGrid=new Uint8Array(W*H);farmTimer=new Float32Array(W*H);farmTiles=new Set();farmSp=new Int16Array(W*H).fill(-1);
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
  people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];chron=[];usedNames=new Set();
@@ -381,27 +535,28 @@ function genWorld(){
  }
  for(let i=0;i<W*H;i++){if(!g[i]&&reg[i]!==best)g[i]=1}
  map=g;
+ genFertility();
  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(!map[idx(x,y)])openTiles.push([x,y]);
  openChunks=new Set();
  for(const[x,y]of openTiles)openChunks.add(((x>>3))+','+((y>>3)));
- // resource nodes
- const REG={berry:520,mush:430,tree:950,rock:1500};
- const YLD={berry:'food',mush:'food',tree:'wood',rock:'stone'};
- const AMT={berry:4,mush:3,tree:5,rock:5};
+ // resource nodes — plants seed themselves where the soil suits their species;
+ // rock is scattered against the bramble. Fertile ground grows more, and grows
+ // the fussier (higher-yield) species; poor ground gets hardy weeds and stone.
  for(const[x,y]of openTiles){
   let nw=0;
   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&!walkable(x+dx,y+dy))nw++;
   let adj=false;
   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(nodeAt.has(idx(x+dx,y+dy)))adj=true;
   if(adj)continue;
-  const r=R();let t=null;
-  if(r<0.008+nw*0.003)t='tree';
-  else if(r<0.017+nw*0.005)t='berry';
-  else if(r<0.024+nw*0.006)t='mush';
-  else if(r<0.030+nw*0.004)t='rock';
-  if(t){
-   const nd={x,y,t,amt:AMT[t],max:AMT[t],reg:REG[t],rt:0,yield:YLD[t]};
-   nodes.push(nd);nodeAt.set(idx(x,y),nd);
+  const f=fertAt(x,y), r=R();
+  if(r<0.028+nw*0.004 && r>=0.010+f*0.06){ // stone favours barren, rocky edges
+   const nd={x,y,t:'rock',amt:5,max:5,reg:1500,rt:0,yield:'stone'};
+   nodes.push(nd);nodeAt.set(idx(x,y),nd);continue;
+  }
+  // a plant takes root with probability rising in fertile soil
+  if(R() < 0.012+f*0.06){
+   const sp=pickSpeciesFor(f);
+   if(sp) plantNode(x,y,sp);
   }
  }
  // Understory mouths — deep places far from the centre, against the bramble
@@ -1016,7 +1171,9 @@ function doTask(p,dt){
    if(t.h>=8){
     t.h=0;n.amt--;n.rt=n.reg;
     p.inv[n.yield]++;
-    emote(p,n.yield==='food'?'🍇':n.yield==='wood'?'🪵':'⛏');
+    const sp=speciesOf(n);
+    if(sp){ harvestPlant(p,sp); emote(p,sp.glyph); }
+    else emote(p,n.yield==='food'?'🍇':n.yield==='wood'?'🪵':'⛏');
     if(n.amt<=0||p.inv[n.yield]>=t.want)p.task=null;
    }
    break;
@@ -1145,8 +1302,8 @@ function doTask(p,dt){
     if(moveAlong(p,dt))t.arr=true;else break;
    }
    t.h=(t.h||0)+dt;
-   if(chance(dt*0.03))emote(p,{mine:'⛏',wall:'🌿',harvest:'🌾',clear:'⛏',tidywall:'🧹',pave:'🧱'}[j.type]||'🌱');
-   if(t.h>=(j.type==='wall'||j.type==='pave'||j.type==='tidywall'?6:12)){doVillageJob(p,v,j);p.task=null}
+   if(chance(dt*0.03))emote(p,{mine:'⛏',wall:'🌿',harvest:'🌾',clear:'⛏',tidywall:'🧹',pave:'🧱',weed:'🌿',till:'🌱'}[j.type]||'🌱');
+   if(t.h>=(j.type==='wall'||j.type==='pave'||j.type==='tidywall'||j.type==='weed'?6:12)){doVillageJob(p,v,j);p.task=null}
    break;
   }
   default:p.task=null;
@@ -1168,13 +1325,32 @@ function doVillageJob(p,v,j){
   if(chance(.2))tale([p],p.name+' cleared old bramble from the lanes of '+v.name+', hauling out good stone.');
  }else if(j.type==='till'){
   if(!walkable(j.x,j.y)||farmGrid[i]){drop();return}
-  farmGrid[i]=1;farmTimer[i]=FARM_RIPEN;farmTiles.add(i);markMod(i);drop();
+  // sow a seed of the village's chosen crop; no seed → the plot stays fallow
+  const crop=cropOf(v);
+  if(!crop||!(v.seed&&v.seed[crop.key]>0)){drop();return}
+  v.seed[crop.key]--;
+  farmGrid[i]=1;farmSp[i]=crop.i;farmTimer[i]=cropRipen(crop,i);farmTiles.add(i);markMod(i);drop();
  }else if(j.type==='harvest'){
-  if(farmGrid[i]===2){farmGrid[i]=1;farmTimer[i]=FARM_RIPEN;farmTiles.add(i);markMod(i);
-   p.inv.food+=ri(2,4);v.stock.food+=ri(3,6);
-   if(chance(.12))tale([p],p.name+' brought in a good harvest from the '+v.name+' plots.');
+  if(farmGrid[i]===2){
+   const crop=(farmSp[i]>=0&&floraSpecies)?floraSpecies[farmSp[i]]:null;
+   const f=fertAt(j.x,j.y);
+   const gain=Math.max(1,Math.round(((crop?crop.yield:3))*(0.5+f)));   // fertile soil pays more
+   p.inv.food+=Math.ceil(gain/2);v.stock.food+=gain;
+   if(crop){ harvestPlant(p,crop); (v.seed=v.seed||{})[crop.key]=(v.seed[crop.key]||0)+ri(1,2); }
+   fert[i]=clamp(fert[i]-0.05,0,1);                                     // each cropping tires the soil
+   // replant if a seed remains, else leave the plot fallow to recover
+   if(crop&&v.seed[crop.key]>0){ v.seed[crop.key]--; farmGrid[i]=1;farmTimer[i]=cropRipen(crop,i); }
+   else { farmGrid[i]=0;farmSp[i]=-1;farmTiles.delete(i); }
+   markMod(i);
+   if(chance(.12))tale([p],p.name+' brought in '+(crop?crop.name:'a')+' harvest from the '+v.name+' plots.');
   }
   drop();
+ }else if(j.type==='weed'){
+  // pull an unhelpful wild plant to make room for the good crop
+  const nd=nodeAt.get(i);
+  if(nd&&nd.sp!=null)removeNode(nd);
+  drop();
+  if(chance(.12))tale([p],p.name+' cleared out the weeds choking the '+v.name+' fields.');
  }else if(j.type==='clear'){
   const nd=nodeAt.get(i);
   if(nd&&nd.t==='rock'){removeNode(nd);v.stock.stone+=2;p.inv.stone++}
@@ -1416,6 +1592,7 @@ function dailyTick(){
  }
  // the age turns, and the land with it (the ground re-composites live in frame())
  if(surfEra&&chance(.05))tale([],pick(surfEra.lines));
+ ecologyTick();
  villageTick();
  upkeepTick();
 }
@@ -1431,7 +1608,10 @@ function stepSim(dt){
   const g=eraGreen();
   for(const n of nodes){
    if(n.t==='rock'){ if(n.amt<n.max){n.rt-=dt;if(n.rt<=0){n.amt++;n.rt=n.reg}} continue; }
-   if(n.amt<n.max){ n.rt-=dt*g; if(n.rt<=0){ n.amt++; n.rt=n.reg } }
+   // plants regrow faster in fertile, well-suited soil (and only in green ages)
+   const sp=speciesOf(n), f=fertAt(n.x,n.y);
+   const rate=g*(0.35+f*1.1)*(sp?(0.5+plantSuit(sp,f)*0.9):1);
+   if(n.amt<n.max){ n.rt-=dt*rate; if(n.rt<=0){ n.amt++; n.rt=n.reg } }
    if(g<0.35 && n.amt>1 && chance(dt*0.02*(0.4-g))) n.amt--;
   }
  }
@@ -2234,6 +2414,7 @@ function planVillage(v){
   if(j.type==='clear')return nodeAt.has(idx(j.x,j.y))||!walkable(j.x,j.y);
   if(j.type==='tidywall')return struct[idx(j.x,j.y)]===S_WALL;
   if(j.type==='pave')return !pavedTiles.has(idx(j.x,j.y));
+  if(j.type==='weed'){const nd=nodeAt.get(idx(j.x,j.y));return nd&&nd.sp!=null;}
   return false;
  });
  const [cx,cy]=claimCenter(v.claim),cl=v.claim;
@@ -2252,9 +2433,12 @@ function planVillage(v){
   }
   if(remaining===0)v.wallDone=true;
  }
+ // --- agriculture: the village sows its favourite crop, but only once it has
+ //     gathered seed for it (wild foraging fills the seed stock first) ---
+ const crop=cropOf(v), haveSeed=crop&&v.seed&&v.seed[crop.key]>0;
  const targetFarms=Math.min(18,v.homes.length+6);
  let farmCount=0;for(let y=cl.y0;y<=cl.y1;y++)for(let x=cl.x0;x<=cl.x1;x++)if(farmGrid[idx(x,y)])farmCount++;
- if(farmCount<targetFarms){
+ if(haveSeed&&farmCount<targetFarms){
   let added=0;
   const ix0=cl.x0+WALL_THICK+1,iy0=cl.y0+WALL_THICK+1,ix1=cl.x1-WALL_THICK-1,iy1=cl.y1-WALL_THICK-1;
   outer:for(let y=iy0;y<=iy1;y++)for(let x=ix0;x<=ix1;x++){
@@ -2267,6 +2451,18 @@ function planVillage(v){
  for(let y=cl.y0;y<=cl.y1;y++)for(let x=cl.x0;x<=cl.x1;x++){
   const i=idx(x,y);
   if(farmGrid[i]===2&&!v.jobs.some(j=>j.x===x&&j.y===y&&j.type==='harvest'))v.jobs.push({type:'harvest',x,y});
+ }
+ // --- weeding: pull wild plants around the claim that aren't the chosen crop
+ //     (and any species that's a worthless weed), to clear ground for monocrop ---
+ if(v.jobs.filter(j=>j.type==='weed').length<5){
+  let added=0;
+  weedscan:for(let y=cl.y0;y<=cl.y1&&added<5;y++)for(let x=cl.x0;x<=cl.x1;x++){
+   const i=idx(x,y),nd=nodeAt.get(i);
+   if(!nd||nd.sp==null||v.jobs.some(j=>j.x===x&&j.y===y))continue;
+   const sp=floraSpecies[nd.sp];
+   const unwanted = sp.weed || (crop && nd.sp!==crop.i && !sp.wood && speciesScore(sp)<speciesScore(crop)-1);
+   if(unwanted){ v.jobs.push({type:'weed',x,y}); if(++added>=5)break weedscan; }
+  }
  }
  if(v.jobs.filter(j=>j.type==='mine').length<4){
   for(let tries=0;tries<18;tries++){
@@ -2739,12 +2935,23 @@ function drawNode(c,n,t){
   c.fillStyle='rgba(255,255,255,0.2)';c.fillRect(px-3,py-2,2,1);
   return;
  }
+ const sp=speciesOf(n);
+ if(sp){
+  const st=nodeStage(n), imgL=sp.L[st], imgD=sp.D[st];
+  const base=(n.amt<=0)?0.5:1;
+  const g=clamp(eraGreen()*1.25,0,1);         // crossfade living → withered as the age turns
+  const drawAt=(img)=>c.drawImage(img,px-img.width/2,n.y*TILE+TILE-img.height+2);
+  c.globalAlpha=base*g; drawAt(imgL);
+  c.globalAlpha=base*(1-g); drawAt(imgD);
+  c.globalAlpha=1;
+  return;
+ }
  if(flora){
   const key=n.t==='berry'?'berry':n.t==='mush'?'mush':'tree';
   const vi=(n.x*7+n.y*13)%flora[key].length, st=nodeStage(n);
   const imgL=flora[key][vi][st], imgD=floraDead[key][vi][st];
   const base=(n.amt<=0)?0.5:1;
-  const g=clamp(eraGreen()*1.25,0,1);         // crossfade living → withered as the age turns
+  const g=clamp(eraGreen()*1.25,0,1);
   const drawAt=(img)=>c.drawImage(img,px-img.width/2,n.y*TILE+TILE-img.height+2);
   c.globalAlpha=base*g; drawAt(imgL);
   c.globalAlpha=base*(1-g); drawAt(imgD);
@@ -3715,8 +3922,27 @@ function inspectBuilding(b){
  if(bld2)rows.push(['Raised by',bld2.name+(bld2.dead?' (departed)':''),bld2.dead?null:nameLink(bld2)[1]]);
  showInspect(b.tp==='home'?'🏠':'⛺',tp,owners.length?'':'vacant — a newcomer could claim it',rows,b.tp==='home'?'A door that shuts and a kettle that sings. Small certainties against a very large question.':'Woven cane and patched broadleaves. It keeps the worst of the weather out.');
 }
+const STAT_LABEL={work:'diligence',luck:'fortune',charm:'charm',social:'warmth',speed:'quickness',fert:'fertility',romance:'ardour'};
+function fertWord(f){ return f<0.2?'barren':f<0.4?'poor':f<0.6?'workable':f<0.8?'rich':'black loam'; }
 function inspectNode(n){
  lastInspect={type:'node',obj:n};
+ const sp=speciesOf(n);
+ if(sp){
+  const f=fertAt(n.x,n.y);
+  const rows=[
+   ['Species',sp.name+(sp.weed?' (a weed)':'')],
+   ['Yields',sp.wood?'🪵 cane':'🍇 '+sp.yield+' food'],
+   ['Virtue',sp.boost?('+'+sp.boost.v.toFixed(2)+' '+(STAT_LABEL[sp.boost.stat]||sp.boost.stat)+' to whoever tends it'):'none — just '+(sp.wood?'timber':sp.weed?'a nuisance':'food')],
+   ['Soil here',fertWord(f)+' ('+Math.round(f*100)+'% fertile)'],
+   ['Thrives in',fertWord(sp.fertNeed)+' soil'+(sp.hardy>0.6?', and endures worse':'')],
+   ['Remaining',n.amt+' / '+n.max+(n.amt<=0?' (picked clean)':'')],
+  ];
+  const body=sp.weed?'A hardy, useless thing — good for nothing but crowding out better plants. The villagers pull it where they find it.'
+   :sp.boost?'Tending it leaves a little of its virtue in the hands — the town prizes such plants and will sow them by the field.'
+   :'Honest food, nothing more. The kind of plant a hungry village keeps close.';
+  showInspect(sp.glyph,sp.name,(sp.weed?'a weed':sp.boost?'a boon-plant':sp.wood?'timber':'food-plant'),rows,body);
+  return;
+ }
  const info={berry:['🍇','A thoughtfruit tangle','sweet, faintly opinionated fruit'],mush:['🍄','A philosophercap cluster','pale mushrooms that hum when it rains'],tree:['🌳','A whistling cane','tall hollow stalks — timber and song'],rock:['🪨','An old hillbone','loose stone, waiting to be worked']}[n.t];
  const rows=[['Yields',n.yield==='food'?'🍇 food':n.yield==='wood'?'🪵 cane':'🪨 stone'],['Remaining',n.amt+' / '+n.max+(n.amt<=0?' (picked clean)':'')],['Regrows',n.amt<n.max?'slowly, in time':'fully grown']];
  showInspect(info[0],info[1],info[2],rows,n.amt<=0?'Picked clean for now. Give it time; the garden is patient with itself.':'A little of the garden’s quiet generosity, here for whoever finds it first.');
@@ -3744,7 +3970,10 @@ function inspectTile(tx,ty){
  const i=idx(tx,ty);
  if(farmGrid[i]===1||farmGrid[i]===2){
   const v=villages.find(vv=>dist2(vv.cx,vv.cy,tx,ty)<(vv.rad+4)**2);
-  showInspect(farmGrid[i]===2?'🌾':'🌱',farmGrid[i]===2?'A ripe farm plot':'A tilled farm plot',v?'tended by '+v.name:'',[['State',farmGrid[i]===2?'ready to harvest':'growing']],'The village mind combed order into the wild green — rows of pale grain, each one an agreed-upon fact.');
+  const crop=(farmSp[i]>=0&&floraSpecies)?floraSpecies[farmSp[i]]:null, f=fertAt(tx,ty);
+  const rows=[['State',farmGrid[i]===2?'ready to harvest':'growing'],['Soil',fertWord(f)+' ('+Math.round(f*100)+'%)']];
+  if(crop){rows.unshift(['Crop',crop.name+(crop.boost?' · +'+(STAT_LABEL[crop.boost.stat]||crop.boost.stat):'')]);}
+  showInspect(farmGrid[i]===2?'🌾':'🌱',(farmGrid[i]===2?'A ripe plot of ':'A tilled plot of ')+(crop?crop.name:'crops'),v?'tended by '+v.name:'',rows,crop&&crop.boost?'A monocrop of the village’s prized boon-plant — every harvest tires the soil a little more, so the fields keep creeping outward.':'The village mind combed order into the wild green — rows of one chosen plant, each an agreed-upon fact. Cropping the same soil wears it thin over time.');
   return;
  }
  if(!walkable(tx,ty)){
@@ -4129,6 +4358,7 @@ return {
   get selected(){return selected},
   get hero(){return hero},
   people:()=>people,monsters:()=>monsters,villages:()=>villages,dungeons:()=>dungeons,nodes:()=>nodes,buildings:()=>buildings,animals:()=>animals,flyers:()=>flyers,
+  floraSpecies:()=>floraSpecies, fertAt:(x,y)=>fertAt(x,y),
   get interior(){return interior},
   toast,tale,
   spawnSettler:()=>arrive(),

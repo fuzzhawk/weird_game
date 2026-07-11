@@ -21,6 +21,17 @@ A unified game built from the four prototypes in this repo:
 - **plant-forge.html** → bakes all surface flora: resource plants
   (thoughtfruit tangles, philosophercap clusters, whistling canes) and the
   decorative meadow undergrowth.
+- **A living plant ecosystem** (`js/surface.js`, new) → every world grows its own
+  **catalogue of plant species**, each with a food/wood yield, an optional
+  **stat-boost** it grants whoever tends it (diligence / fortune / charm /
+  warmth / quickness / fertility), growth traits, and a few worthless **weeds**.
+  A per-tile **soil-fertility** field is generated from procedural elevation and
+  moisture and then **eroded** so richness pools in the valleys; plants seed
+  themselves where the soil suits them, grow faster in good ground, and slowly
+  spread. Villagers **forage for seeds**, then **monocrop their most useful
+  species** — sowing it from seed stock, **weeding out** the dross, and paying
+  for it as each harvest **wears the soil thin** (fallow land recovers). Tap any
+  plant or field to read its species, virtue and soil.
 - **Tech Forge** (`js/relics.js`, new) → a procedural generator for
   **technology relics** — machined icons (cores, chips, drones, blades, keys)
   with glowing neon cores. Each relic grants a **skill** (a stat/combat perk)
