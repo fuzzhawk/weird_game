@@ -1,11 +1,11 @@
 'use strict';
 /* ============================================================
    SEED & SAGE — main.js
-   Mode switching between the surface garden and the
-   Understory dungeons, plus the single animation loop.
+   World-select boot, mode switching between the surface garden
+   and the Understory dungeons, plus the single animation loop.
    ============================================================ */
 (function(){
-let mode='surface';
+let mode='surface', running=false;
 const sui=document.getElementById('sui');
 const dui=document.getElementById('dui');
 
@@ -32,23 +32,29 @@ Surface.onEnterDungeon=(dun)=>{
   );
 };
 
-Surface.init();
-Editor.init();
-
 function loop(t){
   if(mode==='surface')Surface.frame(t);
   else Dungeon.frame(t);
   requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+
+// dream up the chosen world and start (the loading screen has already trained Lore)
+function enterWorld(cfg){
+  Surface.api.reseed(cfg?cfg.seed:undefined);
+  showSurface();
+  if(!running){ running=true; requestAnimationFrame(loop); }
+}
+
+Editor.init();
+Worlds.boot(enterWorld);
 
 // hooks for tinkering & automated smoke tests
 window.GameDebug={
-  Surface, Dungeon, Hero, Editor,
+  Surface, Dungeon, Hero, Editor, Worlds, Lore,
   get mode(){return mode},
+  enterWorld,                       // GameDebug.enterWorld({seed,theme}) skips the picker
   descendFirst(){
     const d=Surface.api.dungeons()[0];
-    if(d)Surface.onEnterDungeon?d:null;
     if(d){showDungeon();Dungeon.enter({name:d.name,danger:d.danger,depth:d.depth,id:d.id,ref:d},(r)=>{showSurface();Surface.returnFromDungeon(r)})}
     return d;
   },
