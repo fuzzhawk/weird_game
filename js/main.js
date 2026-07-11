@@ -50,7 +50,7 @@ Worlds.boot(enterWorld);
 
 // hooks for tinkering & automated smoke tests
 window.GameDebug={
-  Surface, Dungeon, Hero, Editor, Worlds, Lore,
+  Surface, Dungeon, Hero, Editor, Worlds, Lore, Mind,
   get mode(){return mode},
   enterWorld,                       // GameDebug.enterWorld({seed,theme}) skips the picker
   descendFirst(){

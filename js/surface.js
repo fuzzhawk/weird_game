@@ -690,9 +690,13 @@ function moveAlong(p,dt){
 /* ================= people ================= */
 const PAL=['#c94f5e','#4fa3a5','#c98a3d','#8a63c9','#6fa04f','#5a7fc9','#c95f9d','#b0a04a','#7a6a55','#4fc98a','#9a4f3d','#5ac9c0'];
 const SKINS=['#e8c39e','#d1a074','#a9764c','#8a5a35','#6b4326','#f0d4b8'];
-function newPerson({x,y,age,traits,parents}){
+function newPerson({x,y,age,traits,parents,mind}){
+ const myMind=mind||Mind.create();
+ let nm=null;
+ if(myMind&&Mind.active){ nm=Mind.name(myMind,4,11); let t=0; while(nm&&usedNames.has(nm)&&t++<8)nm=Mind.name(myMind,4,11); if(nm)usedNames.add(nm); }
+ if(!nm)nm=makeName();
  const p={
-  id:nextId++,name:makeName(),x,y,fx:1,dirIdx:0,
+  id:nextId++,name:nm,mind:myMind,x,y,fx:1,dirIdx:0,
   col:pick(PAL),skin:pick(SKINS),
   age,lifespan:ri(58,88),
   traits:traits||[],
@@ -1404,6 +1408,7 @@ function laneTiles(x0,y0,x1,y1){
 /* ================= romance & interaction ================= */
 function interact(p,o){
  const r=relOf(p,o),ro=relOf(o,p);
+ Mind.mingle(p.mind,o.mind);   // words rub off: each takes a little of the other's memory
  if(!r.met){
   r.met=true;ro.met=true;
   if(chance(.3))tale([p,o],p.name+' crossed paths with '+o.name+' near '+pick(['the thoughtfruit rows','a quiet pool','the old sundial','the philosophercap terraces','a gap in the hedges'])+'.');
@@ -1470,7 +1475,7 @@ function birth(p,o){
  let t2=chance(.6)?pool[1]:pick(TKEYS);
  let tries=0;while(t2===traits[0]&&tries++<20)t2=pick(TKEYS);
  traits.push(t2);
- const c=newPerson({x:hx*TILE+TILE/2,y:hy*TILE+TILE/2,age:0,traits,parents:[p.id,o.id]});
+ const c=newPerson({x:hx*TILE+TILE/2,y:hy*TILE+TILE/2,age:0,traits,parents:[p.id,o.id],mind:Mind.child(p.mind,o.mind)});
  setHome(c,home);
  p.kids.push(c.id);o.kids.push(c.id);
  relOf(p,c).met=true;relOf(c,p).met=true;relOf(o,c).met=true;relOf(c,o).met=true;
@@ -2587,6 +2592,7 @@ function say(p,o,kind){
  // hand-written garden lines mention turnips & moss and would read wrong in a
  // cyberpunk or modern world, so lean on the Markov line when it's available.
  let line=(Lore.active&&chance(.7)&&Lore.line(4,12))||pick(pool).replace('{o}',o?o.name:'friend');
+ line=Mind.speak(p.mind,line);   // coloured by the speaker's own drifted idiolect
  p.bubble={text:line,until:performance.now()+2600};
 }
 function chatBubbles(p,o){
@@ -3787,7 +3793,7 @@ function npcDialogue(p){
  if(p.cards.length&&chance(.4)){const c=TAROT[p.cards[p.cards.length-1].i];lines.push('The garden dealt me '+c.n+'. I am still deciding what it gave me.')}
  if(dungeons.length&&chance(.55)){const d=pick(dungeons.filter(dd=>!dd.cleansed).concat(dungeons).slice(0,dungeons.length));const lr=Lore.active&&Lore.line(5,12);lines.push(lr?lr+' Beneath '+d.name+'.':pick(TALK_RUMOR).replace('{d}',d.name))}
  lines.push(loreOr(pick(TALK_CLOSE),4,10));
- return lines;
+ return lines.map(l=>Mind.speak(p.mind,l));   // each speaker's own drifted words bleed in
 }
 let dlgLines=null,dlgIdx=0;
 function startTalk(p){
