@@ -177,9 +177,50 @@ button:active{transform:translateY(1px)}
 #edAnimalCanvas{width:56px;height:56px;image-rendering:pixelated;background:#22301a;border:1px solid #2c4022;border-radius:6px;flex:0 0 auto}
 #edAnimalName{color:#cfe37a;font-weight:bold;font-size:13px;letter-spacing:.5px}
 #edAnimalTemper{color:#a6d46a;font-size:11px;margin-top:2px}
+/* ================= world-select loading screen ================= */
+#boot{position:fixed;inset:0;z-index:100;background:radial-gradient(120% 90% at 50% -10%,#16241a,#0a0f0c 70%);color:#e8e2d5;display:flex;flex-direction:column;overflow:hidden;padding-top:env(safe-area-inset-top)}
+#boot.hidden{display:none}
+#bootHead{padding:20px 18px 8px;text-align:center;flex:0 0 auto}
+#bootHead h1{font-family:Georgia,serif;font-size:26px;letter-spacing:.14em;margin:0;color:#cfe37a}
+#bootHead p{margin:6px 0 0;font-size:12.5px;color:#8fa885;letter-spacing:.03em}
+#wgrid{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;padding:12px 14px 20px;align-content:start}
+.wcard{text-align:left;background:rgba(24,34,22,.85);border:1px solid #2c4022;border-radius:12px;padding:11px 12px;cursor:pointer;color:#e8e2d5;transition:border-color .12s,transform .06s;display:flex;flex-direction:column;gap:5px}
+.wcard:active{transform:translateY(1px)}
+.wcard.on{border-color:#cfe37a;background:rgba(40,54,32,.95);box-shadow:0 0 0 1px #cfe37a55}
+.wchip{font-size:9.5px;font-weight:700;letter-spacing:.04em;border:1px solid;border-radius:99px;padding:2px 7px;align-self:flex-start}
+.wtitle{font-family:Georgia,serif;font-size:15px;font-weight:700;color:#f0ead9;line-height:1.15}
+.wblurb{font-size:11px;color:#9db09a;line-height:1.35}
+#wsheet{flex:0 0 auto;background:rgba(14,20,14,.98);border-top:1px solid #3c4f33;border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.6);padding:12px 16px calc(14px + env(safe-area-inset-bottom));max-height:0;overflow:hidden;transition:max-height .25s ease}
+#wsheet.open{max-height:62vh;overflow-y:auto}
+.wsheetTop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+#wSheetTitle{font-family:Georgia,serif;font-size:18px;font-weight:700;color:#f0ead9}
+#wSheetTheme{font-size:11px;font-weight:700}
+#wsheet label{display:block;font-size:11px;color:#8fa885;margin:10px 0 4px;letter-spacing:.03em}
+#wSeedText{width:100%;box-sizing:border-box;min-height:96px;resize:vertical;background:#141c14;border:1px solid #3c4f33;border-radius:10px;color:#cfc6b8;font-family:Georgia,serif;font-size:12.5px;line-height:1.5;padding:9px 11px}
+.wseedRow{display:flex;gap:9px;align-items:center;margin-top:9px}
+#wSeedNum{width:110px;background:#141c14;border:1px solid #3c4f33;border-radius:8px;color:#cfe37a;padding:8px 10px;font-size:13px}
+.wsheetBtns{display:flex;gap:8px;margin-top:12px}
+#wEnter{flex:1 1 auto;background:#1a3524;color:#cfe8cf;border:2px solid #3fae54;border-radius:10px;padding:12px;font-size:15px;font-weight:700;letter-spacing:.06em;cursor:pointer}
+#wEnter:active{transform:translateY(1px)}
+#wSheetBack,#wRandom{background:rgba(30,38,26,.9);border:1px solid #3c4f33;color:#e8e2d5;border-radius:10px;padding:12px 16px;font-size:13px;cursor:pointer}
+#wRandom{position:absolute;top:calc(18px + env(safe-area-inset-top));right:16px}
 </style>
 </head>
 <body>
+
+<!-- ================= WORLD SELECT (loading screen) ================= -->
+<div id="boot">
+  <button id="wRandom">🎲 Surprise me</button>
+  <div id="bootHead"><h1>SEED &amp; SAGE</h1><p>Choose a world to seed — or paste your own lore.</p></div>
+  <div id="wgrid"></div>
+  <div id="wsheet">
+    <div class="wsheetTop"><span id="wSheetTitle">—</span><span id="wSheetTheme"></span></div>
+    <label>Seed text — paste a paragraph; it teaches the world its names &amp; voice</label>
+    <textarea id="wSeedText" spellcheck="false"></textarea>
+    <div class="wseedRow"><label style="margin:0">World seed</label><input id="wSeedNum" inputmode="numeric" value="0"></div>
+    <div class="wsheetBtns"><button id="wSheetBack">Back</button><button id="wEnter">◈ Enter this world</button></div>
+  </div>
+</div>
 
 <!-- ================= SURFACE ================= -->
 <div id="sui">
@@ -313,6 +354,7 @@ button:active{transform:translateY(1px)}
 </div>
 
 <script src="js/core.js"></script>
+<script src="js/lore.js"></script>
 <script src="js/tiles.js"></script>
 <script src="js/forge.js"></script>
 <script src="js/plants.js"></script>
@@ -321,6 +363,7 @@ button:active{transform:translateY(1px)}
 <script src="js/surface.js"></script>
 <script src="js/dungeon.js"></script>
 <script src="js/editor.js"></script>
+<script src="js/worlds.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

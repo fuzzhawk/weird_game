@@ -110,7 +110,7 @@ function shoveOccupants(x,y){
 /* ================= names ================= */
 const NAMES=['Wren','Bramble','Sorrel','Fen','Mab','Orla','Perrin','Rue','Tamsin','Ulric','Vesper','Yarrow','Zephyr','Cassia','Dovan','Elowen','Fable','Garnet','Hollis','Isolde','Juniper','Kestrel','Lark','Merrit','Nix','Oleander','Pip','Quill','Rowan','Sable','Thistle','Una','Violet','Willem','Alder','Briar','Cinder','Damson','Ember','Fern','Gale','Hazel','Ivo','Jessamine','Kit','Linden','Moss','Nettle','Onyx','Poppy','Reed','Saffron','Tansy','Umber','Vale','Wisteria','Ash','Birch','Clover','Dunn','Edda','Flint','Gorse','Heath','Iris','Jasper','Knox','Loam','Marlow','North','Opal','Petra','Quince','Rye','Slate','Teal','Ursa','Vann','Wick','Yew','Zora','Bryn','Cove','Dell','Eyre','Frost','Glen','Hale','Ida','Jute','Kell','Lune','Mira','Noor','Osier','Pike','Ren','Sunna','Tor','Verne','Wilde'];
 let usedNames=new Set(),usedBiz=new Set(),usedDun=new Set(),usedVil=new Set();
-function makeName(){let tries=0;while(tries++<80){const n=pick(NAMES);if(!usedNames.has(n)){usedNames.add(n);return n}}const n=pick(NAMES)+' '+pick(['II','III','the Younger','the Second']);usedNames.add(n);return n}
+function makeName(){let tries=0;while(tries++<80){const n=(Lore.active&&Lore.name(3,10))||pick(NAMES);if(!usedNames.has(n)){usedNames.add(n);return n}}const n=pick(NAMES)+' '+pick(['II','III','the Younger','the Second']);usedNames.add(n);return n}
 
 /* ================= traits & goals ================= */
 const TRAITS={
@@ -822,8 +822,9 @@ function startBuild(p,tp,forP){
   emptySince:0,ruined:false,vid:null};
  if(tp==='biz'){
   b.sub=pick(BIZKINDS);
-  let nm='The '+pick(BIZ_ADJ)+' '+pick(BIZ_NOUN),tr=0;
-  while(usedBiz.has(nm)&&tr++<15)nm='The '+pick(BIZ_ADJ)+' '+pick(BIZ_NOUN);
+  const bizName=()=>Lore.active?'The '+Lore.name(4,10):'The '+pick(BIZ_ADJ)+' '+pick(BIZ_NOUN);
+  let nm=bizName(),tr=0;
+  while(usedBiz.has(nm)&&tr++<15)nm=bizName();
   usedBiz.add(nm);b.name=nm;
  }
  buildings.push(b);
@@ -1515,7 +1516,7 @@ function die(p,cause){
 const MUSINGS=['{n} watched a snail cross the path and called it a pilgrimage.','{n} argued with a rosebush and, by all accounts, lost.','{n} buried a word in the seed-rows to see what it grows.','{n} counted the petals of a thoughtfruit blossom: odd again. Troubling.','{n} listened to a beehive and swears it was buffering.','{n} whispered a question to the moss and is still waiting for the reply packet.','{n} found a strand of dead cable in the loam and planted it, hopefully.','{n} practiced being a tree. Reviews were mixed.'];
 const AMBIENT=['A warm wind combed the meadow, and every stalk bent the same polite degree.','The philosophercaps pulsed in sync, as if the ground were refreshing.','Far under the hills something old hummed one clean note and went quiet.','All afternoon the garden smelled of green ink, ozone, and beginnings.','A migration of moths crossed the sky, spelling nothing, beautifully.','A dead streetlamp deep in the hedgerow flickered once, for no one, then slept again.'];
 function dailyTick(){
- if(chance(.3))tale([],pick(AMBIENT));
+ if(chance(.3))tale([],(Lore.active&&Lore.line(6,16))||pick(AMBIENT));
  const snapshot=people.slice();
  let giftDone=false;
  for(const p of snapshot){
@@ -1532,7 +1533,7 @@ function dailyTick(){
    tale([p],p.name+' returned from the wild edges with clearer eyes.');
   }
   if(p.age>=16&&chance(.12))drawCard(p,null);
-  if(chance(.08))tale([p],pick(MUSINGS).replace('{n}',p.name));
+  if(chance(.08))tale([p],(Lore.active&&(p.name+' '+Lore.line(4,12)))||pick(MUSINGS).replace('{n}',p.name));
   if(p.doom&&cday()>=p.doom){die(p,'doom');continue}
   if(p.age>p.lifespan&&chance(0.05+(p.age-p.lifespan)*0.08)){die(p,'age');continue}
   if(p.partner&&p.id<p.partner){
@@ -1717,8 +1718,9 @@ function grantHeroRelic(rel){
 }
 function dangerWord(d){return d<.28?'uneasy':d<.45?'dangerous':d<.62?'deadly':d<.8?'a death-trap':'a legend of ruin'}
 function makeDungeon(x,y){
- let nm='The '+pick(DUN_ADJ)+' '+pick(DUN_NOUN),tr=0;
- while(usedDun.has(nm)&&tr++<20)nm='The '+pick(DUN_ADJ)+' '+pick(DUN_NOUN);
+ const dunName=()=>Lore.active?'The '+Lore.name(4,11):'The '+pick(DUN_ADJ)+' '+pick(DUN_NOUN);
+ let nm=dunName(),tr=0;
+ while(usedDun.has(nm)&&tr++<20)nm=dunName();
  usedDun.add(nm);
  const d={id:nextId++,x,y,name:nm,danger:rf(.24,.42),depth:ri(2,5),loot:rf(.7,1),restock:0,
   raids:0,deaths:0,relicsFound:0,inside:new Set(),cleansed:false};
@@ -2316,7 +2318,7 @@ function drawAnimal(c,a,t){
 /* ================= villages (the collective mind) ================= */
 const VIL_ADJ=['Verdance','Quiddity','Perhaps','Tenderloam','Bloomgate','Stillwater','Gloamrest','Emberfold','Seedwell','Neon Hollow','Thornhaven','Sempervirens'];
 const CLAIM_MARGIN=3,CLAIM_MIN=14,CLAIM_MAX=30,WALL_THICK=2;
-function villageName(){let n=pick(VIL_ADJ),tr=0;while(usedVil.has(n)&&tr++<15)n=pick(VIL_ADJ);usedVil.add(n);return n}
+function villageName(){for(let tr=0;tr<20;tr++){const n=(Lore.active&&Lore.name(4,11))||pick(VIL_ADJ);if(!usedVil.has(n)){usedVil.add(n);return n}}const n=pick(VIL_ADJ);usedVil.add(n);return n}
 function clampClaim(c){return{x0:clamp(Math.round(c.x0),2,W-3),y0:clamp(Math.round(c.y0),2,H-3),x1:clamp(Math.round(c.x1),2,W-3),y1:clamp(Math.round(c.y1),2,H-3)}}
 function claimOf(g,extra){
  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
