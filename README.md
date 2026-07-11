@@ -97,6 +97,14 @@ The Sage's hearts, level, and blade upgrades persist between the surface and
 every dungeon floor. Loot carried out of a dungeon is tipped into the nearest
 village granary.
 
+**Every world is its own colour.** A per-world **biome** is derived from the seed
+and threads through everything, so no two worlds look alike: the terrain eras are
+**recoloured from scratch** (one world's Verdant Age is jade, another's is teal,
+crimson or amethyst — drifting to its own cold waste) with a **per-world texture
+grain**, the plant sprites are **hue-rotated** to the world's cast, and the fauna,
+flyers and relic neon are shifted to match. Reroll the world (↻) and the whole
+palette — ground, flora, animals, birds, relics — comes up different.
+
 **Eras.** The surface world slowly cycles between a lush medieval forest and a
 sci-fi urban wasteland and back — a full ping-pong takes ~1000 days. As the age
 turns (The Verdant Age → The Age of Smoke → The Grey Age → The Neon Waste →

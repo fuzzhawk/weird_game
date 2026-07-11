@@ -282,10 +282,11 @@ function bakeFlora(seedBase){
   D.tree.push([0,1,2].map(st=>PF.bake('sapling',{leafDensity:.3,palette:'autumn'},s+13,72,0.55+st*0.17)));
  }
  const kinds=['grassTuft','wildflower','fern','vine','wildflower','grassTuft','fern','wildflower'];
+ const decRot=(biome?biome.plantRot:0);
  for(let i=0;i<8;i++){
-  const s=(frng()*1e9)|0,ph=frng()*6.28;
-  F.decor.push(PF.bake(kinds[i],{palette:i===3?'duskViolet':'meadow'},s,24,0.75+frng()*0.25,ph));
-  D.decor.push(PF.bake(kinds[i],{leafDensity:.3,bloomAmount:0,palette:'autumn'},s,24,0.55,ph));
+  const s=(frng()*1e9)|0,ph=frng()*6.28,r=(decRot+frng()*40-20)%360;
+  F.decor.push(PF.bake(kinds[i],{palette:i===3?'duskViolet':'meadow',hueRot:r},s,24,0.75+frng()*0.25,ph));
+  D.decor.push(PF.bake(kinds[i],{leafDensity:.3,bloomAmount:0,palette:'autumn',hueRot:r},s,24,0.55,ph));
  }
  flora=F; floraDead=D;
  floraSpecies=makeFloraSpecies(seedBase);
@@ -322,8 +323,9 @@ function makeFloraSpecies(seedBase){
   else if(tp==='herb'){ kind='berry';preset=pk(['wildflower','vine','bush']);cell=40;foodYield=rint(0,2);palette=pk(['meadow','duskViolet','forest']);suf=pk(PSUF_HERB); }
   else { kind='berry';preset='bush';cell=40;foodYield=rint(2,4);palette=pk(['meadow','forest']);suf=pk(PSUF_FOOD); }
   const boost=(!weed&&!wood&&(tp==='herb'||rng()<0.35))?{stat:pk(BOOST_STATS),v:+(0.15+rng()*0.4).toFixed(2)}:null;
+  const hueRot=((biome?biome.plantRot:0)+(rng()*70-35))%360;   // this world's cast + per-species jitter
   const bakeSet=(dead)=>{ const s=(rng()*1e9)|0;
-   const ov=dead?{palette:'autumn',bloomAmount:0.08,leafDensity:0.35}:{palette,bloomAmount:weed?0.05:(boost?0.9:0.5)};
+   const ov=dead?{palette:'autumn',bloomAmount:0.08,leafDensity:0.35,hueRot}:{palette,bloomAmount:weed?0.05:(boost?0.9:0.5),hueRot};
    return [0,1,2].map(st=>PF.bake(preset,ov,s+i*97,cell,(dead?0.5:0.55)+st*0.2)); };
   sps.push({ i, key:'sp'+i, name:cap(pk(PLANT_PRE))+suf, kind, preset, cell, palette,
    yield:foodYield, wood, weed, boost,
@@ -499,6 +501,8 @@ function genWorld(){
  people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];chron=[];usedNames=new Set();
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
+ makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
+ AF.setWorld(biome.faunaShift);TF.setWorld(biome.relicRot);
  bakeFlora('garden-'+seed);
  queueMonsterBakes();
  // cellular automata: open meadow carved out of the old bramble
@@ -2642,9 +2646,36 @@ const ERAS=[
  {name:'The Neon Waste', grass:'#54677a', dirt:'#08060e', style:'cracked', edge:'sharp', green:0.06,
   lines:['Dead signage flickers in the bramble. The old net dreams beneath.','Chrome and moss have called a truce out here in the waste.','Nothing grows but the past, and it grows everywhere.']},
 ];
-// the three fixed keyframes the terrain layers are painted from (forest / grey /
-// waste). The live age just slides an urbanization mask between them.
-const LAYER_KF=[ERAS[0],ERAS[2],ERAS[3]];
+// ERAS above is a TEMPLATE (names, green levels, flavour lines). Each world
+// recolours it from a procedural BIOME so no two worlds share a palette — the
+// Verdant Age might be jade, teal, rust or violet, drifting to its own cold waste.
+let biome=null, worldEras=null;
+function hsl2hex(h,s,l){ const c=CF.hsl(((h%360)+360)%360, clamp(s,0,100), clamp(l,0,100)); return '#'+[c.r,c.g,c.b].map(v=>clamp(v|0,0,255).toString(16).padStart(2,'0')).join(''); }
+function lerpHueDeg(a,b,t){ let d=((b-a+540)%360)-180; return a+d*t; }
+function makeBiome(){
+ const rng=U.mulberry32((seed>>>0)^0xB10E5);
+ const hue=Math.round(rng()*360);
+ biome={ hue, hue2:Math.round((hue+130+rng()*130)%360), sat:34+rng()*24,
+   plantRot:Math.round(rng()*360), faunaShift:Math.round(rng()*360), relicRot:Math.round(rng()*360) };
+ return biome;
+}
+function makeWorldEras(){
+ if(!biome)makeBiome();
+ const b=biome, rng=U.mulberry32((seed>>>0)^0xE7A5), N=ERAS.length;
+ const styles=TileGen.STYLE_NAMES.slice();
+ for(let i=styles.length-1;i>0;i--){const j=(rng()*(i+1))|0;[styles[i],styles[j]]=[styles[j],styles[i]];}
+ worldEras=ERAS.map((base,i)=>{
+  const t=i/(N-1);                                        // 0 verdant .. 1 waste
+  const hue=lerpHueDeg(b.hue,b.hue2,t*0.9);
+  const sat=b.sat*(1-t*0.75);
+  return {...base,
+   grass: hsl2hex(hue, Math.max(6,sat*(1-t*0.25)), clamp(47-t*6+(rng()*5-2.5),26,60)),
+   dirt:  hsl2hex(hue+(rng()*30-15), Math.max(4,sat*0.5), clamp(13-t*4,5,20)),
+   style: styles[i%styles.length] };   // texture grain differs per world too
+ });
+ return worldEras;
+}
+function layerKF(){ const E=worldEras||ERAS; return [E[0],E[2],E[3]]; }
 function eraGreen(){ return surfEra?surfEra.green:1; }
 let eraOffset=0,tileSalt=0;   // editor knobs: shift the age / reroll the grain
 function eraFloat(){
@@ -2655,8 +2686,9 @@ function eraFloat(){
 function lerpHex(a,b,t){const A=U.hexToRgb(a),B=U.hexToRgb(b);
  return '#'+[0,1,2].map(i=>clamp(Math.round(A[i]+(B[i]-A[i])*t),0,255).toString(16).padStart(2,'0')).join('')}
 function eraState(){
- const f=eraFloat(),N=ERAS.length,i=Math.min(Math.floor(f),N-1),frac=f-Math.floor(f);
- const a=ERAS[i],b=ERAS[Math.min(i+1,N-1)],near=frac<0.5?a:b;
+ const E=worldEras||ERAS;
+ const f=eraFloat(),N=E.length,i=Math.min(Math.floor(f),N-1),frac=f-Math.floor(f);
+ const a=E[i],b=E[Math.min(i+1,N-1)],near=frac<0.5?a:b;
  return {f,name:near.name,grass:lerpHex(a.grass,b.grass,frac),dirt:lerpHex(a.dirt,b.dirt,frac),
   style:near.style,edge:near.edge,green:a.green+(b.green-a.green)*frac,lines:near.lines};
 }
@@ -2670,16 +2702,17 @@ let surfPals=null,surfStyle=null,surfSeedN=1,surfMasks=null,surfEra=null;
 // per-cell crossfade between them stays clean (only palette + surface texture
 // differ from age to age).
 function bakeSurfaceTiles(){
+ const KF=layerKF();
  surfStyle=TileGen.deriveStyle('surface-'+seed+'-'+tileSalt);
- surfStyle.name=LAYER_KF[0].style; surfStyle.edge=LAYER_KF[0].edge;
+ surfStyle.name=KF[0].style; surfStyle.edge=KF[0].edge;
  surfStyle.texDensity*=0.7; surfStyle.macroAmt*=0.7;       // calmer than the deep
  surfSeedN=(seed>>>0)||1;
  surfMasks=[];
  for(let i=0;i<16;i++)surfMasks[i]=TileGen.edgeMask(TILE,TileGen.cornersFromIndex(i),surfStyle);
  // per-layer palette (keep blocked rock much darker than open grass) + texture style
  for(let k=0;k<3;k++){
-  terPals[k]=TileGen.makePalettes(LAYER_KF[k].grass,LAYER_KF[k].dirt,{rockLift:0.05});
-  terStyle[k]={...surfStyle, name:LAYER_KF[k].style};
+  terPals[k]=TileGen.makePalettes(KF[k].grass,KF[k].dirt,{rockLift:0.05});
+  terStyle[k]={...surfStyle, name:KF[k].style};
  }
  surfPals=terPals[0];
  surfEra=eraState();
@@ -4400,6 +4433,7 @@ return {
   bloomAll:()=>{for(const n of nodes)n.amt=n.max;toast('Everything ripens at once. Unsettling, but generous.')},
   rerollFlora:()=>{bakeFlora('garden-'+seed+'-'+((Math.random()*1e6)|0));buildTerrainLayer();repaintDynAll();toast('The flora reconsiders its whole aesthetic.')},
   era:()=>eraState(),
+  biome:()=>biome,
   eraStats:()=>({green:eraGreen(),salvage:salvage.length,relicTarget:relicTarget(),
     animals:animals.length,animalTarget:animalTarget(),
     nodeFood:nodes.filter(n=>n.yield==='food').reduce((a,n)=>a+n.amt,0)}),
