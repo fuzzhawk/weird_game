@@ -609,8 +609,10 @@ function genWorld(){
  for(let i=0;i<4;i++)spawnFlyer();
  refreshChron();
 }
-// relics surface as the world industrialises: few in the forest, many in the waste
-function relicTarget(){ return Math.round(1 + (1-eraGreen())*13); }
+// relics surface as the world industrialises: few in the forest, many in the
+// waste — and the built themes (modern, cyberpunk) are strewn with far more.
+function relicMult(){ return worldTheme==='cyberpunk'?2.1 : worldTheme==='modern'?1.5 : 1; }
+function relicTarget(){ return Math.round((1 + (1-eraGreen())*13)*relicMult()); }
 function spawnSalvage(){
  for(let t=0;t<40;t++){
   const[x,y]=randOpenTile();
@@ -2688,7 +2690,17 @@ function makeWorldEras(){
 }
 function layerKF(){ const E=worldEras||ERAS; return [E[0],E[2],E[3]]; }
 function eraGreen(){ return surfEra?surfEra.green:1; }
-let eraOffset=0,tileSalt=0;   // editor knobs: shift the age / reroll the grain
+let eraOffset=0,tileSalt=0,worldTheme='fantasy';   // editor knobs + this world's theme
+// where in the age-cycle a world begins: fantasy is green, modern industrial,
+// cyberpunk a neon waste — with a per-world jitter so no two open identically.
+function startEraOffset(){
+ const r=U.mulberry32((seed>>>0)^0x5A17);
+ let phase;
+ if(worldTheme==='cyberpunk')   phase=2.75+r()*0.25;   // Grey → Neon Waste
+ else if(worldTheme==='modern') phase=1.70+r()*0.70;   // Age of Smoke → Grey
+ else                           phase=r()*1.05;         // Verdant → first Smoke
+ return phase*ERA_SEG_DAYS - 0.30;   // simMin opens at DAY*0.30, so day≈phase at genesis
+}
 function eraFloat(){
  const day=simMin/DAY+eraOffset, N=ERAS.length, seg=2*(N-1);
  let t=(day/ERA_SEG_DAYS)%seg; if(t<0)t+=seg;
@@ -2779,11 +2791,15 @@ function paintPaved(c,x,y){
 function buildDecorList(){
  decorList=[];
  if(!flora)return;
+ // built themes are sparser: narrow the undergrowth band so modern & cyberpunk
+ // worlds read as concrete-and-chrome, not meadow.
+ const pw=worldTheme==='cyberpunk'?0.34 : worldTheme==='modern'?0.6 : 1;
+ const hi=0.30+0.12*pw;
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
   const i=idx(x,y);
   if(map[i]!==0||nodeAt.has(i))continue;
   const h=hash2(x,y);
-  if(h>0.30&&h<0.42) decorList.push({x,y,i,vi:(x*7+y*13)%flora.decor.length});
+  if(h>0.30&&h<hi) decorList.push({x,y,i,vi:(x*7+y*13)%flora.decor.length});
  }
 }
 // bake a horizontal band of one terrain layer
@@ -4290,9 +4306,11 @@ $('newBtn').onclick=()=>{
   toast('Tap ↻ again to let this garden go');
  }
 };
-function reseed(newSeed){
+function reseed(newSeed,theme){
  seed=(newSeed===undefined)?((Math.random()*2**31)|0):newSeed;
+ if(theme)worldTheme=theme;
  rng=U.mulberry32(seed);
+ eraOffset=startEraOffset();      // each world opens in a theme-appropriate age, not always verdant
  genWorld();
  $('charPanel').classList.add('hidden');$('logPanel').classList.add('hidden');closeInspect();
  toast('A new garden dreams itself up… (seed '+seed+')');
@@ -4448,7 +4466,7 @@ return {
   era:()=>eraState(),
   biome:()=>biome,
   eraStats:()=>({green:eraGreen(),salvage:salvage.length,relicTarget:relicTarget(),
-    animals:animals.length,animalTarget:animalTarget(),
+    animals:animals.length,animalTarget:animalTarget(),theme:worldTheme,decor:decorList?decorList.length:0,
     nodeFood:nodes.filter(n=>n.yield==='food').reduce((a,n)=>a+n.amt,0)}),
   // ---- Animal Forge ----
   AF,
