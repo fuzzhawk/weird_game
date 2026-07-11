@@ -104,6 +104,7 @@ const Worlds = (function(){
   const seedNum=parseInt($('wSeedNum').value,10);
   const seed=isNaN(seedNum)?w.seed:seedNum;
   Lore.train(text, seed, w.t);
+  Mind.seedWorld(text, seed);   // per-NPC mutating memory shares the world's substrate
   $('boot').classList.add('hidden');
   if(onEnter)onEnter({seed, theme:w.t, title:w.title, text});
  }
