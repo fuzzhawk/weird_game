@@ -18,6 +18,8 @@ const {mulberry32,hashStr,hsl,shade,Raster,DIRS,rasterToImageData}=CF;
 function pick(rng,a){ return a[(rng()*a.length)|0]; }
 function rr(rng,lo,hi){ return lo+rng()*(hi-lo); }
 function chance(rng,p){ return rng()<p; }
+let worldHueShift=0;                       // per-world palette rotation for all fauna
+function setWorld(h){ worldHueShift=((h||0)%360+360)%360; }
 
 /* ---------- naming: invent a species + an individual ---------- */
 const SP_PRE=['thorn','dusk','moss','ember','glimmer','grumble','stag','bram','fen','gloam','snout','tuft','clover','rime','soot','pallid','cinder','hollow','verr','quill','murk','loam','bristle','sable','wisp'];
@@ -74,8 +76,8 @@ function make(key, seed){
  const tailSize= rr(rng,3,8);
  const hide    = pick(rng,HIDES);
 
- // --- colours ---
- const hue = h? Math.round(rr(rng,h.hue[0],h.hue[1]))%360 : Math.round(rng()*360);
+ // --- colours (rotated by this world's palette so each world's fauna differ) ---
+ const hue = ((h? Math.round(rr(rng,h.hue[0],h.hue[1])) : Math.round(rng()*360)) + worldHueShift)%360;
  const sat = h? Math.round(rr(rng,h.sat[0],h.sat[1])) : Math.round(rr(rng,10,72));
  const lit = h? Math.round(rr(rng,h.lit[0],h.lit[1])) : Math.round(rr(rng,30,70));
  const bellyLit = clampN(lit+rr(rng,10,22),0,92);
@@ -317,7 +319,7 @@ function makeFlyer(key, seed){
   wingPairs: kind==='bird'?1:2,
   tailType: kind==='bird'? pick(rng,['fan','fork','long','short']) : pick(rng,['none','none','stinger']),
   beak: kind==='bird', antennae: kind==='bug',
-  hue: Math.round(rng()*360),
+  hue: (Math.round(rng()*360)+worldHueShift)%360,
   sat: kind==='bird'? Math.round(rr(rng,46,86)) : Math.round(rr(rng,22,70)),
   lit: kind==='bird'? Math.round(rr(rng,42,64)) : Math.round(rr(rng,32,56)),
   wingLit: Math.round(rr(rng,58,86)),
@@ -393,5 +395,5 @@ function bakeFlyer(params, drawSize){
  return { FRAMES, params:P, native:S, scale, box, fps:{walk:12} };
 }
 
-return {KEYS, HINTS, make, bake, pick, speciesName, makeFlyer, bakeFlyer, flyerName};
+return {KEYS, HINTS, make, bake, pick, speciesName, makeFlyer, bakeFlyer, flyerName, setWorld};
 })();

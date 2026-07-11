@@ -15,6 +15,17 @@ function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
   let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
   return((t^t>>>14)>>>0)/4294967296;}}
 function hashStr(s){s=String(s);let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+let worldRelicRot=0;                        // per-world hue rotation for relic neon
+function setWorld(h){ worldRelicRot=((h||0)%360+360)%360; }
+function rotHex(hex,deg){
+  const n=parseInt(hex.slice(1),16), r=(n>>16)/255, g=((n>>8)&255)/255, b=(n&255)/255;
+  const mx=Math.max(r,g,b), mn=Math.min(r,g,b), l=(mx+mn)/2, d=mx-mn; let h=0,s=0;
+  if(d){ s=l>0.5?d/(2-mx-mn):d/(mx+mn); h=mx===r?((g-b)/d+(g<b?6:0)):mx===g?((b-r)/d+2):((r-g)/d+4); h/=6; }
+  h=(h+deg/360)%1; if(h<0)h+=1;
+  const q=l<0.5?l*(1+s):l+s-l*s, p=2*l-q, f=t=>{t=(t%1+1)%1;return t<1/6?p+(q-p)*6*t:t<1/2?q:t<2/3?p+(q-p)*(2/3-t)*6:p;};
+  const to=v=>Math.round(v*255).toString(16).padStart(2,'0');
+  return '#'+to(f(h+1/3))+to(f(h))+to(f(h-1/3));
+}
 function hash2(x,y){let h=(x*73856093 ^ y*19349663)>>>0; return (h%1024)/1024;}
 const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
 
@@ -74,7 +85,8 @@ function insideHull(dx,dy,shape,hw,hh){
 /* ---------- render ---------- */
 function renderRelic(ctx, P, cell, phase, seedNum){
   const rng=mulberry32((seedNum!==undefined?seedNum:hashStr(P.seed))>>>0 || 1);
-  const pal=PALETTES[P.palette]||PALETTES.chrome;
+  let pal=PALETTES[P.palette]||PALETTES.chrome;
+  if(worldRelicRot) pal={metal:pal.metal.map(c=>rotHex(c,worldRelicRot*0.4)),neon:rotHex(pal.neon,worldRelicRot),neon2:rotHex(pal.neon2,worldRelicRot)};
   const cx=cell/2, cy=cell/2 + 1;
   const pulse=0.5+0.5*Math.sin((phase||0));
   const px=(x,y,c)=>{ x|=0; y|=0; if(x<0||y<0||x>=cell||y>=cell)return; ctx.fillStyle=c; ctx.fillRect(x,y,1,1); };
@@ -233,5 +245,5 @@ function paramsFor(rel){ return {...PRESETS[rel.preset], palette:rel.palette, si
 function bakeCatalog(id, cell, phase){ const rel=byId[id]||CATALOG[0]; return bakeParams(paramsFor(rel), cell||32, phase||0); }
 
 return {PALETTES, PALETTE_KEYS:PAL_KEYS, PRESETS, PRESET_KEYS, CATALOG, byId,
-  defaults, randomParams, renderRelic, bakeParams, paramsFor, bakeCatalog, mulberry32, hashStr};
+  defaults, randomParams, renderRelic, bakeParams, paramsFor, bakeCatalog, mulberry32, hashStr, setWorld};
 })();
