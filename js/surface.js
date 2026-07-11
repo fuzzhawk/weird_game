@@ -110,7 +110,7 @@ function shoveOccupants(x,y){
 /* ================= names ================= */
 const NAMES=['Wren','Bramble','Sorrel','Fen','Mab','Orla','Perrin','Rue','Tamsin','Ulric','Vesper','Yarrow','Zephyr','Cassia','Dovan','Elowen','Fable','Garnet','Hollis','Isolde','Juniper','Kestrel','Lark','Merrit','Nix','Oleander','Pip','Quill','Rowan','Sable','Thistle','Una','Violet','Willem','Alder','Briar','Cinder','Damson','Ember','Fern','Gale','Hazel','Ivo','Jessamine','Kit','Linden','Moss','Nettle','Onyx','Poppy','Reed','Saffron','Tansy','Umber','Vale','Wisteria','Ash','Birch','Clover','Dunn','Edda','Flint','Gorse','Heath','Iris','Jasper','Knox','Loam','Marlow','North','Opal','Petra','Quince','Rye','Slate','Teal','Ursa','Vann','Wick','Yew','Zora','Bryn','Cove','Dell','Eyre','Frost','Glen','Hale','Ida','Jute','Kell','Lune','Mira','Noor','Osier','Pike','Ren','Sunna','Tor','Verne','Wilde'];
 let usedNames=new Set(),usedBiz=new Set(),usedDun=new Set(),usedVil=new Set();
-function makeName(){let tries=0;while(tries++<80){const n=(Lore.active&&Lore.name(3,10))||pick(NAMES);if(!usedNames.has(n)){usedNames.add(n);return n}}const n=pick(NAMES)+' '+pick(['II','III','the Younger','the Second']);usedNames.add(n);return n}
+function makeName(){let tries=0;while(tries++<80){const n=(Lore.active&&Lore.name(4,10))||pick(NAMES);if(!usedNames.has(n)){usedNames.add(n);return n}}const n=pick(NAMES)+' '+pick(['II','III','the Younger','the Second']);usedNames.add(n);return n}
 
 /* ================= traits & goals ================= */
 const TRAITS={
@@ -2583,7 +2583,10 @@ const SAY={
 };
 function say(p,o,kind){
  const pool=SAY[kind]||SAY.greet;
- let line=pick(pool).replace('{o}',o?o.name:'friend');
+ // in a lore-seeded world most chatter takes the world's own voice; the
+ // hand-written garden lines mention turnips & moss and would read wrong in a
+ // cyberpunk or modern world, so lean on the Markov line when it's available.
+ let line=(Lore.active&&chance(.7)&&Lore.line(4,12))||pick(pool).replace('{o}',o?o.name:'friend');
  p.bubble={text:line,until:performance.now()+2600};
 }
 function chatBubbles(p,o){
@@ -3772,16 +3775,18 @@ const TRAIT_TALK={
  dreamer:['Some nights the whole meadow lifts an inch. No one else checks.'],
  stubborn:['I planted it there. It will GROW there.']
 };
+// a line in the world's own voice when lore is seeded, else the hand-written one
+function loreOr(fallback,min,max){ return (Lore.active&&Lore.line(min||5,max||13))||fallback; }
 function npcDialogue(p){
  const lines=[];
- lines.push(pick(TALK_OPEN));
+ lines.push(loreOr(pick(TALK_OPEN),5,12));
  const tp=TRAIT_TALK[p.traits[0]]||TRAIT_TALK[p.traits[1]];
- if(tp)lines.push(pick(tp));
- if(p.courting&&chance(.6))lines.push(pick(TALK_LOVE));
- else if(p.goal&&!p.goal.done&&chance(.7))lines.push(TALK_GOAL[p.goal.k]);
+ if(tp)lines.push(loreOr(pick(tp),6,15));
+ if(p.courting&&chance(.6))lines.push(loreOr(pick(TALK_LOVE),5,12));
+ else if(p.goal&&!p.goal.done&&chance(.7))lines.push(loreOr(TALK_GOAL[p.goal.k],6,15));
  if(p.cards.length&&chance(.4)){const c=TAROT[p.cards[p.cards.length-1].i];lines.push('The garden dealt me '+c.n+'. I am still deciding what it gave me.')}
- if(dungeons.length&&chance(.55)){const d=pick(dungeons.filter(dd=>!dd.cleansed).concat(dungeons).slice(0,dungeons.length));lines.push(pick(TALK_RUMOR).replace('{d}',d.name))}
- lines.push(pick(TALK_CLOSE));
+ if(dungeons.length&&chance(.55)){const d=pick(dungeons.filter(dd=>!dd.cleansed).concat(dungeons).slice(0,dungeons.length));const lr=Lore.active&&Lore.line(5,12);lines.push(lr?lr+' Beneath '+d.name+'.':pick(TALK_RUMOR).replace('{d}',d.name))}
+ lines.push(loreOr(pick(TALK_CLOSE),4,10));
  return lines;
 }
 let dlgLines=null,dlgIdx=0;
