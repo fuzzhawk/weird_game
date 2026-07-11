@@ -11,7 +11,11 @@ A unified game built from the four prototypes in this repo:
   descends into a chain of floors; each floor's Keeper offers a variation of
   the original Grove & Blade quests (cull the blight / gather night-blooms /
   refute the boss). Clear the final floor's heart to put the whole dungeon
-  to rest on the surface.
+  to rest on the surface. The floors render with the **same shared TileGen
+  terrain engine as the overworld** and a **zoomable camera** (pinch / mouse
+  wheel), plus a **per-tile atmospheric lighting** system — a darkness that the
+  Sage's lantern, glowing foes, treasure, blooms and portals carve into pools of
+  light, so the murk reads as genuinely lit rather than flatly shaded.
 - **creature-forge.html** (the "hero forge") → bakes every character sprite:
   surface villagers, the Sage, surfacing monsters, and the full dungeon cast.
 - **plant-forge.html** → bakes all surface flora: resource plants
