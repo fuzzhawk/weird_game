@@ -271,10 +271,15 @@ let flora=null, floraDead=null, floraSeed='garden';
 let floraSpecies=null, fert=null, farmSp=null;   // plant catalogue, soil fertility, per-farm crop
 // ---- water & weather ----
 // water: 0 dry · 1 stream (shallow, passable) · 2 lake (deep, impassable)
-let water=null, elevF=null, wetUntil=null, waterFrac=0;
+let water=null, waterMax=null, elevF=null, wetUntil=null, waterFrac=0;
+// dynamic level: lakes dry up (evaporation) and refill (rain) around a global wetness
+let lakeBedSorted=null, streamNorm=null, wetness=0.5, lastWetRecomp=-1;
 let clouds=[], humidity=0.3, windX=1, windY=0, worldWet=0.5, weatherT=0;
 const DIRS8=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
 const MAXCLOUDS=14, RAIN_WET_DUR=140;
+// baked animated water tiles (this world's palette) + timing
+let waterAnim=null;
+const WATER_VARIANTS=3, WATER_FRAMES=8, WATER_FRAME_MS=150;
 function bakeFlora(seedBase){
  floraSeed=seedBase;
  const frng=U.mulberry32(U.hashStr(seedBase)^0xF10A);
@@ -381,9 +386,36 @@ function valNoise(seed){
  }
  return out;
 }
+// Voronoi elevation: scatter sites of random base height; within each cell the
+// ground BOWLS — lowest at the site, rising toward the cell walls — so water
+// pools at the sites of the low cells and drains, cell to cell, over the saddles
+// between them. A couple of blur passes soften the ridges into flowing slopes.
+function voronoiElev(seedN){
+ const rng=U.mulberry32((seedN>>>0)^0x1CE00B);
+ const N=13+((rng()*10)|0), sites=[];
+ for(let i=0;i<N;i++)sites.push({x:rng()*W,y:rng()*H,h:rng()});
+ const e=new Float32Array(W*H), cellR=W*0.16;
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  let d1=1e18,d2=1e18,h1=0;
+  for(const s of sites){ const dx=x-s.x,dy=y-s.y,d=dx*dx+dy*dy; if(d<d1){d2=d1;d1=d;h1=s.h}else if(d<d2)d2=d; }
+  const f1=Math.sqrt(d1);
+  // base height of the owning basin + a bowl that deepens toward its site
+  e[idx(x,y)] = h1*0.60 + clamp(f1/cellR,0,1)*0.40;
+ }
+ // smooth so the cell walls become slopes water can run down
+ for(let pass=0;pass<2;pass++){
+  const n=e.slice();
+  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){
+   const i=idx(x,y);
+   n[i]=(e[i]*2+e[i-1]+e[i+1]+e[i-W]+e[i+W])/6;
+  }
+  for(let i=0;i<W*H;i++)e[i]=n[i];
+ }
+ return e;
+}
 function genFertility(){
  fert=new Float32Array(W*H);
- elevF=valNoise(seed*2+1); const elev=elevF, moist=valNoise(seed*7+3);
+ elevF=voronoiElev(seed*2+1); const elev=elevF, moist=valNoise(seed*7+3);
  for(let i=0;i<W*H;i++){
   // damp lowland loam is richest; dry uplands are poorer
   fert[i]=clamp(0.24 + moist[i]*0.52 + (1-elev[i])*0.30 - 0.12, 0, 1);
@@ -433,7 +465,43 @@ function genHydrology(){
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){ const i=idx(x,y); if(water[i]||map[i])continue;
   for(const[dx,dy]of DIRS8){const nx=x+dx,ny=y+dy; if(nx>=0&&ny>=0&&nx<W&&ny<H&&water[idx(nx,ny)]){ fert[i]=clamp(fert[i]+0.14,0,1); break; }}
  }
- let n=0; for(let i=0;i<W*H;i++)if(water[i])n++; waterFrac=n/(W*H);
+ // this is the MAX footprint; the live water recedes and refills within it
+ waterMax=water.slice();
+ const lakeBeds=[]; for(let i=0;i<W*H;i++)if(waterMax[i]===2)lakeBeds.push(elevF[i]);
+ lakeBeds.sort((a,b)=>a-b); lakeBedSorted=Float32Array.from(lakeBeds);
+ // rank each stream tile by height so the high reaches dry first in a drought
+ const sIdx=[]; for(let i=0;i<W*H;i++)if(waterMax[i]===1)sIdx.push(i);
+ sIdx.sort((a,b)=>elevF[a]-elevF[b]);
+ streamNorm=new Float32Array(W*H);
+ for(let k=0;k<sIdx.length;k++)streamNorm[sIdx[k]]=sIdx.length>1?k/(sIdx.length-1):0;
+ wetness=worldWet; lastWetRecomp=-1;
+ recomputeWater(true);
+}
+// set the live water footprint from the current wetness: lakes fill from their
+// lowest beds up, streams flow from the low reaches up. Returns true if any
+// tile changed impassability (so pathfinding needs to re-flood).
+function recomputeWater(force){
+ if(!waterMax)return false;
+ lastWetRecomp=wetness;
+ const wf=worldWet>0.05?worldWet:0.2;
+ const fLake=clamp(wetness/wf,0,1);
+ const surf = lakeBedSorted&&lakeBedSorted.length? lakeBedSorted[Math.min(lakeBedSorted.length-1,(fLake*(lakeBedSorted.length-1))|0)] : 1e9;
+ const streamF=clamp(wetness/wf,0,1.3);
+ let changed=false, n=0;
+ for(let i=0;i<W*H;i++){
+  const wm=waterMax[i]; if(!wm){continue;}
+  let now=0;
+  if(wm===2){ now = elevF[i]<=surf ? 2 : 0; }
+  else { now = streamF > 0.32+streamNorm[i]*0.6 ? 1 : 0; }
+  if(now!==water[i]){
+   if((water[i]===2)!==(now===2))changed=true;   // lake ⇄ land flips walkability
+   water[i]=now;
+  }
+  if(now)n++;
+ }
+ waterFrac=n/(W*H);
+ if(changed){regionsDirty=true;}
+ return changed;
 }
 // flood-fill water==tag, drying components smaller than minSize
 function pruneSmallWater(tag,minSize){
@@ -472,6 +540,7 @@ function rainOn(c,dt){
   wetUntil[i]=simMin+RAIN_WET_DUR;
   if(fert&&map[i]===0&&!water[i]&&fert[i]<0.8) fert[i]=clamp(fert[i]+dt*0.0012,0,0.8);  // the rain nourishes
  }
+ wetness=clamp(wetness+dt*0.00075,0,1.15);   // the rain runs off and refills the lakes
 }
 function updateCloud(c,dt){
  c.drift+=dt*0.01;
@@ -487,7 +556,16 @@ function updateCloud(c,dt){
 }
 function weatherTick(dt){
  const sun=clamp(1-nightFactor(),0,1);
- humidity=clamp(humidity+(waterFrac*1.4+0.12)*(0.35+0.65*sun)*dt*0.0018,0,1.4);
+ // moisture rides in on the wider climate too, so rain still comes to a parched
+ // world and can refill it — droughts recede, they don't become permanent deserts
+ humidity=clamp(humidity+(waterFrac*1.1+0.42)*(0.35+0.65*sun)*dt*0.0018,0,1.4);
+ // the lake level BREATHES around the world's climate baseline: spring/aquifer
+ // recharge pulls it up toward worldWet, hot-sun evaporation draws it down, and
+ // rain (in rainOn) lifts it in visible pulses — so lakes recede in dry spells
+ // and refill when the rains come, without ever collapsing to permanent desert
+ wetness=clamp(wetness + (worldWet-wetness)*0.00018*dt - (0.00003+waterFrac*0.0006)*sun*dt, 0, 1.15);
+ // reshape the shoreline only when the level has drifted enough (throttled)
+ if(Math.abs(wetness-lastWetRecomp)>0.012) recomputeWater(false);
  if(humidity>0.55 && clouds.length<MAXCLOUDS && chance(dt*0.03*(humidity-0.5))){ spawnCloud(0.45+humidity*0.5); humidity-=0.4; }
  weatherT+=dt;
  const wa=Math.atan2(windY,windX)+Math.sin(weatherT*0.0003)*0.02;
@@ -2862,6 +2940,21 @@ function bakeSurfaceTiles(){
  }
  surfPals=terPals[0];
  surfEra=eraState();
+ bakeWaterTiles();
+}
+// bake this world's water: its own hue (pulled toward blue), murkier in the
+// built/waste themes. Lakes run deep, streams a touch brighter and shallower.
+function bakeWaterTiles(){
+ const bh=biome?biome.hue:210;
+ const hue=lerpHueDeg(bh,210,0.62);                        // toward water-blue, but keep the world's cast
+ const sat=clamp((biome?biome.sat:45)/100+0.18,0.28,0.7);
+ const murk=worldTheme==='cyberpunk'?0.6 : worldTheme==='modern'?0.34 : 0.12;
+ const lakePal=TileGen.waterPalette(hue,sat,murk);
+ const streamPal=TileGen.waterPalette(hue,sat*0.9,murk*0.5);
+ waterAnim={
+  lake:  TileGen.makeWater({pal:lakePal,  res:TILE,frames:WATER_FRAMES,variants:WATER_VARIANTS,seed:surfSeedN^0x5EA}),
+  stream:TileGen.makeWater({pal:streamPal,res:TILE,frames:WATER_FRAMES,variants:WATER_VARIANTS,seed:surfSeedN^0x57A}),
+ };
 }
 // re-mark every hand-edited tile so the dynamic overlay repaints after a rebake
 function repaintDynAll(){
@@ -3294,29 +3387,28 @@ function draw(t){
  if(tcv)ctx.drawImage(tcv,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
  if(terrainDirty){paintDyn();terrainDirty=false}
  if(dynCanvas)ctx.drawImage(dynCanvas,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
- // ---- water: lakes (opaque, over the rock silhouette) and streams (over grass) ----
- if(water){
-  const shim=t*0.0016;
+ // ---- water: calm, pre-baked ripple tiles in the world's own palette ----
+ if(water&&waterAnim){
+  const fi=((t/WATER_FRAME_MS)|0)%WATER_FRAMES;
   for(let y=vy0;y<=vy1;y++)for(let x=vx0;x<=vx1;x++){
-   const i=idx(x,y), w=water[i]; if(!w)continue;
+   const i=idx(x,y), w=water[i], wm=waterMax?waterMax[i]:w;
    const px=x*TILE,py=y*TILE;
-   // ripple: a slow diagonal wave modulating brightness
-   const wv=Math.sin((x+y)*0.9+shim*140)*0.5+Math.sin((x-y)*1.7+shim*90)*0.5;
-   const lit=clamp(0.5+wv*0.28,0,1);
-   if(w===2){
-    const base=lerpHex('#1f4a6e','#2f6f9a',lit);
-    ctx.fillStyle=base;ctx.fillRect(px,py,TILE,TILE);
-    ctx.globalAlpha=0.20+0.20*lit;ctx.fillStyle='#bfe8ff';ctx.fillRect(px,py+((wv*3+5)|0),TILE,1);ctx.globalAlpha=1;
-   }else{
-    ctx.globalAlpha=0.5+0.18*lit;ctx.fillStyle=lerpHex('#2b5f7e','#49a0c0',lit);ctx.fillRect(px,py,TILE,TILE);
-    ctx.globalAlpha=0.28*lit;ctx.fillStyle='#cfeeff';ctx.fillRect(px,py+((wv*2+7)|0),TILE,1);ctx.globalAlpha=1;
+   if(w){
+    const vi=(x*7+y*13)%WATER_VARIANTS;
+    const frames=(w===2?waterAnim.lake:waterAnim.stream)[vi];
+    if(w===2){ ctx.drawImage(frames[fi],px,py); }
+    else { ctx.globalAlpha=0.62; ctx.drawImage(frames[fi],px,py); ctx.globalAlpha=1; }
+   } else if(wm===2){
+    // a lakebed the water has retreated from — cracked, silty mud
+    ctx.globalAlpha=0.5;ctx.fillStyle='#4a3d2c';ctx.fillRect(px,py,TILE,TILE);
+    ctx.globalAlpha=0.18;ctx.fillStyle='#2a2018';ctx.fillRect(px,py+((x+y)&3)+5,TILE,1);ctx.globalAlpha=1;
    }
   }
-  // wet sheen where rain has fallen (darken + a faint cool glaze that fades)
+  // wet sheen where rain has fallen (a fading cool glaze)
   if(wetUntil){
    for(let y=vy0;y<=vy1;y++)for(let x=vx0;x<=vx1;x++){
     const i=idx(x,y); if(water[i])continue; const wet=wetAt(i); if(wet<=0.01)continue;
-    ctx.globalAlpha=wet*0.28;ctx.fillStyle='#22304a';ctx.fillRect(x*TILE,y*TILE,TILE,TILE);ctx.globalAlpha=1;
+    ctx.globalAlpha=wet*0.26;ctx.fillStyle='#22304a';ctx.fillRect(x*TILE,y*TILE,TILE,TILE);ctx.globalAlpha=1;
    }
   }
  }
@@ -4737,7 +4829,10 @@ return {
   groundRGB:(x,y)=>{if(!tctx)return null;const d=tctx.getImageData(x*TILE+TILE/2,y*TILE+TILE/2,1,1).data;return[d[0],d[1],d[2]]},
   graves:()=>buildings.filter(b=>b.tp==='grave'&&!b.gone),
   blossomGraves:()=>{let n=0;for(const b of buildings)if(b.tp==='grave'&&!b.gone){bloomGrave(b);n++}if(n)toast('The cemeteries turn to meadow — '+n+' graves given back as flowers.');return n},
-  weather:()=>{let wet=0;if(wetUntil)for(let i=0;i<W*H;i++)if(wetUntil[i]>simMin)wet++;return {humidity:+humidity.toFixed(2),clouds:clouds.length,raining:clouds.filter(c=>c.rain>0.1).length,wetTiles:wet,wind:[+windX.toFixed(2),+windY.toFixed(2)],waterFrac:+waterFrac.toFixed(3),worldWet:+worldWet.toFixed(2)}},
+  weather:()=>{let wet=0;if(wetUntil)for(let i=0;i<W*H;i++)if(wetUntil[i]>simMin)wet++;return {humidity:+humidity.toFixed(2),wetness:+wetness.toFixed(3),clouds:clouds.length,raining:clouds.filter(c=>c.rain>0.1).length,wetTiles:wet,wind:[+windX.toFixed(2),+windY.toFixed(2)],waterFrac:+waterFrac.toFixed(3),worldWet:+worldWet.toFixed(2)}},
+  setWetness:(v)=>{wetness=clamp(+v,0,1.15);recomputeWater(true);return waterFrac},
+  drought:()=>{wetness=0.05;recomputeWater(true);toast('A long drought sets in — the waters draw back.');return waterFrac},
+  deluge:()=>{wetness=1.1;recomputeWater(true);toast('The rains return in force — the lakes brim over.');return waterFrac},
   waterTiles:()=>{let lake=0,stream=0;for(let i=0;i<W*H;i++){if(water[i]===2)lake++;else if(water[i]===1)stream++;}return{lake,stream}},
   isWater:(x,y)=>isWater(x,y),
   makeStorm:()=>{spawnCloud(1.25);spawnCloud(1.1);toast('Clouds gather over the world — rain is coming.');return clouds.length},
