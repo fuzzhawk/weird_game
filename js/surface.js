@@ -61,7 +61,7 @@ let onEnterDungeon=null;          // set by main.js
 let inDialog=false;
 const idx=(x,y)=>y*W+x;
 const inB=(x,y)=>x>=0&&y>=0&&x<W&&y<H;
-const walkable=(x,y)=>inB(x,y)&&map[idx(x,y)]===0;
+const walkable=(x,y)=>inB(x,y)&&map[idx(x,y)]===0&&(!water||water[idx(x,y)]!==2);
 const cday=()=>Math.floor(simMin/DAY)+1;
 const tod=()=>(simMin%DAY)/DAY;
 const isNight=()=>{const t=tod();return t<0.24||t>0.87};
@@ -269,6 +269,12 @@ function applyAff(p,o,d){
 /* ================= flora (Plant Forge sprites) ================= */
 let flora=null, floraDead=null, floraSeed='garden';
 let floraSpecies=null, fert=null, farmSp=null;   // plant catalogue, soil fertility, per-farm crop
+// ---- water & weather ----
+// water: 0 dry · 1 stream (shallow, passable) · 2 lake (deep, impassable)
+let water=null, elevF=null, wetUntil=null, waterFrac=0;
+let clouds=[], humidity=0.3, windX=1, windY=0, worldWet=0.5, weatherT=0;
+const DIRS8=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+const MAXCLOUDS=14, RAIN_WET_DUR=140;
 function bakeFlora(seedBase){
  floraSeed=seedBase;
  const frng=U.mulberry32(U.hashStr(seedBase)^0xF10A);
@@ -377,7 +383,7 @@ function valNoise(seed){
 }
 function genFertility(){
  fert=new Float32Array(W*H);
- const elev=valNoise(seed*2+1), moist=valNoise(seed*7+3);
+ elevF=valNoise(seed*2+1); const elev=elevF, moist=valNoise(seed*7+3);
  for(let i=0;i<W*H;i++){
   // damp lowland loam is richest; dry uplands are poorer
   fert[i]=clamp(0.24 + moist[i]*0.52 + (1-elev[i])*0.30 - 0.12, 0, 1);
@@ -396,6 +402,100 @@ function genFertility(){
  for(let i=0;i<W*H;i++){ fert[i]=map[i]?clamp(fert[i]*0.4,0,1):clamp(fert[i],0,1); }
 }
 function fertAt(x,y){ return fert?fert[idx(x,y)]:0.5; }
+function isWater(x,y){ return water?water[idx(x,y)]:0; }
+
+/* ---------- hydrology: lakes fill the basins, streams trace the flow ---------- */
+function genHydrology(){
+ water=new Uint8Array(W*H); wetUntil=new Float32Array(W*H); waterFrac=0;
+ if(!elevF)return;
+ // world wetness: fantasy is lush and lake-strewn, the built themes run drier
+ const wr=U.mulberry32((seed>>>0)^0x77A7E2);
+ worldWet=clamp((0.34+wr()*0.42)*(worldTheme==='cyberpunk'?0.55:worldTheme==='modern'?0.78:1),0.1,1);
+ // normalise elevation over the open ground
+ let mn=1e9,mx=-1e9;
+ for(let i=0;i<W*H;i++)if(map[i]===0){if(elevF[i]<mn)mn=elevF[i];if(elevF[i]>mx)mx=elevF[i];}
+ const span=(mx-mn)||1, lakeLevel=mn+span*(0.10+worldWet*0.14);
+ // 1) LAKES — the lowest open basins hold standing water
+ for(let i=0;i<W*H;i++) if(map[i]===0 && elevF[i]<=lakeLevel) water[i]=2;
+ pruneSmallWater(2,7);   // drop puddles smaller than 7 tiles
+ // 2) STREAMS — flow accumulation, steepest descent, high ground to low
+ const open=[]; for(let i=0;i<W*H;i++)if(map[i]===0)open.push(i);
+ open.sort((a,b)=>elevF[b]-elevF[a]);
+ const acc=new Float32Array(W*H); for(const i of open)acc[i]=1;
+ for(const i of open){
+  const x=i%W,y=(i/W)|0; let le=elevF[i],li=-1;
+  for(const[dx,dy]of DIRS8){const nx=x+dx,ny=y+dy; if(nx<0||ny<0||nx>=W||ny>=H)continue; const j=idx(nx,ny); if(map[j]!==0)continue; if(elevF[j]<le){le=elevF[j];li=j;}}
+  if(li>=0)acc[li]+=acc[i];
+ }
+ const streamThresh=90-worldWet*45;   // wetter worlds → denser stream network
+ for(let i=0;i<W*H;i++) if(map[i]===0 && water[i]===0 && acc[i]>=streamThresh) water[i]=1;
+ // 3) riparian richness — the banks drink, so land beside water grows greener
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){ const i=idx(x,y); if(water[i]||map[i])continue;
+  for(const[dx,dy]of DIRS8){const nx=x+dx,ny=y+dy; if(nx>=0&&ny>=0&&nx<W&&ny<H&&water[idx(nx,ny)]){ fert[i]=clamp(fert[i]+0.14,0,1); break; }}
+ }
+ let n=0; for(let i=0;i<W*H;i++)if(water[i])n++; waterFrac=n/(W*H);
+}
+// flood-fill water==tag, drying components smaller than minSize
+function pruneSmallWater(tag,minSize){
+ const seen=new Uint8Array(W*H), q=new Int32Array(W*H);
+ for(let s=0;s<W*H;s++){
+  if(water[s]!==tag||seen[s])continue;
+  let head=0,tail=0,cnt=0; q[tail++]=s; seen[s]=1; const comp=[];
+  while(head<tail){ const c=q[head++]; comp.push(c); cnt++; const cx=c%W,cy=(c/W)|0;
+   for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const nx=cx+dx,ny=cy+dy; if(nx<0||ny<0||nx>=W||ny>=H)continue; const j=idx(nx,ny); if(water[j]===tag&&!seen[j]){seen[j]=1;q[tail++]=j;}}
+  }
+  if(cnt<minSize)for(const c of comp)water[c]=0;
+ }
+}
+
+/* ---------- weather: evaporation → clouds → rain ---------- */
+function initWeather(){
+ const r=U.mulberry32((seed>>>0)^0x5C10D5);
+ const ang=r()*6.283; windX=Math.cos(ang); windY=Math.sin(ang);
+ humidity=0.3; clouds=[]; weatherT=0;
+}
+function edgeUpwindSpawn(){
+ // enter from the upwind side, offset along it randomly
+ const cx=W/2-windX*W*0.7, cy=H/2-windY*H*0.7;
+ const px=clamp(cx+(-windY)*rf(-W*0.5,W*0.5),-2,W+2);
+ const py=clamp(cy+( windX)*rf(-H*0.5,H*0.5),-2,H+2);
+ return [px*TILE,py*TILE];
+}
+function spawnCloud(mass){
+ const s=edgeUpwindSpawn();
+ clouds.push({x:s[0],y:s[1],vx:windX,vy:windY,mass,rain:0,drift:R()*6.28,seed:(R()*1e9)>>>0});
+}
+function rainOn(c,dt){
+ const cx=(c.x/TILE)|0, cy=(c.y/TILE)|0, R0=4;
+ for(let dy=-R0;dy<=R0;dy++)for(let dx=-R0;dx<=R0;dx++){
+  if(dx*dx+dy*dy>R0*R0)continue; const x=cx+dx,y=cy+dy; if(x<0||y<0||x>=W||y>=H)continue; const i=idx(x,y);
+  wetUntil[i]=simMin+RAIN_WET_DUR;
+  if(fert&&map[i]===0&&!water[i]&&fert[i]<0.8) fert[i]=clamp(fert[i]+dt*0.0012,0,0.8);  // the rain nourishes
+ }
+}
+function updateCloud(c,dt){
+ c.drift+=dt*0.01;
+ const spd=TILE*0.02;
+ c.x+=(windX+Math.cos(c.drift)*0.25)*spd*dt;
+ c.y+=(windY+Math.sin(c.drift)*0.25)*spd*dt;
+ const tx=clamp((c.x/TILE)|0,0,W-1), ty=clamp((c.y/TILE)|0,0,H-1);
+ if(water[idx(tx,ty)]) c.mass+=dt*0.0010;        // drinks moisture crossing water
+ c.mass-=dt*0.00018;
+ if(c.mass>0.82){ c.rain=Math.min(1,c.rain+dt*0.05); rainOn(c,dt); c.mass-=dt*0.0016; }
+ else c.rain=Math.max(0,c.rain-dt*0.04);
+ if(c.x<-3*TILE||c.x>(W+3)*TILE||c.y<-3*TILE||c.y>(H+3)*TILE)c.mass=0;
+}
+function weatherTick(dt){
+ const sun=clamp(1-nightFactor(),0,1);
+ humidity=clamp(humidity+(waterFrac*1.4+0.12)*(0.35+0.65*sun)*dt*0.0018,0,1.4);
+ if(humidity>0.55 && clouds.length<MAXCLOUDS && chance(dt*0.03*(humidity-0.5))){ spawnCloud(0.45+humidity*0.5); humidity-=0.4; }
+ weatherT+=dt;
+ const wa=Math.atan2(windY,windX)+Math.sin(weatherT*0.0003)*0.02;
+ windX=Math.cos(wa); windY=Math.sin(wa);
+ for(let i=clouds.length-1;i>=0;i--){ const c=clouds[i]; updateCloud(c,dt); if(c.mass<=0.02)clouds.splice(i,1); }
+}
+// how much rain is falling on a given tile right now (for the wet sheen)
+function wetAt(i){ return wetUntil&&wetUntil[i]>simMin ? clamp((wetUntil[i]-simMin)/RAIN_WET_DUR,0,1) : 0; }
 // pick a species suited to soil of fertility f (weeds win the poor ground)
 function pickSpeciesFor(f){
  if(!floraSpecies||!floraSpecies.length)return null;
@@ -544,7 +644,9 @@ function genWorld(){
  for(let i=0;i<W*H;i++){if(!g[i]&&reg[i]!==best)g[i]=1}
  map=g;
  genFertility();
- for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(!map[idx(x,y)])openTiles.push([x,y]);
+ genHydrology();        // carve the basins into lakes and trace the streams (needs elev + fert)
+ initWeather();
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(!map[idx(x,y)]&&!water[idx(x,y)])openTiles.push([x,y]);
  openChunks=new Set();
  for(const[x,y]of openTiles)openChunks.add(((x>>3))+','+((y>>3)));
  // resource nodes — plants seed themselves where the soil suits their species;
@@ -1636,6 +1738,7 @@ function stepSim(dt){
  updateMonsters(dt);
  updateAnimals(dt);
  updateFlyers(dt);
+ weatherTick(dt);
  ripenAll(dt);
  for(let i=people.length-1;i>=0;i--){
   const p=people[i];
@@ -3191,6 +3294,41 @@ function draw(t){
  if(tcv)ctx.drawImage(tcv,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
  if(terrainDirty){paintDyn();terrainDirty=false}
  if(dynCanvas)ctx.drawImage(dynCanvas,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
+ // ---- water: lakes (opaque, over the rock silhouette) and streams (over grass) ----
+ if(water){
+  const shim=t*0.0016;
+  for(let y=vy0;y<=vy1;y++)for(let x=vx0;x<=vx1;x++){
+   const i=idx(x,y), w=water[i]; if(!w)continue;
+   const px=x*TILE,py=y*TILE;
+   // ripple: a slow diagonal wave modulating brightness
+   const wv=Math.sin((x+y)*0.9+shim*140)*0.5+Math.sin((x-y)*1.7+shim*90)*0.5;
+   const lit=clamp(0.5+wv*0.28,0,1);
+   if(w===2){
+    const base=lerpHex('#1f4a6e','#2f6f9a',lit);
+    ctx.fillStyle=base;ctx.fillRect(px,py,TILE,TILE);
+    ctx.globalAlpha=0.20+0.20*lit;ctx.fillStyle='#bfe8ff';ctx.fillRect(px,py+((wv*3+5)|0),TILE,1);ctx.globalAlpha=1;
+   }else{
+    ctx.globalAlpha=0.5+0.18*lit;ctx.fillStyle=lerpHex('#2b5f7e','#49a0c0',lit);ctx.fillRect(px,py,TILE,TILE);
+    ctx.globalAlpha=0.28*lit;ctx.fillStyle='#cfeeff';ctx.fillRect(px,py+((wv*2+7)|0),TILE,1);ctx.globalAlpha=1;
+   }
+  }
+  // wet sheen where rain has fallen (darken + a faint cool glaze that fades)
+  if(wetUntil){
+   for(let y=vy0;y<=vy1;y++)for(let x=vx0;x<=vx1;x++){
+    const i=idx(x,y); if(water[i])continue; const wet=wetAt(i); if(wet<=0.01)continue;
+    ctx.globalAlpha=wet*0.28;ctx.fillStyle='#22304a';ctx.fillRect(x*TILE,y*TILE,TILE,TILE);ctx.globalAlpha=1;
+   }
+  }
+ }
+ // cloud shadows drift across the ground (drawn under everything that follows)
+ if(clouds.length){
+  for(const c of clouds){
+   const sx=c.x+8, sy=c.y+10, r=(9+c.mass*7)*TILE;
+   if(sx<vx0*TILE-r||sx>vx1*TILE+r||sy<vy0*TILE-r||sy>vy1*TILE+r)continue;
+   ctx.globalAlpha=0.06+c.mass*0.10;ctx.fillStyle='#0a1420';
+   ctx.beginPath();ctx.ellipse(sx,sy,r,r*0.62,0,0,7);ctx.fill();ctx.globalAlpha=1;
+  }
+ }
  const nf=nightFactor();
  // ground clutter: living meadow undergrowth that withers (and thins) locally as
  // the waste blooms over it, greens back as nature returns. It's sub-tile detail,
@@ -3308,6 +3446,46 @@ function draw(t){
  }
  airborne.sort((a,b)=>a.y-b.y);
  for(const fl of airborne)drawFlyer(ctx,fl,t);
+ // ---- rain, then clouds overhead ----
+ if(clouds.length){
+  let storm=0;
+  for(const c of clouds){
+   // rain streaks fall from the cloud's footprint down onto the ground
+   if(c.rain>0.05){
+    const cx=c.x,cy=c.y,R0=4*TILE;
+    if(!(cx<vx0*TILE-R0||cx>vx1*TILE+R0||cy<vy0*TILE-R0||cy>vy1*TILE+R0)){
+     storm+=c.rain*c.mass;
+     ctx.strokeStyle='rgba(150,190,225,'+(0.22*c.rain)+')';ctx.lineWidth=1;
+     const drops=(28*c.rain)|0, ph=t*0.6;
+     ctx.beginPath();
+     for(let d=0;d<drops;d++){
+      const a=(c.seed+d*2654435761)>>>0, rx=cx+((a%(R0*2))-R0), ry=cy+(((a>>8)%(R0*2))-R0);
+      const yo=(ph+ (a>>4))% (TILE*1.4);
+      ctx.moveTo(rx,ry+yo);ctx.lineTo(rx-2,ry+yo+5);
+     }
+     ctx.stroke();
+    }
+   }
+  }
+  // storm gloom over the viewport when heavy cloud sits overhead
+  if(storm>0.15){ ctx.globalAlpha=clamp(storm*0.10,0,0.32);ctx.fillStyle='#1a2432';
+   ctx.fillRect(vx0*TILE-TILE,vy0*TILE-TILE,(vx1-vx0+3)*TILE,(vy1-vy0+3)*TILE);ctx.globalAlpha=1; }
+  // the cloud bodies themselves, riding high above the world
+  for(const c of clouds){
+   const lift=30, cx=c.x, cy=c.y-lift;
+   const r=(8+c.mass*7)*TILE;
+   if(cx<vx0*TILE-r||cx>vx1*TILE+r||cy<vy0*TILE-r||cy>vy1*TILE+r)continue;
+   const gr=U.mulberry32(c.seed||1);
+   const dark=c.rain>0.3, base=dark?'#5a6474':'#e6edf4';
+   ctx.globalAlpha=clamp(0.28+c.mass*0.5,0,0.9);
+   for(let p=0;p<6;p++){
+    const ox=(gr()*2-1)*r*0.7, oy=(gr()*2-1)*r*0.32, pr=r*(0.4+gr()*0.5);
+    ctx.fillStyle=p<3?base:(dark?'#6f7a8c':'#f4f8fc');
+    ctx.beginPath();ctx.ellipse(cx+ox,cy+oy,pr,pr*0.62,0,0,7);ctx.fill();
+   }
+   ctx.globalAlpha=1;
+  }
+ }
  if(SPEEDS[speedIdx]<=16){
   for(const p of ppl){
    if(p.bubble&&p.bubble.until>performance.now())drawBubble(ctx,p);
@@ -4559,6 +4737,10 @@ return {
   groundRGB:(x,y)=>{if(!tctx)return null;const d=tctx.getImageData(x*TILE+TILE/2,y*TILE+TILE/2,1,1).data;return[d[0],d[1],d[2]]},
   graves:()=>buildings.filter(b=>b.tp==='grave'&&!b.gone),
   blossomGraves:()=>{let n=0;for(const b of buildings)if(b.tp==='grave'&&!b.gone){bloomGrave(b);n++}if(n)toast('The cemeteries turn to meadow — '+n+' graves given back as flowers.');return n},
+  weather:()=>{let wet=0;if(wetUntil)for(let i=0;i<W*H;i++)if(wetUntil[i]>simMin)wet++;return {humidity:+humidity.toFixed(2),clouds:clouds.length,raining:clouds.filter(c=>c.rain>0.1).length,wetTiles:wet,wind:[+windX.toFixed(2),+windY.toFixed(2)],waterFrac:+waterFrac.toFixed(3),worldWet:+worldWet.toFixed(2)}},
+  waterTiles:()=>{let lake=0,stream=0;for(let i=0;i<W*H;i++){if(water[i]===2)lake++;else if(water[i]===1)stream++;}return{lake,stream}},
+  isWater:(x,y)=>isWater(x,y),
+  makeStorm:()=>{spawnCloud(1.25);spawnCloud(1.1);toast('Clouds gather over the world — rain is coming.');return clouds.length},
   dealCard:(p)=>drawCard(p,'The gardener’s thumb turned a card, and it'),
   rerollLook:(p)=>{p.lookSeed='folk-'+p.id+'-'+((Math.random()*1e9)|0);queuePersonBake(p);toast(p.name+' looks in the pond and sees a stranger. They adapt.')},
   banishMonster:(m)=>{killMonster(m,null,true);toast('Unsaid.')},
