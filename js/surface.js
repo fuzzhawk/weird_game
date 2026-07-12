@@ -24,6 +24,10 @@ const COST={shelter:{wood:5},home:{wood:10,stone:6},biz:{wood:12,stone:8}};
 const NEED={shelter:50,home:130,biz:150};
 const SZ={shelter:[1,1],home:[2,2],biz:[2,2],grave:[1,1]};
 const RUIN_DELAY=6*DAY,CRUMBLE_DELAY=10*DAY;
+// graves settle, then the ground gives them back as flowers: the stone sinks and
+// blooms take over, the tile is freed, and the turned earth is left richer.
+const GRAVE_LIFE=16*DAY, GRAVE_BLOOM_GROW=4*DAY;
+let graveBlooms=[];
 const VILLAGE_MIN=4;
 const WALL_STONE=0;
 const FARM_RIPEN=1.4*DAY;
@@ -498,7 +502,7 @@ function genWorld(){
  struct=new Uint8Array(W*H);farmGrid=new Uint8Array(W*H);farmTimer=new Float32Array(W*H);farmTiles=new Set();farmSp=new Int16Array(W*H).fill(-1);
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];chron=[];usedNames=new Set();
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];chron=[];usedNames=new Set();graveBlooms=[];
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -976,7 +980,7 @@ function addGrave(p){
  const tx=(p.x/TILE)|0,ty=(p.y/TILE)|0;
  const s=findSpot(tx,ty,1,1)||nearOpen(tx,ty);
  if(!s)return;
- const b={i:buildings.length,id:nextId++,tp:'grave',x:s[0],y:s[1],w:1,h:1,prog:1,need:1,done:true,gone:false,owners:[],builder:p.id,forId:null,stock:null,prosperity:0,sub:null,name:null,ref:p.id};
+ const b={i:buildings.length,id:nextId++,tp:'grave',x:s[0],y:s[1],w:1,h:1,prog:1,need:1,done:true,gone:false,owners:[],builder:p.id,forId:null,stock:null,prosperity:0,sub:null,name:null,ref:p.id,born:simMin};
  buildings.push(b);
  bld[idx(s[0],s[1])]=b.i;
 }
@@ -1866,7 +1870,7 @@ function questDeath(p,d,survivors){
  for(const kid of p.kids){const k=allById.get(kid);if(k&&!k.dead)tale([k],k.name+' grew up with only stories of '+p.name+', who went into the deep for them.')}
  if(p.home&&!p.home.gone)p.home.owners=p.home.owners.filter(id=>id!==p.id);
  if(p.business&&!p.business.gone)tale([p],p.business.name+' shuttered, its keeper lost below.');
- const s=nearOpen(d.x,d.y);if(s){const b={i:buildings.length,id:nextId++,tp:'grave',x:s[0],y:s[1],w:1,h:1,prog:1,need:1,done:true,gone:false,owners:[],builder:p.id,forId:null,stock:null,prosperity:0,sub:null,name:null,ref:p.id};buildings.push(b);if(bld[idx(s[0],s[1])]<0)bld[idx(s[0],s[1])]=b.i}
+ const s=nearOpen(d.x,d.y);if(s){const b={i:buildings.length,id:nextId++,tp:'grave',x:s[0],y:s[1],w:1,h:1,prog:1,need:1,done:true,gone:false,owners:[],builder:p.id,forId:null,stock:null,prosperity:0,sub:null,name:null,ref:p.id,born:simMin};buildings.push(b);if(bld[idx(s[0],s[1])]<0)bld[idx(s[0],s[1])]=b.i}
  if(selected===p)renderPanelFull(p);
 }
 function giveRelic(p,relic){
@@ -2557,9 +2561,25 @@ function findVillageJob(p){
 }
 
 /* ================= abandonment & upkeep tick ================= */
+// a grave that has run its course sinks away and leaves a patch of flowers,
+// freeing the tile and enriching the turned soil beneath it.
+function bloomGrave(b){
+ const i=idx(b.x,b.y);
+ if(bld[i]===b.i)bld[i]=-1;
+ b.gone=true;
+ if(graveBlooms.length>=500)graveBlooms.shift();
+ graveBlooms.push({x:b.x,y:b.y,born:simMin,seed:(b.id*2654435761)>>>0,ref:b.ref});
+ if(fert){                                        // the earth remembers, and gives back
+  fert[i]=clamp(fert[i]+(0.85-fert[i])*0.6,0,1);
+  for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const nx=b.x+dx,ny=b.y+dy;
+   if(nx>=0&&ny>=0&&nx<W&&ny<H){const j=idx(nx,ny);fert[j]=clamp(fert[j]+0.06,0,1)}}
+ }
+}
 function upkeepTick(){
  for(const b of buildings){
-  if(b.gone||b.tp==='grave')continue;
+  if(b.gone)continue;
+  if(b.tp==='grave'){ if(simMin-(b.born||0)>=GRAVE_LIFE)bloomGrave(b); continue; }
+  if(!b.done)continue;
   if(!b.done)continue;
   const livingOwners=b.owners.filter(id=>{const o=allById.get(id);return o&&!o.dead});
   const proprietorGone=b.tp==='biz'&&(()=>{const o=allById.get(b.builder);return !o||o.dead})();
@@ -2749,12 +2769,21 @@ function repaintDynAll(){
  terrainDirty=true;
 }
 // paint one cell of continuous ground into ctx (grass, or rock where the mask is solid)
+// soil quality colours the open ground: rich earth reads deep and green, poor
+// ground pales toward dry tan — so the fertility field is legible in the texture.
+const FERT_LUSH=[34,84,38], FERT_POOR=[156,146,110];
+function fertTint(col,f){
+ if(f>=0.5)return TileGen.mix(col,FERT_LUSH,(f-0.5)*0.7);
+ return TileGen.mix(col,FERT_POOR,(0.5-f)*0.6);
+}
 function paintCellTextureTo(c,x,y,solidMask,pals,style){
  const img=c.createImageData(TILE,TILE),data=img.data;
+ const f=fert?fertAt(x,y):0.5;
  for(let ly=0;ly<TILE;ly++)for(let lx=0;lx<TILE;lx++){
   const i=ly*TILE+lx;
   const solid=solidMask?solidMask[i]===1:false;
   let col=TileGen.surfaceTexel(pals,solid,x*TILE+lx,y*TILE+ly,surfSeedN,style);
+  if(!solid)col=fertTint(col,f);   // only the walkable soil, not the bramble-rock
   // dark rim along the grass↔rock boundary (organic edge readability)
   if(solidMask){
    const s=solidMask[i];
@@ -3025,10 +3054,24 @@ function drawNode(c,n,t){
 function drawBuilding(c,b,nf){
  const px=b.x*TILE,py=b.y*TILE,w=b.w*TILE,h=b.h*TILE;
  if(b.tp==='grave'){
-  c.fillStyle='#6f7285';
-  c.beginPath();c.moveTo(px+4,py+13);c.lineTo(px+4,py+6);c.arc(px+8,py+6,4,Math.PI,0);c.lineTo(px+12,py+13);c.closePath();c.fill();
-  c.fillStyle='#4a5c48';c.fillRect(px+3,py+12,10,2);
-  c.fillStyle='#e8e8f0';c.fillRect(px+7,py+3,2,2); // the small white flower
+  // the stone leans, mosses and sinks as its blooms take hold, until the ground
+  // reclaims it entirely (see bloomGrave / upkeepTick).
+  const age=clamp((simMin-(b.born||simMin))/GRAVE_LIFE,0,1);
+  const sink=age*5, lean=(age-0.2)*3.2;                 // tilts and settles into the earth
+  c.save();c.translate(px+8,py+13);c.rotate(clamp(lean,0,3.2)*0.09);c.translate(-(px+8),-(py+13));
+  const top=py+6+sink;
+  c.fillStyle=lerpHex('#6f7285','#586a54',age);         // greys, then greens with moss
+  c.beginPath();c.moveTo(px+4,py+13);c.lineTo(px+4,top);c.arc(px+8,top,4,Math.PI,0);c.lineTo(px+12,py+13);c.closePath();c.fill();
+  c.fillStyle=lerpHex('#4a5c48','#3a5a34',age);c.fillRect(px+3,py+12,10,2);
+  if(age>0.35){c.fillStyle='rgba(74,112,60,'+(0.3+age*0.5)+')';c.fillRect(px+4,py+11,9,2)} // moss creeps up
+  c.restore();
+  // flowers gather at the foot and multiply as the grave gives way
+  const nb=Math.round(age*4);
+  const gr=U.mulberry32(((b.id*2654435761)>>>0)||1);
+  const BC=['#e8e8f0','#e6c14a','#d76a9a','#b48ad6','#7fc7e6'];
+  for(let f=0;f<nb;f++){const fx=px+3+gr()*10, fy=py+9+gr()*5;
+   c.fillStyle=BC[(gr()*BC.length)|0];c.beginPath();c.arc(fx,fy,1.4,0,7);c.fill();
+   c.fillStyle='#3a5a34';c.fillRect(fx-0.5,fy,1,2);}
   return;
  }
  if(b.ruined)return;
@@ -3162,6 +3205,21 @@ function draw(t){
    if(g>0.02){ctx.globalAlpha=g;ctx.drawImage(dcL,bx-dcL.width/2,by-dcL.height+1)}
    if(g<0.98){ctx.globalAlpha=(1-g)*(1-0.55*clamp((u-0.75)/0.25,0,1));ctx.drawImage(dcD,bx-dcD.width/2,by-dcD.height+1)}
    ctx.globalAlpha=1;
+  }
+ }
+ // flowers left where graves gave way — a growing wild patch on the freed tile
+ if(graveBlooms.length&&z>0.7){
+  const BC=['#e8e8f0','#e6c14a','#d76a9a','#b48ad6','#7fc7e6','#f0a0c0'];
+  for(const gb of graveBlooms){
+   if(gb.x<vx0||gb.x>vx1||gb.y<vy0||gb.y>vy1)continue;
+   const grow=clamp((simMin-gb.born)/GRAVE_BLOOM_GROW,0,1), sc=0.4+grow*0.6;
+   const gr=U.mulberry32(gb.seed||1), cx=gb.x*TILE+TILE/2, cy=gb.y*TILE+TILE-2;
+   const n=5+((gr()*4)|0);
+   for(let f=0;f<n;f++){
+    const fx=cx+(gr()*2-1)*6, fy=cy+(gr()*2-1)*4, h=(2.5+gr()*3)*sc;
+    ctx.strokeStyle='#3f6a38';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(fx,fy);ctx.lineTo(fx,fy-h);ctx.stroke();
+    ctx.fillStyle=BC[(gr()*BC.length)|0];ctx.beginPath();ctx.arc(fx,fy-h,1.5*sc+0.4,0,7);ctx.fill();
+   }
   }
  }
  for(const n of nodes){
@@ -4497,6 +4555,10 @@ return {
   },
   healPerson:(p)=>{p.hp=100;p.hunger=0;p.energy=100;p.gloomUntil=0;emote(p,'✨');toast(p.name+' is made whole.')},
   killPerson:(p)=>die(p,'edited'),
+  graveBlooms:()=>graveBlooms,
+  groundRGB:(x,y)=>{if(!tctx)return null;const d=tctx.getImageData(x*TILE+TILE/2,y*TILE+TILE/2,1,1).data;return[d[0],d[1],d[2]]},
+  graves:()=>buildings.filter(b=>b.tp==='grave'&&!b.gone),
+  blossomGraves:()=>{let n=0;for(const b of buildings)if(b.tp==='grave'&&!b.gone){bloomGrave(b);n++}if(n)toast('The cemeteries turn to meadow — '+n+' graves given back as flowers.');return n},
   dealCard:(p)=>drawCard(p,'The gardener’s thumb turned a card, and it'),
   rerollLook:(p)=>{p.lookSeed='folk-'+p.id+'-'+((Math.random()*1e9)|0);queuePersonBake(p);toast(p.name+' looks in the pond and sees a stranger. They adapt.')},
   banishMonster:(m)=>{killMonster(m,null,true);toast('Unsaid.')},
