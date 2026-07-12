@@ -265,11 +265,55 @@ function makeTileset(opts){
   return {res, variants, field, high, cliff, coll, style, pals, grassHex:opts.grassHex, dirtHex:opts.dirtHex};
 }
 
+/* ---------- WATER: a per-world water palette + animated ripple tiles ----------
+   The water takes the world's own hue (pulled toward blue by the caller) so a
+   jade world's ponds read teal, a rust world's read murky bronze, etc. Frames
+   loop seamlessly (phase 0..2π) for a calm, non-flickering undulation. */
+function waterPalette(hueDeg, sat, murk){
+  const h=(((hueDeg%360)+360)%360)/360;
+  sat=clamp(sat!==undefined?sat:0.5,0.12,0.85); murk=clamp(murk||0,0,1);
+  const s=sat*(1-murk*0.45);
+  return {
+    deep:  hexToRgb(hslToHex(h,          s,      0.15+murk*0.05)),
+    mid:   hexToRgb(hslToHex(h,          s*0.95, 0.30)),
+    light: hexToRgb(hslToHex((h+0.02)%1, s*0.80, 0.47)),
+    foam:  hexToRgb(hslToHex((h+0.03)%1, s*0.45, 0.83)),
+  };
+}
+function makeWater(opts){
+  const res=opts.res||16, frames=opts.frames||8, variants=opts.variants||3;
+  const pal=opts.pal, seed=(opts.seed>>>0)||99;
+  const out=[];
+  for(let v=0;v<variants;v++){
+    const list=[];
+    for(let f=0;f<frames;f++){
+      const cv=document.createElement('canvas'); cv.width=res; cv.height=res;
+      const c=cv.getContext('2d'); const img=c.createImageData(res,res), d=img.data;
+      const ph=f/frames*Math.PI*2;
+      for(let y=0;y<res;y++)for(let x=0;x<res;x++){
+        const n=vnoise(x/7+v*4.3, y/7+v*2.1, seed+v*13);
+        const w1=Math.sin((x*0.42+y*0.28)+ph+n*1.6);
+        const w2=Math.sin((x*0.22-y*0.36)-ph*0.8+n*1.2);
+        const lit=(w1*0.5+w2*0.5)*0.5+0.5;
+        let col;
+        if(lit>0.86)      col=pal.foam;
+        else if(lit>0.62) col=mix(pal.light,pal.foam,(lit-0.62)/0.24);
+        else if(lit>0.36) col=mix(pal.mid,pal.light,(lit-0.36)/0.26);
+        else              col=mix(pal.deep,pal.mid,lit/0.36);
+        const p=(y*res+x)*4; d[p]=col[0]; d[p+1]=col[1]; d[p+2]=col[2]; d[p+3]=255;
+      }
+      c.putImageData(img,0,0); list.push(cv);
+    }
+    out.push(list);
+  }
+  return out;   // out[variant][frame] → res×res canvas
+}
+
 return {
   mulberry32, vnoise, ihash, mix,
   diskOffsets, cornersFromIndex, cornerIndex, cellCorners, fieldCornerIndex,
   computeVertexGrid, generateCAField, sampleQuadrant, roundedFieldMask, edgeMask,
   makePalettes, deriveStyle, STYLE_NAMES, EDGE_NAMES, paintTile, paintCliff, makeTileset,
-  fieldTexel, rockTexel, surfaceTexel,
+  fieldTexel, rockTexel, surfaceTexel, waterPalette, makeWater,
 };
 })();
