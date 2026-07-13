@@ -74,6 +74,9 @@ let salvage=[];   // surface tech-salvage caches the Sage can pick up for a reli
 const HERO_T={isHero:true,get x(){return hero.x},get y(){return hero.y},get dead(){return hero.down}};
 function heroTargetable(){return !hero.down&&speedIdx<=1}
 let heroSlashes=[],heroSlashCd=0;
+// mining: per-tile accumulated damage on bramble-rock, debris particles, and the
+// stone the Sage has hauled out of the terrain
+let rockDmg=null, particles=[], heroStone=0;
 const HERO_SPEED=132, HERO_RANGE=56, HERO_ARC=Math.PI*0.85;
 
 /* ================= terrain editing ================= */
@@ -681,6 +684,7 @@ function processBakeQueue(){
 function genWorld(){
  map=new Uint8Array(W*H);bld=new Int16Array(W*H).fill(-1);
  struct=new Uint8Array(W*H);farmGrid=new Uint8Array(W*H);farmTimer=new Float32Array(W*H);farmTiles=new Set();farmSp=new Int16Array(W*H).fill(-1);
+ rockDmg=new Float32Array(W*H);particles=[];heroStone=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
  people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];chron=[];usedNames=new Set();graveBlooms=[];
@@ -1519,7 +1523,8 @@ function doVillageJob(p,v,j){
   shoveOccupants(j.x,j.y);setSolid(j.x,j.y,S_WALL);drop();
  }else if(j.type==='mine'){
   if(walkable(j.x,j.y)){drop();return}
-  carveFloor(j.x,j.y);v.stock.stone+=2;p.inv.stone++;drop();
+  if(!mineable(j.x,j.y)){drop();return}
+  unearthRock(j.x,j.y,{p,v});drop();
   if(chance(.2))tale([p],p.name+' cleared old bramble from the lanes of '+v.name+', hauling out good stone.');
  }else if(j.type==='till'){
   if(!walkable(j.x,j.y)||farmGrid[i]){drop();return}
@@ -1568,6 +1573,79 @@ function removeNode(nd){
  const i=idx(nd.x,nd.y),k=nodes.indexOf(nd);
  if(k>=0)nodes.splice(k,1);
  nodeAt.delete(i);markMod(i);
+}
+/* ================= mining: break the terrain, find what's inside ================= */
+// how much punishment a rock tile takes before it shatters — the high, deep
+// ground is tougher (and hides richer finds)
+function hardnessAt(x,y){ return 26 + (elevF?elevF[idx(x,y)]:0.5)*46; }
+function rockColor(){ const r=(terPals&&terPals[0])?terPals[0].rock.base:[104,104,116]; return 'rgb('+r[0]+','+r[1]+','+r[2]+')'; }
+function mineable(x,y){
+ const i=idx(x,y);
+ return map[i]!==0 && struct[i]===S_ROCK && !nodeAt.has(i) && bld[i]<0 && !dungeonAt(x,y);
+}
+// deliver a hit to a rock tile; shatters it (and spills its contents) once its
+// accumulated damage passes the tile's hardness. agent: {hero} | {p,v}
+function mineTile(x,y,power,agent){
+ if(!mineable(x,y))return false;
+ const i=idx(x,y);
+ rockDmg[i]+=power;
+ spawnDebris(x*TILE+TILE/2,y*TILE+TILE/2,4,rockColor(),0.6);
+ if(rockDmg[i]>=hardnessAt(x,y)){ unearthRock(x,y,agent); return true; }
+ return false;
+}
+// the tile shatters: a burst of debris, the ground opens, stone (and sometimes a
+// buried relic or a glint of ore) comes out
+function unearthRock(x,y,agent){
+ const i=idx(x,y), elev=elevF?elevF[i]:0.5, px=x*TILE+TILE/2, py=y*TILE+TILE/2;
+ spawnDebris(px,py,16,rockColor(),1.4);
+ carveFloor(x,y);           // opens the tile → silDirty re-rounds the neighbouring rock
+ rockDmg[i]=0;
+ const stone=2+(chance(0.35)?1:0)+(elev>0.68?1:0);
+ if(agent){
+  if(agent.hero)heroStone+=stone;
+  if(agent.p)agent.p.inv.stone++;
+  if(agent.v)agent.v.stock.stone+=stone;
+ }
+ // buried treasure — deeper, harder rock hides more of it
+ if(chance(0.05+elev*0.13)){
+  spawnSalvageAt(x,y); spawnSparkle(px,py);
+  if(agent&&agent.hero)toast('You struck something buried in the rock — salvage glints in the rubble.');
+  else if(agent&&agent.p&&chance(.5))tale([agent.p],agent.p.name+' pried something strange out of the deep rock near '+((agent.v&&agent.v.name)||'the diggings')+'.');
+ } else if(chance(0.14)){
+  spawnSparkle(px,py);                                   // a vein of ore/quartz
+  if(agent&&agent.hero)heroStone+=1;
+ }
+ return stone;
+}
+function spawnSalvageAt(x,y){ salvage.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,t:R()*6.28,relic:pick(RELICS)}); }
+// ---- debris particles ----
+function spawnDebris(px,py,n,col,scale){
+ if(particles.length>460)return;
+ for(let i=0;i<n;i++){
+  const a=Math.random()*6.283, sp=(24+Math.random()*80)*scale;
+  particles.push({x:px,y:py,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-34*scale,life:0,max:0.35+Math.random()*0.55*scale,size:1+Math.random()*2.2*scale,col,g:230});
+ }
+}
+function spawnSparkle(px,py){
+ if(particles.length>460)return;
+ for(let i=0;i<10;i++){
+  const a=Math.random()*6.283, sp=26+Math.random()*66;
+  particles.push({x:px,y:py,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-46,life:0,max:0.5+Math.random()*0.6,size:1.6,col:'#ffe27a',g:120,spark:true});
+ }
+}
+function updateParticles(rdt){
+ for(let i=particles.length-1;i>=0;i--){
+  const p=particles[i]; p.life+=rdt; if(p.life>=p.max){particles.splice(i,1);continue}
+  p.vy+=p.g*rdt; p.x+=p.vx*rdt; p.y+=p.vy*rdt; p.vx*=(1-1.8*rdt);
+ }
+}
+function drawParticles(c){
+ for(const p of particles){
+  const k=1-p.life/p.max; c.globalAlpha=p.spark?k:Math.min(1,k*1.4);
+  c.fillStyle=p.col; const s=p.size*(p.spark?k:1);
+  c.fillRect(p.x-s/2,p.y-s/2,Math.max(1,s),Math.max(1,s));
+ }
+ c.globalAlpha=1;
 }
 // a solid tile the village may clear: bramble/rock terrain only — never a
 // building, wall, ruin, resource node, or dungeon mouth
@@ -3596,6 +3674,7 @@ function draw(t){
  }
  airborne.sort((a,b)=>a.y-b.y);
  for(const fl of airborne)drawFlyer(ctx,fl,t);
+ if(particles.length)drawParticles(ctx);   // mining debris & sparks, above the ground
  // ---- rain, then clouds overhead ----
  if(WATER_ON&&clouds.length){
   let storm=0;
@@ -4100,6 +4179,18 @@ function updateHero(rdt){
       if(a.hp<=0)heroKillAnimal(a);
      }
     }
+   }
+   // slashes vs bramble-rock: the Sage mines the terrain, chipping tiles in the arc
+   const rr=Math.ceil((s.range+8)/TILE), htx=(hero.x/TILE)|0, hty=(hero.y/TILE)|0;
+   for(let dyt=-rr;dyt<=rr;dyt++)for(let dxt=-rr;dxt<=rr;dxt++){
+    const x=htx+dxt,y=hty+dyt; if(x<0||y<0||x>=W||y>=H)continue;
+    if(!mineable(x,y))continue;
+    const cx=x*TILE+TILE/2,cy=y*TILE+TILE/2,ddx=cx-hero.x,ddy=cy-hero.y;
+    if(Math.hypot(ddx,ddy)>=s.range+8)continue;
+    let da=Math.atan2(ddy,ddx)-s.ang; da=Math.atan2(Math.sin(da),Math.cos(da));
+    if(Math.abs(da)>s.arc/2)continue;
+    const key='r'+idx(x,y); if(s.hit.has(key))continue; s.hit.add(key);
+    mineTile(x,y,s.dmg,{hero:true});
    }
   }
  }
@@ -4725,6 +4816,7 @@ function frame(t){
  processBakeQueue();
  terrainTick();
  updateHero(rdt);
+ updateParticles(rdt);
  if(cine){
   cam.z+=(cineZoomTarget-cam.z)*0.09;
  }
@@ -4733,7 +4825,7 @@ function frame(t){
   uiT=t;
   $('clock').textContent='Day '+cday();
   $('era').textContent=(surfEra?surfEra.name:phase());
-  $('pop').textContent='👥 '+people.length+(animals.length?' · 🐾'+animals.length:'')+(monsters.length?' · 👹'+monsters.length:'');
+  $('pop').textContent='👥 '+people.length+(animals.length?' · 🐾'+animals.length:'')+(monsters.length?' · 👹'+monsters.length:'')+(heroStone?' · 🪨'+heroStone:'');
   $('hearts').textContent=speedIdx>=2?'🧘 the Sage meditates':heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
   if(cine&&selected)updateCine();
   if(selected&&!$('charPanel').classList.contains('hidden')){
@@ -4889,6 +4981,9 @@ return {
   blossomGraves:()=>{let n=0;for(const b of buildings)if(b.tp==='grave'&&!b.gone){bloomGrave(b);n++}if(n)toast('The cemeteries turn to meadow — '+n+' graves given back as flowers.');return n},
   tileState:(x,y)=>({map:map[idx(x,y)],struct:struct[idx(x,y)],rock:map[idx(x,y)]!==0&&struct[idx(x,y)]===S_ROCK}),
   carveAt:(x,y)=>{if(walkable(x,y))return false;carveFloor(x,y);return true},
+  mineAt:(x,y,power)=>mineTile(x,y,power||999,{hero:true}),
+  get heroStone(){return heroStone},
+  get particleCount(){return particles.length},
   carvePatch:(x,y,r)=>{let n=0;for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const nx=x+dx,ny=y+dy;if(nx<1||ny<1||nx>=W-1||ny>=H-1)continue;const i=idx(nx,ny);if(map[i]!==0&&struct[i]===S_ROCK){carveFloor(nx,ny);n++}}return n},
   weather:()=>{let wet=0;if(wetUntil)for(let i=0;i<W*H;i++)if(wetUntil[i]>simMin)wet++;return {humidity:+humidity.toFixed(2),wetness:+wetness.toFixed(3),clouds:clouds.length,raining:clouds.filter(c=>c.rain>0.1).length,wetTiles:wet,wind:[+windX.toFixed(2),+windY.toFixed(2)],waterFrac:+waterFrac.toFixed(3),worldWet:+worldWet.toFixed(2)}},
   setWetness:(v)=>{wetness=clamp(+v,0,1.15);recomputeWater(true);return waterFrac},
