@@ -77,7 +77,7 @@ let heroSlashes=[],heroSlashCd=0;
 const HERO_SPEED=132, HERO_RANGE=56, HERO_ARC=Math.PI*0.85;
 
 /* ================= terrain editing ================= */
-function markMod(i){modTiles.add(i);terrainDirty=true;regionsDirty=true}
+function markMod(i){modTiles.add(i);terrainDirty=true;regionsDirty=true;silDirty=true}
 function setSolid(x,y,type){const i=idx(x,y);map[i]=1;struct[i]=type;farmGrid[i]=0;pavedTiles.delete(i);markMod(i)}
 function carveFloor(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_FLOOR;markMod(i)}
 function revertTile(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_ROCK;farmGrid[i]=0;pavedTiles.delete(i);markMod(i)}
@@ -280,6 +280,9 @@ const MAXCLOUDS=14, RAIN_WET_DUR=140;
 // baked animated water tiles (this world's palette) + timing
 let waterAnim=null;
 const WATER_VARIANTS=3, WATER_FRAMES=8, WATER_FRAME_MS=150;
+// water & weather are muted for now (elevation + erosion still shape fertility);
+// flip this back to true to bring lakes, streams, clouds and rain back.
+const WATER_ON=false;
 function bakeFlora(seedBase){
  floraSeed=seedBase;
  const frng=U.mulberry32(U.hashStr(seedBase)^0xF10A);
@@ -721,10 +724,10 @@ function genWorld(){
  }
  for(let i=0;i<W*H;i++){if(!g[i]&&reg[i]!==best)g[i]=1}
  map=g;
- genFertility();
- genHydrology();        // carve the basins into lakes and trace the streams (needs elev + fert)
- initWeather();
- for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(!map[idx(x,y)]&&!water[idx(x,y)])openTiles.push([x,y]);
+ genFertility();        // Voronoi elevation + hydraulic erosion → the soil-fertility field
+ if(WATER_ON){ genHydrology(); initWeather(); }   // lakes/streams/weather (muted for now)
+ else { water=null; waterMax=null; wetUntil=null; clouds=[]; }
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(!map[idx(x,y)]&&!(water&&water[idx(x,y)]))openTiles.push([x,y]);
  openChunks=new Set();
  for(const[x,y]of openTiles)openChunks.add(((x>>3))+','+((y>>3)));
  // resource nodes — plants seed themselves where the soil suits their species;
@@ -1816,7 +1819,7 @@ function stepSim(dt){
  updateMonsters(dt);
  updateAnimals(dt);
  updateFlyers(dt);
- weatherTick(dt);
+ if(WATER_ON)weatherTick(dt);
  ripenAll(dt);
  for(let i=people.length-1;i>=0;i--){
   const p=people[i];
@@ -2837,6 +2840,11 @@ let tcv=null,tctx=null,dynCanvas=null,dctx=null;
 // nature returns — so eras no longer re-bake the ground mid-play (no freeze).
 let terLayers=[null,null,null],terPals=[null,null,null],terStyle=[null,null,null];
 let decorList=null,solidCornerIdx=null;
+// real-time blocked terrain: pre-baked rock tiles (per era layer × 16 autotile
+// corners × a few variants), blitted from the LIVE map so a cleared tile shows
+// the ground beneath at once. silDirty triggers a silhouette recompute.
+let rockTiles=null, silDirty=false, silBuf=null, lastSil=0;
+const ROCK_VARIANTS=3, SIL_THROTTLE=120;   // ms between silhouette recomputes
 let urbanBaked=null,villageStamp='';
 let terBuild=null,terScan=0;
 const URBAN_LEVELS=12;
@@ -2940,7 +2948,8 @@ function bakeSurfaceTiles(){
  }
  surfPals=terPals[0];
  surfEra=eraState();
- bakeWaterTiles();
+ if(WATER_ON)bakeWaterTiles();
+ bakeRockTiles();        // real-time blocked-terrain tiles for this world's palette
 }
 // bake this world's water: its own hue (pulled toward blue), murkier in the
 // built/waste themes. Lakes run deep, streams a touch brighter and shallower.
@@ -3027,12 +3036,51 @@ function buildDecorList(){
   if(h>0.30&&h<hi) decorList.push({x,y,i,vi:(x*7+y*13)%flora.decor.length});
  }
 }
-// bake a horizontal band of one terrain layer
+// bake a horizontal band of one terrain layer — GROUND ONLY now (no rock baked in),
+// so this canvas is a pure pre-rendered ground background; the bramble-rock is
+// drawn live on top (see the rock render pass), so clearing a tile reveals soil.
 function bakeLayerBand(k,y0,y1){
  const c=terLayers[k].getContext('2d');c.imageSmoothingEnabled=false;
  const pals=terPals[k],style=terStyle[k];
  for(let y=y0;y<y1;y++)for(let x=0;x<W;x++)
-  paintCellTextureTo(c,x,y,surfMasks[solidCornerIdx[idx(x,y)]],pals,style);
+  paintCellTextureTo(c,x,y,null,pals,style);
+}
+// bake the 16 autotile corner-shapes of bramble-rock for one era layer, a few
+// variants each (chosen per tile by hash so the rock doesn't visibly repeat).
+// Transparent where open, so a rock tile blits cleanly over the ground.
+function bakeRockTile(ci,variant,pals,style){
+ const cv=document.createElement('canvas');cv.width=cv.height=TILE;
+ const c=cv.getContext('2d');const img=c.createImageData(TILE,TILE),data=img.data;
+ const mask=surfMasks[ci], vs=variant*137;
+ for(let ly=0;ly<TILE;ly++)for(let lx=0;lx<TILE;lx++){
+  const i=ly*TILE+lx;
+  if(mask[i]!==1){data[i*4+3]=0;continue;}                 // open → transparent
+  let col=TileGen.rockTexel(pals.rock,lx+vs,ly+vs*2,surfSeedN+variant*9173,style);
+  const s=mask[i],up=ly>0?mask[i-TILE]:s,dn=ly<TILE-1?mask[i+TILE]:s,lf=lx>0?mask[i-1]:s,rt=lx<TILE-1?mask[i+1]:s;
+  if(up!==s||dn!==s||lf!==s||rt!==s)col=TileGen.mix(col,[0,0,0],0.42);   // dark edge rim
+  const p=i*4;data[p]=col[0];data[p+1]=col[1];data[p+2]=col[2];data[p+3]=255;
+ }
+ c.putImageData(img,0,0);return cv;
+}
+function bakeRockTiles(){
+ rockTiles=[[],[],[]];
+ for(let k=0;k<3;k++){
+  const pals=terPals[k],style=terStyle[k];
+  for(let ci=0;ci<16;ci++){ rockTiles[k][ci]=[]; for(let v=0;v<ROCK_VARIANTS;v++)rockTiles[k][ci].push(bakeRockTile(ci,v,pals,style)); }
+ }
+}
+// (re)compute the rock silhouette autotile index from the live map. Reuses a
+// persistent buffer to avoid per-frame garbage. The per-tile reveal is instant
+// regardless (the render pass reads the map directly); this only re-rounds the
+// edges of the rock that remains, so it can be throttled freely.
+function computeSilhouette(){
+ if(!silBuf){silBuf=[];for(let y=0;y<H;y++)silBuf[y]=new Array(W);}
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=idx(x,y);silBuf[y][x]=(map[i]!==0&&struct[i]===S_ROCK);}
+ const vgS=TileGen.computeVertexGrid(silBuf,H,W);
+ if(!solidCornerIdx)solidCornerIdx=new Int16Array(W*H);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++)
+  solidCornerIdx[idx(x,y)]=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
+ silDirty=false; lastSil=performance.now();
 }
 // stream the two extra layers in over frames so world creation doesn't hitch
 function stepTerrainBuild(){
@@ -3108,13 +3156,7 @@ function terrainTick(){
 }
 function buildTerrainLayer(){
  bakeSurfaceTiles();
- // rock silhouette: per-cell edge-mask index from the walkable/solid vertex grid
- const solidF=[];
- for(let y=0;y<H;y++){solidF[y]=[];for(let x=0;x<W;x++)solidF[y][x]=!walkable(x,y)}
- const vgS=TileGen.computeVertexGrid(solidF,H,W);
- solidCornerIdx=new Int16Array(W*H);
- for(let y=0;y<H;y++)for(let x=0;x<W;x++)
-  solidCornerIdx[idx(x,y)]=TileGen.fieldCornerIndex(TileGen.cellCorners(vgS,x,y));
+ computeSilhouette();     // rock autotile index from the live map (rock drawn on top, not baked)
  // allocate the three layer canvases + the composited output + the dyn overlay
  for(let k=0;k<3;k++){const cv=document.createElement('canvas');cv.width=W*TILE;cv.height=H*TILE;terLayers[k]=cv;}
  tcv=document.createElement('canvas');tcv.width=W*TILE;tcv.height=H*TILE;
@@ -3175,9 +3217,9 @@ function paintDynTile(c,i){
   c.fillStyle='#4a5044';
   c.fillRect(px+1,py+7,6,6);c.fillRect(px+9,py+3,5,5);c.fillRect(px+7,py+10,6,4);
   c.fillStyle='rgba(0,0,0,0.4)';c.fillRect(px+3,py+2,2,4);c.fillRect(px+11,py+9,2,3);
- }else{
-  paintFloorTile(c,x,y);
  }
+ // else: natural bramble-rock — leave the overlay cleared; the live rock pass
+ // draws it over the ground background, so removal is instant.
 }
 function paintDyn(){
  if(!dctx)return;
@@ -3387,8 +3429,24 @@ function draw(t){
  if(tcv)ctx.drawImage(tcv,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
  if(terrainDirty){paintDyn();terrainDirty=false}
  if(dynCanvas)ctx.drawImage(dynCanvas,bsx,bsy,bsw,bsh,bsx,bsy,bsw,bsh);
+ // ---- blocked terrain (bramble-rock), drawn LIVE from the current map ----
+ // era-composited like the ground, so it blooms with the age; because it reads
+ // the map every frame, a tile an NPC clears reveals the soil beneath instantly.
+ if(rockTiles){
+  if(silDirty&&performance.now()-lastSil>SIL_THROTTLE)computeSilhouette();
+  for(let y=vy0;y<=vy1;y++)for(let x=vx0;x<=vx1;x++){
+   const i=idx(x,y);
+   if(map[i]===0||struct[i]!==S_ROCK)continue;
+   const ci=solidCornerIdx[i], vi=(x*7+y*13)%ROCK_VARIANTS, px=x*TILE,py=y*TILE;
+   ctx.drawImage(rockTiles[0][ci][vi],px,py);
+   const u=urbanAt(i), a1=clamp(u*2,0,1), a2=clamp((u-0.5)*2,0,1);
+   if(a1>0&&rockTiles[1]){ctx.globalAlpha=a1;ctx.drawImage(rockTiles[1][ci][vi],px,py);}
+   if(a2>0&&rockTiles[2]){ctx.globalAlpha=a2;ctx.drawImage(rockTiles[2][ci][vi],px,py);}
+   ctx.globalAlpha=1;
+  }
+ }
  // ---- water: calm, pre-baked ripple tiles in the world's own palette ----
- if(water&&waterAnim){
+ if(WATER_ON&&water&&waterAnim){
   const fi=((t/WATER_FRAME_MS)|0)%WATER_FRAMES;
   for(let y=vy0;y<=vy1;y++)for(let x=vx0;x<=vx1;x++){
    const i=idx(x,y), w=water[i], wm=waterMax?waterMax[i]:w;
@@ -3413,7 +3471,7 @@ function draw(t){
   }
  }
  // cloud shadows drift across the ground (drawn under everything that follows)
- if(clouds.length){
+ if(WATER_ON&&clouds.length){
   for(const c of clouds){
    const sx=c.x+8, sy=c.y+10, r=(9+c.mass*7)*TILE;
    if(sx<vx0*TILE-r||sx>vx1*TILE+r||sy<vy0*TILE-r||sy>vy1*TILE+r)continue;
@@ -3539,7 +3597,7 @@ function draw(t){
  airborne.sort((a,b)=>a.y-b.y);
  for(const fl of airborne)drawFlyer(ctx,fl,t);
  // ---- rain, then clouds overhead ----
- if(clouds.length){
+ if(WATER_ON&&clouds.length){
   let storm=0;
   for(const c of clouds){
    // rain streaks fall from the cloud's footprint down onto the ground
@@ -4829,11 +4887,14 @@ return {
   groundRGB:(x,y)=>{if(!tctx)return null;const d=tctx.getImageData(x*TILE+TILE/2,y*TILE+TILE/2,1,1).data;return[d[0],d[1],d[2]]},
   graves:()=>buildings.filter(b=>b.tp==='grave'&&!b.gone),
   blossomGraves:()=>{let n=0;for(const b of buildings)if(b.tp==='grave'&&!b.gone){bloomGrave(b);n++}if(n)toast('The cemeteries turn to meadow — '+n+' graves given back as flowers.');return n},
+  tileState:(x,y)=>({map:map[idx(x,y)],struct:struct[idx(x,y)],rock:map[idx(x,y)]!==0&&struct[idx(x,y)]===S_ROCK}),
+  carveAt:(x,y)=>{if(walkable(x,y))return false;carveFloor(x,y);return true},
+  carvePatch:(x,y,r)=>{let n=0;for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const nx=x+dx,ny=y+dy;if(nx<1||ny<1||nx>=W-1||ny>=H-1)continue;const i=idx(nx,ny);if(map[i]!==0&&struct[i]===S_ROCK){carveFloor(nx,ny);n++}}return n},
   weather:()=>{let wet=0;if(wetUntil)for(let i=0;i<W*H;i++)if(wetUntil[i]>simMin)wet++;return {humidity:+humidity.toFixed(2),wetness:+wetness.toFixed(3),clouds:clouds.length,raining:clouds.filter(c=>c.rain>0.1).length,wetTiles:wet,wind:[+windX.toFixed(2),+windY.toFixed(2)],waterFrac:+waterFrac.toFixed(3),worldWet:+worldWet.toFixed(2)}},
   setWetness:(v)=>{wetness=clamp(+v,0,1.15);recomputeWater(true);return waterFrac},
   drought:()=>{wetness=0.05;recomputeWater(true);toast('A long drought sets in — the waters draw back.');return waterFrac},
   deluge:()=>{wetness=1.1;recomputeWater(true);toast('The rains return in force — the lakes brim over.');return waterFrac},
-  waterTiles:()=>{let lake=0,stream=0;for(let i=0;i<W*H;i++){if(water[i]===2)lake++;else if(water[i]===1)stream++;}return{lake,stream}},
+  waterTiles:()=>{let lake=0,stream=0;if(water)for(let i=0;i<W*H;i++){if(water[i]===2)lake++;else if(water[i]===1)stream++;}return{lake,stream,muted:!WATER_ON}},
   isWater:(x,y)=>isWater(x,y),
   makeStorm:()=>{spawnCloud(1.25);spawnCloud(1.1);toast('Clouds gather over the world — rain is coming.');return clouds.length},
   dealCard:(p)=>drawCard(p,'The gardener’s thumb turned a card, and it'),
