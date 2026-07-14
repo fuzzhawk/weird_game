@@ -4588,7 +4588,17 @@ function die(p,cause){
  for(const kid of p.kids){const k=allById.get(kid);if(k&&!k.dead)tale([k],k.name+' planted a small white flower for '+p.name+', and kept it watered.')}
  if(p.home&&!p.home.gone){p.home.owners=p.home.owners.filter(id=>id!==p.id)}
  addGrave(p);
+ freeCorpseSprite(p);
  if(selected===p)renderPanelFull(p);
+}
+// The dead linger in allById (for grave inspection), but their full animated
+// sprite is dozens of canvases each — over a long sim that grew until the
+// browser silently blanked the big terrain canvases. Free the sprite on death,
+// keeping just one portrait frame; the buried are dropped entirely once their
+// grave blooms away (see bloomGrave).
+function freeCorpseSprite(p){
+ if(p.sprite&&p.sprite.FRAMES&&p.sprite.FRAMES.walk&&p.sprite.FRAMES.walk[0])p.portrait=p.sprite.FRAMES.walk[0][0];
+ p.sprite=null;
 }
 
 /* ================= daily tick ================= */
@@ -4939,6 +4949,7 @@ function questDeath(p,d,survivors){
  if(p.home&&!p.home.gone)p.home.owners=p.home.owners.filter(id=>id!==p.id);
  if(p.business&&!p.business.gone)tale([p],p.business.name+' shuttered, its keeper lost below.');
  const s=nearOpen(d.x,d.y);if(s){const b={i:buildings.length,id:nextId++,tp:'grave',x:s[0],y:s[1],w:1,h:1,prog:1,need:1,done:true,gone:false,owners:[],builder:p.id,forId:null,stock:null,prosperity:0,sub:null,name:null,ref:p.id,born:simMin};buildings.push(b);if(bld[idx(s[0],s[1])]<0)bld[idx(s[0],s[1])]=b.i}
+ freeCorpseSprite(p);
  if(selected===p)renderPanelFull(p);
 }
 function giveRelic(p,relic){
@@ -5146,6 +5157,7 @@ function dieByMonster(p,m){
  for(const kid of p.kids){const k=allById.get(kid);if(k&&!k.dead)tale([k],k.name+' lost '+p.name+' to the things beneath the garden.')}
  if(p.home&&!p.home.gone)p.home.owners=p.home.owners.filter(id=>id!==p.id);
  addGrave(p);
+ freeCorpseSprite(p);
  if(selected===p)renderPanelFull(p);
 }
 function updateMonsters(dt){
@@ -5637,6 +5649,9 @@ function bloomGrave(b){
  b.gone=true;
  if(graveBlooms.length>=500)graveBlooms.shift();
  graveBlooms.push({x:b.x,y:b.y,born:simMin,seed:(b.id*2654435761)>>>0,ref:b.ref});
+ // the grave has returned to the earth — release the buried soul from memory so
+ // the roster of the dead can't grow without bound over a very long sim
+ const buried=allById.get(b.ref); if(buried&&buried.dead){buried.portrait=null; allById.delete(b.ref);}
  if(fert){                                        // the earth remembers, and gives back
   fert[i]=clamp(fert[i]+(0.85-fert[i])*0.6,0,1);
   for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const nx=b.x+dx,ny=b.y+dy;
@@ -7499,8 +7514,9 @@ function renderPanelFull(p){
  const pcv=$('pcv'),pctx=pcv.getContext('2d');
  pctx.clearRect(0,0,64,64);
  pctx.imageSmoothingEnabled=false;
- if(p.sprite){
-  const cvf=p.sprite.FRAMES.walk[0][0];
+ const pcvf=p.sprite?p.sprite.FRAMES.walk[0][0]:p.portrait;   // the dead keep one portrait frame
+ if(pcvf){
+  const cvf=pcvf;
   const s=Math.min(58/cvf.width,58/cvf.height);
   const w=cvf.width*s,h=cvf.height*s;
   pctx.drawImage(cvf,(64-w)/2,(64-h)/2,w,h);
