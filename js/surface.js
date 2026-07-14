@@ -45,7 +45,7 @@ let struct,farmGrid,farmTimer;
 let farmTiles=new Set();
 let region,regionsDirty=true;
 let people=[],allById=new Map(),buildings=[];
-let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[];
+let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[],quests=[];
 let flockSeq=1;
 let civFallen=false,expeditionDay=0;   // settlements can die out; an expedition reseeds a new town
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
@@ -716,7 +716,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];chron=[];usedNames=new Set();graveBlooms=[];
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];Hero.renown=0;chron=[];usedNames=new Set();graveBlooms=[];
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -1807,6 +1807,141 @@ function completeGoal(p){
  buff(p,'luck',.15,20,'fulfilled');
  tale([p],p.name+"'s heart's wish came true — "+p.goal.t+'. They walked differently after that.',true);
 }
+
+/* ================= quests: the Sage helps folk chase their dreams ================= */
+// villagers with an unfulfilled arc will, when the Sage stops to talk, sometimes
+// ask for a concrete favour toward that dream. Accepted favours become quests.
+const QUEST_COOLDOWN=6*DAY;   // per-person gap between asks
+let questDirty=false;
+function questGiverEligible(p){
+ return !!(p&&!p.dead&&!p.inDungeon&&p.age>=16&&p.goal&&!p.goal.done&&!p.questId&&simMin-(p.lastQuest||0)>QUEST_COOLDOWN);
+}
+function farCornerTile(p){
+ const px=(p.x/TILE)|0,py=(p.y/TILE)|0;
+ const corners=[[4,4],[W-5,4],[4,H-5],[W-5,H-5]];
+ corners.sort((a,b)=>dist2(b[0],b[1],px,py)-dist2(a[0],a[1],px,py));
+ for(const[cx,cy]of corners){const s=nearOpen(cx,cy);if(s&&!dungeonAt(s[0],s[1])&&dist2(s[0],s[1],px,py)>(18*18))return s}
+ return null;
+}
+function courierTarget(p,g){
+ const pool=people.filter(o=>o!==p&&!o.dead&&!o.inDungeon&&o.age>=16&&(g!=='love'||(!o.partner&&!p.partner)));
+ return pool.length?pick(pool):null;
+}
+function buildQuest(p){
+ const g=p.goal.k;
+ const mk=(kind,extra)=>Object.assign({id:nextId++,giver:p.id,giverName:p.name,goal:g,kind,progress:0,need:1,done:false,accepted:0,offered:simMin},extra);
+ if(g==='wander'){
+  const spot=farCornerTile(p);if(!spot)return null;
+  return mk('waypoint',{mark:spot,title:'Scout a far corner',
+   ask:'There is a corner of this garden I will never reach on these legs — out past where my nerve runs dry. Go and stand in it for me, Sage, so it can be said someone from here has.',
+   desc:'Stand in the far corner '+p.name+' longs to reach.'});
+ }
+ if(g==='craft'){
+  const need=ri(6,12);
+  return mk('gather',{need,title:'Stone for a little shop',
+   ask:'I mean to raise a shop with my own hands, but the ground here hoards its stone. Chip me '+need+' up out of the rock and I can finally lay a floor.',
+   desc:'Mine '+need+' stone toward '+p.name+"'s shop."});
+ }
+ if(g==='family'||g==='quiet'){
+  return mk('slay',{title:g==='family'?'Guard the household':'Still the dark',
+   ask:g==='family'?'Something creeps at the edge of my little home after dark. I cannot raise children under that shadow — would you put it down?':'All I want is a quiet old age beside a warm kettle, but a thing out of the dark keeps breaking the peace. Would you still it, just once?',
+   desc:'Slay a monster to ease '+p.name+"'s mind."});
+ }
+ // love / fellows → carry something to another soul
+ const tgt=courierTarget(p,g);if(!tgt)return null;
+ return mk('courier',{targetId:tgt.id,targetName:tgt.name,mark:[(tgt.x/TILE)|0,(tgt.y/TILE)|0],
+  title:g==='love'?'Carry a love-token':'Carry warm words',
+  ask:g==='love'?('There is someone whose name tastes of rain — '+tgt.name+' — and I have not the courage. Carry this token to them, and let them know a heart here beats their way.'):('Take my warmest greetings to '+tgt.name+'. A friendship is only a message that kept on walking.'),
+  desc:'Bring '+p.name+"'s "+(g==='love'?'token':'greetings')+' to '+tgt.name+'.'});
+}
+function acceptQuest(q){
+ if(!q)return;
+ q.accepted=simMin;
+ if(q.kind==='gather')q.base=heroStone;
+ quests.push(q);
+ const g=allById.get(q.giver);
+ if(g){g.questId=q.id;g.lastQuest=simMin;emote(g,'✦')}
+ toast('✦ Dream taken up: '+q.title,'card');
+ if(g)tale([g],g.name+' asked the wandering Sage for help — '+q.desc,false);
+ questDirty=true;renderQuests();
+}
+function declineQuest(q){
+ if(!q)return;
+ const g=allById.get(q.giver);if(g)g.lastQuest=simMin;
+ toast('You let the moment pass.');
+}
+function cancelQuest(q,why){
+ const i=quests.indexOf(q);if(i>=0)quests.splice(i,1);
+ const g=allById.get(q.giver);if(g&&g.questId===q.id)g.questId=null;
+ if(why)toast('✦ '+why);
+ questDirty=true;
+}
+function creditSlay(){
+ let any=false;
+ for(const q of quests)if(q.kind==='slay'&&!q.done){q.progress++;any=true}
+ if(any)questDirty=true;
+}
+function updateQuests(dt){
+ for(let i=quests.length-1;i>=0;i--){
+  const q=quests[i],g=allById.get(q.giver);
+  if(!g||g.dead){cancelQuest(q,'The one who asked is gone.');continue}
+  if(simMin-q.accepted>10*DAY){buff(g,'social',-.1,3,'letdown');cancelQuest(q,g.name+' stopped hoping.');continue}
+  let done=false;
+  if(q.kind==='waypoint'){
+   if(dist2(hero.x,hero.y,q.mark[0]*TILE+TILE/2,q.mark[1]*TILE+TILE/2)<(2.4*TILE)**2)done=true;
+  }else if(q.kind==='gather'){
+   const prog=Math.max(0,heroStone-q.base);
+   if(prog!==q.progress){q.progress=prog;questDirty=true}
+   if(q.progress>=q.need)done=true;
+  }else if(q.kind==='slay'){
+   if(q.progress>=q.need)done=true;
+  }else if(q.kind==='courier'){
+   const tgt=allById.get(q.targetId);
+   if(!tgt||tgt.dead){cancelQuest(q,'There was no one left to carry it to.');continue}
+   q.mark=[(tgt.x/TILE)|0,(tgt.y/TILE)|0];
+   if(dist2(hero.x,hero.y,tgt.x,tgt.y)<(2.4*TILE)**2)done=true;
+  }
+  if(done)finishQuest(q);
+ }
+ if(questDirty){renderQuests();questDirty=false}
+}
+function finishQuest(q){
+ const i=quests.indexOf(q);if(i>=0)quests.splice(i,1);
+ const g=allById.get(q.giver);
+ Hero.renown=(Hero.renown||0)+1;
+ const ups=heroGainXp(4);if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
+ if(g){
+  g.questId=null;
+  buff(g,'luck',.2,12,'helped');buff(g,'social',.15,8,'helped');emote(g,'🎉');
+  if(q.kind==='waypoint'){completeGoal(g)}
+  else if(q.kind==='gather'){g.wantsBiz=true;buff(g,'work',.25,20,'shopstock');heroStone=Math.max(0,heroStone-q.need);}
+  else if(q.kind==='courier'){
+   const tgt=allById.get(q.targetId);
+   if(tgt&&!tgt.dead){
+    healRel(g,tgt,q.goal==='love'?42:26);
+    if(q.goal==='love'){g.courting=true;tgt.courting=true}
+    if(q.goal==='fellows')completeGoal(g);
+   }
+  }else if(q.kind==='slay'){buff(g,'work',.1,6,'safe')}
+  tale([g],'The Sage saw '+g.name+"'s wish through — "+q.desc+' '+pick(['They will not forget it.','Word of it will travel.','A small light, kept.']),true);
+ }
+ toast('✦ Dream kept for '+(q.giverName||'someone')+'! (renown '+Hero.renown+')','card');
+ questDirty=true;renderQuests();
+ if(selected&&!selected.dead)renderPanelLive(selected);
+}
+function renderQuests(){
+ const badge=$('qbadge');
+ if(badge){badge.textContent=quests.length;badge.classList.toggle('hidden',quests.length===0)}
+ const list=$('questList');if(!list)return;
+ list.innerHTML='';
+ if(!quests.length){const d=document.createElement('div');d.className='none';d.textContent='No dreams in your keeping just now. Talk to the folk of the garden — some will ask for help.';list.appendChild(d);return}
+ for(const q of quests){
+  const row=document.createElement('div');row.className='q';
+  const prog=q.kind==='gather'?(' — '+Math.min(q.progress,q.need)+'/'+q.need+' stone'):q.kind==='slay'?(' — '+(q.progress>=q.need?'done':'0/1')):'';
+  row.innerHTML='<div class="qt">✦ '+q.title+'</div><div class="qd">'+q.desc+'</div><div class="qp">for '+(q.giverName||'—')+prog+'</div>';
+  list.appendChild(row);
+ }
+}
 function die(p,cause){
  if(p.dead)return;
  p.dead=true;p.task=null;p.path=null;p.sleeping=false;
@@ -1955,6 +2090,7 @@ function stepSim(dt){
  for(const d of dungeons)if(d.restock&&simMin>=d.restock){d.loot=clamp(d.loot+0.4,0,1.3);d.danger=d.cleansed?d.danger:clamp(d.danger-0.04,.2,.95);d.restock=0}
  processExpeditions();
  updateMonsters(dt);
+ if(quests.length)updateQuests(dt);
  updateAnimals(dt);
  updateFlyers(dt);
  if(WATER_ON)weatherTick(dt);
@@ -2387,6 +2523,7 @@ function heroKillMonster(m){
  const i=monsters.indexOf(m);if(i>=0)monsters.splice(i,1);
  for(const p of people)if(p.task&&p.task.k==='fight'&&p.task.m===m)p.task=null;
  Hero.kills++;
+ if(quests.length)creditSlay();
  const xp={grub:2,lurker:4,horror:8}[m.type]||2;
  const ups=heroGainXp(xp);
  if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
@@ -3980,6 +4117,16 @@ function draw(t){
   if(camp.tx<vx0-2||camp.tx>vx1+2||camp.ty<vy0-2||camp.ty>vy1+2)continue;
   drawCamp(ctx,camp,t);
  }
+ // quest beacons: a golden mote over the place a dream needs the Sage to reach
+ for(const q of quests){
+  if(!q.mark||(q.kind!=='waypoint'&&q.kind!=='courier'))continue;
+  const qx=q.mark[0]*TILE+TILE/2,qy=q.mark[1]*TILE+TILE/2;
+  const pulse=0.6+0.4*Math.sin(t*0.006+q.id);
+  const go=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';
+  ctx.drawImage(GLOW_WARM,qx-14,qy-24-pulse*4,28,28);ctx.globalCompositeOperation=go;
+  ctx.fillStyle='rgba(240,205,110,'+(0.7+pulse*0.3)+')';
+  ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText('✦',qx,qy-14-pulse*4);
+ }
  for(const m of monsters){
   if(m.x/TILE<vx0-2||m.x/TILE>vx1+2||m.y/TILE<vy0-2||m.y/TILE>vy1+2)continue;
   drawMonster(ctx,m,t);
@@ -4652,7 +4799,7 @@ function npcDialogue(p){
  lines.push(loreOr(pick(TALK_CLOSE),4,10));
  return lines.map(l=>Mind.speak(p.mind,l));   // each speaker's own drifted words bleed in
 }
-let dlgLines=null,dlgIdx=0;
+let dlgLines=null,dlgIdx=0,pendingQuest=null,choosing=false;
 function startTalk(p){
  if(!p||p.dead)return;
  inDialog=true;stick=null;
@@ -4660,20 +4807,39 @@ function startTalk(p){
  p.fx=hero.x>p.x?1:-1;
  p.dirIdx=CFHelp.angToDir(Math.atan2(hero.y-p.y,hero.x-p.x));
  dlgLines=npcDialogue(p);dlgIdx=0;
+ pendingQuest=null;choosing=false;
+ $('sDialogChoice').style.display='none';$('sDialogNext').style.display='block';
+ // a soul with an unrealized dream may ask the Sage for a hand toward it
+ if(questGiverEligible(p)&&chance(.75)){
+  const q=buildQuest(p);
+  if(q){pendingQuest=q;dlgLines=dlgLines.slice(0,-1);dlgLines.push(Mind.speak(p.mind,q.ask))}
+ }
  $('sDialogName').textContent=p.name+' · '+traitPhrase(p);
  $('sDialogText').textContent=dlgLines[0];
+ if(pendingQuest&&dlgLines.length===1)showQuestChoice();
  $('sDialog').style.display='block';
  $('sTalkBtn').style.display='none';
  $('sDescendBtn').style.display='none';
  $('sEnterBtn').style.display='none';
 }
+function showQuestChoice(){
+ choosing=true;
+ $('sDialogChoice').style.display='flex';
+ $('sDialogNext').style.display='none';
+}
+function closeDialog(){
+ $('sDialog').style.display='none';
+ $('sDialogChoice').style.display='none';
+ dlgLines=null;inDialog=false;choosing=false;
+}
 function advanceTalk(){
+ if(choosing)return;   // waiting on the accept / decline choice
  dlgIdx++;
  if(dlgLines&&dlgIdx<dlgLines.length){
   $('sDialogText').textContent=dlgLines[dlgIdx];
+  if(pendingQuest&&dlgIdx===dlgLines.length-1)showQuestChoice();
  }else{
-  $('sDialog').style.display='none';
-  dlgLines=null;inDialog=false;
+  closeDialog();
  }
 }
 
@@ -5068,6 +5234,14 @@ $('logBtn').onclick=()=>{
  else lp.classList.add('hidden');
 };
 $('logClose').onclick=()=>$('logPanel').classList.add('hidden');
+$('questBtn').onclick=()=>{
+ const qp=$('questPanel');
+ if(qp.classList.contains('hidden')){renderQuests();qp.classList.remove('hidden');$('charPanel').classList.add('hidden');$('logPanel').classList.add('hidden');selected=null}
+ else qp.classList.add('hidden');
+};
+$('questClose').onclick=()=>$('questPanel').classList.add('hidden');
+$('qAccept').onclick=e=>{e.stopPropagation();const q=pendingQuest;pendingQuest=null;acceptQuest(q);closeDialog()};
+$('qDecline').onclick=e=>{e.stopPropagation();const q=pendingQuest;pendingQuest=null;declineQuest(q);closeDialog()};
 $('iClose').onclick=closeInspect;
 function setSpeed(idx2){
  speedIdx=idx2;
@@ -5352,6 +5526,10 @@ return {
   forceSchism:()=>{for(const v of villages){const m=villageMembers(v);if(m.length>=6){const lead=allById.get(v.leader);const diss=m.filter(p=>p!==lead).sort((a,b)=>leadership(b)-leadership(a));if(diss.length>=3){schism(v,diss[0],diss);return v.name}}}return null},
   camps:()=>camps.map(c=>{const mem=campMembers(c);const l=mem.find(m=>m.id===c.leader);return{name:c.name,x:c.tx,y:c.ty,members:mem.length,leader:l?l.name:null,raiding:mem.some(m=>m.raid),age:+((simMin-c.founded)/DAY).toFixed(1)};}),
   forceCamp:()=>{const free=monsters.filter(m=>!m.camp);if(free.length<1)return null;const camp=foundCamp(free[0]);if(!camp)return null;for(const m of free.slice(1,4))joinCamp(m,camp);return camp.name},
+  get renown(){return Hero.renown||0},
+  quests:()=>quests.map(q=>({title:q.title,kind:q.kind,goal:q.goal,giver:q.giverName,target:q.targetName||null,progress:q.progress,need:q.need,mark:q.mark||null})),
+  offerQuest:(name)=>{const p=name?people.find(x=>!x.dead&&x.name===name):people.find(questGiverEligible);if(!p)return null;if(p.age>=16&&(!p.goal||p.goal.done)){p.goal=pickGoal(p)}p.lastQuest=0;p.questId=null;const q=buildQuest(p);if(!q)return null;acceptQuest(q);return {title:q.title,kind:q.kind,giver:q.giverName,target:q.targetName||null,mark:q.mark||null};},
+  completeQuestNow:()=>{if(!quests.length)return null;const q=quests[0];if(q.kind==='gather')heroStone=q.base+q.need;else if(q.kind==='slay')q.progress=q.need;else if(q.mark){hero.x=q.mark[0]*TILE+TILE/2;hero.y=q.mark[1]*TILE+TILE/2}const before=Hero.renown||0;updateQuests(0.1);return {renown:Hero.renown||0,advanced:(Hero.renown||0)>before,title:q.title};},
   get heroStone(){return heroStone},
   get particleCount(){return particles.length},
   carvePatch:(x,y,r)=>{let n=0;for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const nx=x+dx,ny=y+dy;if(nx<1||ny<1||nx>=W-1||ny>=H-1)continue;const i=idx(nx,ny);if(map[i]!==0&&struct[i]===S_ROCK){carveFloor(nx,ny);n++}}return n},
