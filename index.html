@@ -32,8 +32,8 @@ button:active{transform:translateY(1px)}
   .sp{gap:3px}
   #era{max-width:40vw}
 }
-#toasts{position:fixed;top:54px;left:50%;transform:translateX(-50%);z-index:20;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;width:min(92vw,440px)}
-.toast{background:rgba(20,28,17,.94);border:1px solid #4a6640;border-radius:12px;padding:8px 13px;font-size:12.5px;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,.5);animation:tin .25s ease;max-width:100%}
+#toasts{position:fixed;top:calc(44px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:20;display:flex;flex-direction:column;gap:3px;align-items:center;pointer-events:none;width:min(88vw,360px)}
+.toast{background:rgba(20,28,17,.9);border:1px solid #4a6640;border-radius:7px;padding:2px 9px;font-size:10.5px;line-height:1.35;text-align:center;box-shadow:0 2px 9px rgba(0,0,0,.4);animation:tin .2s ease;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .toast.card{border-color:#8a76c2;color:#d9cff2}
 @keyframes tin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
 .panel{position:fixed;left:0;right:0;bottom:0;background:rgba(19,26,16,.97);border-top:1px solid #3c4f33;border-radius:18px 18px 0 0;z-index:10;display:flex;flex-direction:column;box-shadow:0 -8px 30px rgba(0,0,0,.5);padding-bottom:env(safe-area-inset-bottom)}
