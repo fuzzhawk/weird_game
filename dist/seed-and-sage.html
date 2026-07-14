@@ -5727,7 +5727,8 @@ let decorList=null,solidCornerIdx=null;
 // real-time blocked terrain: pre-baked rock tiles (per era layer × 16 autotile
 // corners × a few variants), blitted from the LIVE map so a cleared tile shows
 // the ground beneath at once. silDirty triggers a silhouette recompute.
-let rockTiles=null, silDirty=false, silBuf=null, lastSil=0;
+let rockTiles=null, rockNub=[[],[],[]], silDirty=false, silBuf=null, lastSil=0;
+let crackCv=null, crackCtx=null;   // scratch tile for clipping mining cracks to the rock shape
 const ROCK_VARIANTS=3, SIL_THROTTLE=120;   // ms between silhouette recomputes
 let urbanBaked=null,villageStamp='';
 let terBuild=null,terScan=0;
@@ -5946,11 +5947,28 @@ function bakeRockTile(ci,variant,pals,style){
  }
  c.putImageData(img,0,0);return cv;
 }
+// an isolated rock tile (all neighbours mined away) autotiles to an empty mask
+// and would vanish while still solid — so lone tiles fall back to this centred
+// boulder, keeping the terrain visible until it is actually broken
+function bakeRockNub(variant,pals,style){
+ const cv=document.createElement('canvas');cv.width=cv.height=TILE;
+ const c=cv.getContext('2d');const img=c.createImageData(TILE,TILE),data=img.data;
+ const cxp=8,cyp=8,R=6.2,vs=variant*137;
+ for(let ly=0;ly<TILE;ly++)for(let lx=0;lx<TILE;lx++){
+  const i=ly*TILE+lx, dx=lx-cxp+0.5, dy=ly-cyp+0.5, d=Math.sqrt(dx*dx+dy*dy);
+  if(d>R){data[i*4+3]=0;continue;}
+  let col=TileGen.rockTexel(pals.rock,lx+vs,ly+vs*2,surfSeedN+variant*9173,style);
+  if(d>R-1.3)col=TileGen.mix(col,[0,0,0],0.42);   // dark rim
+  const p=i*4;data[p]=col[0];data[p+1]=col[1];data[p+2]=col[2];data[p+3]=255;
+ }
+ c.putImageData(img,0,0);return cv;
+}
 function bakeRockTiles(){
- rockTiles=[[],[],[]];
+ rockTiles=[[],[],[]]; rockNub=[[],[],[]];
  for(let k=0;k<3;k++){
   const pals=terPals[k],style=terStyle[k];
   for(let ci=0;ci<16;ci++){ rockTiles[k][ci]=[]; for(let v=0;v<ROCK_VARIANTS;v++)rockTiles[k][ci].push(bakeRockTile(ci,v,pals,style)); }
+  for(let v=0;v<ROCK_VARIANTS;v++)rockNub[k].push(bakeRockNub(v,pals,style));
  }
 }
 // (re)compute the rock silhouette autotile index from the live map. Reuses a
@@ -6322,25 +6340,30 @@ function draw(t){
    const i=idx(x,y);
    if(map[i]===0||struct[i]!==S_ROCK)continue;
    const ci=solidCornerIdx[i], vi=(x*7+y*13)%ROCK_VARIANTS, px=x*TILE,py=y*TILE;
-   ctx.drawImage(rockTiles[0][ci][vi],px,py);
+   // lone tiles (corner index 0) autotile to nothing → fall back to a boulder so
+   // the terrain never vanishes while it is still solid
+   const iso=ci===0;
+   const tile0=iso?rockNub[0][vi]:rockTiles[0][ci][vi];
+   ctx.drawImage(tile0,px,py);
    const u=urbanAt(i), a1=clamp(u*2,0,1), a2=clamp((u-0.5)*2,0,1);
-   if(a1>0&&rockTiles[1]){ctx.globalAlpha=a1;ctx.drawImage(rockTiles[1][ci][vi],px,py);}
-   if(a2>0&&rockTiles[2]){ctx.globalAlpha=a2;ctx.drawImage(rockTiles[2][ci][vi],px,py);}
+   if(a1>0&&rockTiles[1]){ctx.globalAlpha=a1;ctx.drawImage(iso?rockNub[1][vi]:rockTiles[1][ci][vi],px,py);}
+   if(a2>0&&rockTiles[2]){ctx.globalAlpha=a2;ctx.drawImage(iso?rockNub[2][vi]:rockTiles[2][ci][vi],px,py);}
    ctx.globalAlpha=1;
-   // mining cracks: a worked tile shows its damage so it's clear it is not yet
-   // broken (still solid) — bright fissures that branch and deepen toward shattering
+   // mining cracks: a subtle fissure that deepens toward shattering, clipped to the
+   // rock's own shape (via a scratch tile) so it never hangs over the edge
    const dm=rockDmg&&rockDmg[i]; if(dm>0){
-    const frac=clamp(dm/hardnessAt(x,y),0,1), gr=U.mulberry32(i*2654435761>>>0);
-    const nc=1+((frac*3)|0);
-    for(let pass=0;pass<2;pass++){
-     const g2=U.mulberry32(i*2654435761>>>0);   // same crack geometry, drawn twice
-     ctx.strokeStyle= pass===0 ? 'rgba(8,6,10,'+(0.5+frac*0.4)+')' : 'rgba(226,210,180,'+(0.5+frac*0.45)+')';
-     ctx.lineWidth= pass===0?2:1;
-     ctx.beginPath();
-     for(let cN=0;cN<nc;cN++){ let cxp=px+4+g2()*8, cyp=py+4+g2()*8; ctx.moveTo(cxp,cyp);
-      const segs=2+((frac*2)|0); for(let sN=0;sN<segs;sN++){cxp+=g2()*8-4;cyp+=g2()*8-4;ctx.lineTo(clamp(cxp,px+1,px+15),clamp(cyp,py+1,py+15));}}
-     ctx.stroke();
-    }
+    const frac=clamp(dm/hardnessAt(x,y),0,1);
+    if(!crackCv){crackCv=document.createElement('canvas');crackCv.width=crackCv.height=TILE;crackCtx=crackCv.getContext('2d');}
+    const cc=crackCtx, g2=U.mulberry32(i*2654435761>>>0), nc=1+((frac*2.2)|0);
+    cc.clearRect(0,0,TILE,TILE);
+    cc.strokeStyle='rgba(20,16,22,'+(0.22+frac*0.33)+')'; cc.lineWidth=1;
+    cc.beginPath();
+    for(let cN=0;cN<nc;cN++){ let ax=5+g2()*6, ay=5+g2()*6; cc.moveTo(ax,ay);
+     const segs=1+((frac*2)|0); for(let sN=0;sN<segs;sN++){ax=clamp(ax+g2()*6-3,2,14);ay=clamp(ay+g2()*6-3,2,14);cc.lineTo(ax,ay);}}
+    cc.stroke();
+    cc.globalCompositeOperation='destination-in'; cc.drawImage(tile0,0,0);   // keep cracks only on rock
+    cc.globalCompositeOperation='source-over';
+    ctx.drawImage(crackCv,px,py);
    }
   }
  }
