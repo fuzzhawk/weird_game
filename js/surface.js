@@ -45,7 +45,7 @@ let struct,farmGrid,farmTimer;
 let farmTiles=new Set();
 let region,regionsDirty=true;
 let people=[],allById=new Map(),buildings=[];
-let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[];
+let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[];
 let flockSeq=1;
 let civFallen=false,expeditionDay=0;   // settlements can die out; an expedition reseeds a new town
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
@@ -716,7 +716,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];chron=[];usedNames=new Set();graveBlooms=[];
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];chron=[];usedNames=new Set();graveBlooms=[];
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -2223,17 +2223,18 @@ function processExpeditions(){
 
 /* ================= monsters (mostly peaceful surface — occasional risers) ================= */
 function monsterCap(){return Math.min(16,3+((people.length/3)|0))}   // the dark presses harder now
-function spawnMonster(d){
+function spawnMonster(d,at){
  if(monsters.length>=monsterCap()||peaceful||(d&&d.cleansed))return;
  const r=R();
  let type='grub';
  if(r<d.danger*0.35)type='horror';
  else if(r<0.25+d.danger*0.4)type='lurker';
  const M=MONSTERS[type];
- const s=nearOpen(d.x,d.y);if(!s)return;
+ const s=at?nearOpen(at[0],at[1]):nearOpen(d.x,d.y);if(!s)return;
  const m={id:nextId++,type,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,fx:1,dirIdx:0,animClock:R()*4,
   hp:M.hp,maxhp:M.hp,dmg:M.dmg,spd:M.spd,col:M.col,g:M.g,name:M.n,
-  home:d,target:null,path:null,pi:0,atkCd:0,roamT:0,em:null,born:simMin,atkAnim:0};
+  home:d,target:null,path:null,pi:0,atkCd:0,roamT:0,em:null,born:simMin,atkAnim:0,
+  camp:null,socialCd:rf(20,60),raid:null,raidUntil:0};
  monsters.push(m);
  emote2(m,'❗');
  tale([],'Something '+pick(['wet','many-rooted','wrong','pale and huge'])+' came up out of '+d.name+' — a '+M.n+'.',true);
@@ -2274,11 +2275,26 @@ function updateMonster(m,dt){
  if(m.atkCd>0)m.atkCd-=dt;
  if(m.atkAnim>0)m.atkAnim-=dt;
  m.animClock+=dt*0.12;
- const[t,td]=nearestSettler(m.x,m.y,p=>!p.inDungeon);
+ let[t,td]=nearestSettler(m.x,m.y,p=>!p.inDungeon);
+ // risers only lock onto prey within sight; beyond that they idle, gather, and camp.
+ // camped or raiding risers are roused and hunt further afield.
+ const per=((m.type==='horror'?20:m.type==='lurker'?16:12)+(isNight()?6:0)+(m.camp||m.raid?8:0))*TILE;
+ if(t&&td>per){t=null}
  m.target=t;
  if(!t){
-  if(simMin-m.born>3*DAY){killMonster(m,null,true);return}
-  if(!m.path){const rx=clamp(m.home.x+ri(-6,6),1,W-2),ry=clamp(m.home.y+ri(-6,6),1,H-2);monsterMove(m,rx,ry,dt)}
+  monsterSocial(m,dt);
+  // raiders press on toward their objective even before prey comes into view
+  if(m.raid&&simMin<m.raidUntil){
+   if(!m.path||m.pi>=m.path.length)monsterMove(m,m.raid[0],m.raid[1],dt);else monsterMove(m,0,0,dt);
+   if(dist2(m.x,m.y,m.raid[0]*TILE,m.raid[1]*TILE)<(4*TILE)**2)m.raid=null;
+   return;
+  }
+  m.raid=null;
+  // a camp gives a riser reason to linger; lone roamers sink back into the dark
+  if(!m.camp&&simMin-m.born>3*DAY){killMonster(m,null,true);return}
+  // idle wandering: circle the camp if part of one, else the home dungeon
+  const ax=m.camp?m.camp.tx:m.home.x, ay=m.camp?m.camp.ty:m.home.y, rad=m.camp?4:6;
+  if(!m.path){const rx=clamp(ax+ri(-rad,rad),1,W-2),ry=clamp(ay+ri(-rad,rad),1,H-2);monsterMove(m,rx,ry,dt)}
   else monsterMove(m,0,0,dt);
   return;
  }
@@ -2405,7 +2421,8 @@ function dieByMonster(p,m){
 }
 function updateMonsters(dt){
  for(let i=monsters.length-1;i>=0;i--)updateMonster(monsters[i],dt);
- if(peaceful)return;
+ if(peaceful){if(camps.length)camps.length=0;return}
+ campTick(dt);
  for(const d of dungeons){
   d.spawnT=(d.spawnT||simMin+rf(1.6,3.2)*DAY);
   if(simMin>=d.spawnT){
@@ -2427,6 +2444,83 @@ function updateMonsters(dt){
    if(d){const n=ri(2,3);let spawned=0;for(let k=0;k<n;k++){const before=monsters.length;spawnMonster(d);if(monsters.length>before)spawned++}
     if(spawned>1)tale([],'A warband came clawing up out of '+d.name+', making straight for the hedge-walls of '+pick(walled).name+'.',true);}
   }
+ }
+}
+
+/* ================= monster camps & social behavior ================= */
+// the dark doesn't only hunt — it gathers. Idle risers cluster into surface
+// camps, huddle and squabble amongst themselves, then muster into warbands.
+const MON_SCORE={grub:1,lurker:2.2,horror:4};
+function monScore(m){return (MON_SCORE[m.type]||1)*(0.5+0.5*m.hp/m.maxhp)}
+function campMembers(camp){return monsters.filter(m=>m.camp===camp)}
+function campName(){return pick(['the Gnawing','the Ashen Ring','the Root-Coven','the Hollow Muster','the Bramble Warren','the Sump Court','the Cinder Nest','the Pale Circle','the Gall-Wake','the Rotward'])}
+function nearAnyVillage(tx,ty,pad){for(const v of villages){const rr=(v.rad||6)+pad;if(dist2(tx,ty,v.cx,v.cy)<rr*rr)return true}return false}
+function nearestDungeonTile(tx,ty){let best=null,bd=1e18;for(const d of dungeons){if(d.cleansed)continue;const dd=dist2(tx,ty,d.x,d.y);if(dd<bd){bd=dd;best=d}}return best}
+function nearestVillageTile(tx,ty){let best=null,bd=1e18;for(const v of villages){const dd=dist2(tx,ty,v.cx,v.cy);if(dd<bd){bd=dd;best=v}}return best}
+function foundCamp(m){
+ const bx=(m.x/TILE)|0,by=(m.y/TILE)|0;let spot=null;
+ for(let tries=0;tries<24&&!spot;tries++){
+  const x=clamp(bx+ri(-2,2),1,W-2),y=clamp(by+ri(-2,2),1,H-2);
+  if(!walkable(x,y)||nodeAt.has(idx(x,y))||dungeonAt(x,y))continue;
+  if(nearAnyVillage(x,y,5))continue;
+  spot=[x,y];
+ }
+ if(!spot)return null;
+ const camp={id:nextId++,tx:spot[0],ty:spot[1],x:spot[0]*TILE+TILE/2,y:spot[1]*TILE+TILE/2,
+  founded:simMin,leader:m.id,name:campName(),raidT:simMin+rf(1.2,2.2)*DAY,reinforceT:simMin+rf(1.4,2.4)*DAY,flare:0};
+ camps.push(camp);m.camp=camp;emote2(m,'🔥');
+ tale([],'The risers stopped fleeing the light and began to gather above ground — a camp, '+camp.name+', taking root.',true);
+ return camp;
+}
+function joinCamp(m,camp){m.camp=camp;if(chance(.5))emote2(m,'❗')}
+function disbandCamp(camp){const i=camps.indexOf(camp);if(i<0)return;camps.splice(i,1);for(const m of monsters)if(m.camp===camp)m.camp=null;tale([],camp.name+' guttered out — its risers scattered back into the dark.',false)}
+function spawnAtCamp(camp){const d=nearestDungeonTile(camp.tx,camp.ty)||dungeons[0];if(!d)return null;return spawnMonster(d,[camp.tx,camp.ty])}
+function campTick(dt){
+ // free, surface-bound risers gravitate together
+ for(const m of monsters){
+  if(m.camp||m.target||simMin-m.born<0.4*DAY)continue;
+  let joined=false;
+  for(const camp of camps){if(dist2(m.x,m.y,camp.x,camp.y)<(7*TILE)**2){joinCamp(m,camp);joined=true;break}}
+  if(joined)continue;
+  if(chance(dt*0.02)){
+   const buddy=monsters.find(o=>o!==m&&!o.camp&&!o.target&&dist2(m.x,m.y,o.x,o.y)<(3.5*TILE)**2);
+   if(buddy){const founder=monScore(m)>=monScore(buddy)?m:buddy;const camp=foundCamp(founder);if(camp)joinCamp(founder===m?buddy:m,camp)}
+  }
+ }
+ // camp lifecycle: leadership, reinforcement, raids
+ for(let i=camps.length-1;i>=0;i--){
+  const camp=camps[i],mem=campMembers(camp);
+  if(mem.length===0){disbandCamp(camp);continue}
+  camp.flare=Math.max(0,camp.flare-dt);
+  if(!mem.some(m=>m.id===camp.leader)){const top=mem.slice().sort((a,b)=>monScore(b)-monScore(a))[0];camp.leader=top.id;emote2(top,'💢')}
+  if(mem.length>=3&&simMin>=camp.reinforceT){
+   camp.reinforceT=simMin+rf(1.4,2.4)*DAY;
+   if(monsters.length<monsterCap()){const nb=spawnAtCamp(camp);if(nb){nb.camp=camp;camp.flare=6;tale([],'Something new clawed up into '+camp.name+' — the camp swells.',true)}}
+  }
+  if(mem.length>=3&&simMin>=camp.raidT){
+   camp.raidT=simMin+rf(1.2,2.2)*DAY;
+   const v=nearestVillageTile(camp.tx,camp.ty);
+   if(v){camp.flare=9;for(const m of mem){m.raid=[v.cx,v.cy];m.raidUntil=simMin+rf(220,360)}
+    tale([],camp.name+' boiled up as a warband and set off toward '+v.name+'.',true)}
+  }
+ }
+}
+function monsterSocial(m,dt){
+ m.socialCd-=dt;if(m.socialCd>0)return;m.socialCd=rf(30,70);
+ let other=null,bd=(2.6*TILE)**2;
+ for(const o of monsters){if(o===m||o.target)continue;const d=dist2(m.x,m.y,o.x,o.y);if(d<bd){bd=d;other=o}}
+ if(!other)return;
+ const kin=m.camp&&m.camp===other.camp;
+ if(kin||m.type===other.type){
+  // huddle: dark solidarity mends them a little; the leader steadies the pack
+  const heal=kin?rf(3,7):rf(1,3);
+  m.hp=Math.min(m.maxhp,m.hp+heal);other.hp=Math.min(other.maxhp,other.hp+heal);
+  if(chance(.5))emote2(m,kin?'🔥':'❗');
+ }else if(chance(.45)){
+  // squabble between rival breeds — a nip, and the weaker gives ground
+  const win=monScore(m)>=monScore(other)?m:other,lose=win===m?other:m;
+  lose.hp=Math.max(1,lose.hp-rf(2,6));emote2(win,'💢');emote2(lose,'💨');
+  lose.path=null;lose.roamT=0;
  }
 }
 
@@ -3630,6 +3724,26 @@ function drawBuilding(c,b,nf){
   c.fillText(b.sub[1],px+w-5,py-9);
  }
 }
+function drawCamp(c,camp,t){
+ const px=camp.x,py=camp.y;
+ const n=campMembers(camp).length;
+ // a bonfire ringed by crude totems — flares brighter when the camp stirs
+ const flick=0.6+0.4*Math.sin(t*0.012+camp.id)+(camp.flare>0?0.5:0);
+ const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+ c.drawImage(GLOW_RED,px-16-camp.flare,py-16-camp.flare,32+camp.flare*2,32+camp.flare*2);
+ c.globalCompositeOperation=go;
+ // fire
+ c.fillStyle='rgba(0,0,0,0.35)';c.beginPath();c.ellipse(px,py+3,9,3.5,0,0,7);c.fill();
+ c.fillStyle='rgba(230,90,50,'+(0.55+flick*0.35)+')';
+ c.beginPath();c.moveTo(px,py-9-flick*3);c.lineTo(px-4,py+1);c.lineTo(px+4,py+1);c.closePath();c.fill();
+ c.fillStyle='rgba(255,200,90,'+(0.5+flick*0.3)+')';
+ c.beginPath();c.moveTo(px,py-4-flick*2);c.lineTo(px-2,py+1);c.lineTo(px+2,py+1);c.closePath();c.fill();
+ // totem stakes leaning around the fire
+ c.strokeStyle='#3a2b33';c.lineWidth=1.4;
+ for(let k=0;k<3;k++){const a=camp.id*1.7+k*2.09;const sx=px+Math.cos(a)*10,sy=py+2+Math.sin(a)*4;
+  c.beginPath();c.moveTo(sx,sy);c.lineTo(sx+Math.cos(a)*2,sy-7);c.stroke();}
+ if(cam.z>1.0){c.font='7px system-ui';c.textAlign='center';c.fillStyle='rgba(240,150,120,0.9)';c.fillText('☠ '+camp.name+(n>1?' ('+n+')':''),px,py-14);}
+}
 function drawMonster(c,m,t){
  const px=m.x,py=m.y;
  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
@@ -3861,6 +3975,10 @@ function draw(t){
  for(const sv of salvage){
   if(sv.x/TILE<vx0-1||sv.x/TILE>vx1+1||sv.y/TILE<vy0-1||sv.y/TILE>vy1+1)continue;
   drawSalvage(ctx,sv,t);
+ }
+ for(const camp of camps){
+  if(camp.tx<vx0-2||camp.tx>vx1+2||camp.ty<vy0-2||camp.ty>vy1+2)continue;
+  drawCamp(ctx,camp,t);
  }
  for(const m of monsters){
   if(m.x/TILE<vx0-2||m.x/TILE>vx1+2||m.y/TILE<vy0-2||m.y/TILE>vy1+2)continue;
@@ -5232,6 +5350,8 @@ return {
   governance:()=>villages.map(v=>{const l=allById.get(v.leader);return{name:v.name,gov:v.gov,leader:l?l.name:null,leadTraits:l?l.traits:null,members:villageMembers(v).length,unrest:+(v.unrest||0).toFixed(2),gates:v.gates?v.gates.size:0,wallDone:!!v.wallDone};}),
   forceCouncil:()=>{for(const v of villages)holdCouncil(v);return villages.length},
   forceSchism:()=>{for(const v of villages){const m=villageMembers(v);if(m.length>=6){const lead=allById.get(v.leader);const diss=m.filter(p=>p!==lead).sort((a,b)=>leadership(b)-leadership(a));if(diss.length>=3){schism(v,diss[0],diss);return v.name}}}return null},
+  camps:()=>camps.map(c=>{const mem=campMembers(c);const l=mem.find(m=>m.id===c.leader);return{name:c.name,x:c.tx,y:c.ty,members:mem.length,leader:l?l.name:null,raiding:mem.some(m=>m.raid),age:+((simMin-c.founded)/DAY).toFixed(1)};}),
+  forceCamp:()=>{const free=monsters.filter(m=>!m.camp);if(free.length<1)return null;const camp=foundCamp(free[0]);if(!camp)return null;for(const m of free.slice(1,4))joinCamp(m,camp);return camp.name},
   get heroStone(){return heroStone},
   get particleCount(){return particles.length},
   carvePatch:(x,y,r)=>{let n=0;for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const nx=x+dx,ny=y+dy;if(nx<1||ny<1||nx>=W-1||ny>=H-1)continue;const i=idx(nx,ny);if(map[i]!==0&&struct[i]===S_ROCK){carveFloor(nx,ny);n++}}return n},
