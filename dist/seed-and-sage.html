@@ -2932,9 +2932,23 @@ const TRAITS={
  awkward:{a:'awkward',charm:-.25},
  hardworking:{a:'hardworking',work:.35},
  dreamer:{a:'a dreamer',work:-.1,romance:.1,luck:.05},
- stubborn:{a:'stubborn',social:-.1}
+ stubborn:{a:'stubborn',social:-.1},
+ commanding:{a:'commanding',social:.2,charm:.1,work:.1},   // a natural leader
+ rebellious:{a:'rebellious',social:-.05,work:.05}          // a firebrand who dissents
 };
 const TKEYS=Object.keys(TRAITS);
+// how much a person is looked to as a leader — drives who runs a village and who
+// splinters off to found their own
+const LEAD_W={commanding:1.0,ambitious:.55,charming:.45,brave:.35,kind:.3,cheerful:.25,hardworking:.2,loyal:.15,creative:.1,rebellious:.12,timid:-.4,awkward:-.35,gloomy:-.25,lazy:-.2};
+function leadership(p){
+ if(!p||p.dead)return 0;
+ let s=0.2;
+ for(const t of p.traits)s+=(LEAD_W[t]||0);
+ s+=Math.min(0.3,Math.max(0,(p.age-24)/120));      // experience of years
+ s+=(p.relics?p.relics.length*0.05:0);              // relics lend authority
+ s+=mod(p,'charm')*0.3;
+ return s;
+}
 const MODKEYS=['luck','social','work','romance','charm'];
 const CLASH=[['grumpy','cheerful'],['ambitious','lazy'],['timid','brave'],['gloomy','cheerful'],['jealous','charming'],['awkward','charming'],['stubborn','stubborn'],['grumpy','dreamer']];
 const KIN=[['creative','dreamer'],['kind','loyal'],['ambitious','hardworking'],['curious','brave'],['cheerful','kind'],['passionate','creative'],['gloomy','gloomy'],['curious','dreamer']];
@@ -3807,6 +3821,7 @@ function startBuild(p,tp,forP){
  const[w,h]=SZ[tp];
  let anchor=[(p.x/TILE)|0,(p.y/TILE)|0],bounds=null,s=null;
  if(forP&&forP.home){anchor=homeTile(forP.home)}
+ else if(p.founder&&!p.vid){ /* a schism founder builds where they've settled, not back home */ }
  else if(tp!=='grave'){
   const v=p.vid?villages.find(vv=>vv.id===p.vid):nearestVillage(p,34);
   if(v&&v.claim){
@@ -4086,6 +4101,13 @@ function think(p){
    setTask(p,'fight',{m:nearM});return;
   }
  }
+ // a schism founder marching off to break new ground: press on to the site, then
+ // settle and build — once enough of the band cluster, a new village is born
+ if(p.migrate){
+  const tx=p.migrate[0],ty=p.migrate[1];
+  if(dist2(p.x,p.y,tx*TILE,ty*TILE)<(5*TILE)**2||!walkable(tx,ty)){ p.migrate=null; }
+  else { setTask(p,'migrate',{}); if(!goTo(p,tx,ty)){ p.migrate=null; } p.thinkT=simMin+rf(6,16); return; }
+ }
  if(st==='child'){
   if(isNight()||p.energy<20){p.sleeping=true;return}
   if(p.hunger>55){
@@ -4121,7 +4143,7 @@ function think(p){
   if(!b.gone&&!b.done&&b.builder===p.id){setTask(p,'build',{b});return}
  }
  if(!p.home||p.home.gone){
-  if(claimVacant(p))return;
+  if(!p.founder&&claimVacant(p))return;   // founders must raise their own roofs at the new site, not drift back
   if(canAfford(p,COST.shelter)){if(startBuild(p,'shelter'))return}
   gatherType(p,'wood',COST.shelter.wood);return;
  }
@@ -4139,7 +4161,10 @@ function think(p){
   if(totalMat(p,'stone')<COST.biz.stone){gatherType(p,'stone',3);return}
  }
  if(p.home.stock.food<4+2*Math.min(3,p.kids.length)){gatherType(p,'food',4);return}
- if(p.vid){const v=villages.find(vv=>vv.id===p.vid);const keen=v&&!v.wallDone?0.95:0.7;if(chance(keen)){const job=findVillageJob(p);if(job){setTask(p,'villagejob',{v:job.v,j:job.j});return}}}
+ if(p.vid){const v=villages.find(vv=>vv.id===p.vid);const keen=v&&!v.wallDone?0.95:0.7;if(chance(keen)){const job=findVillageJob(p);if(job){
+  if(job.j.type==='guard'){ const k=job.v.jobs.indexOf(job.j); if(k>=0)job.v.jobs.splice(k,1); setTask(p,'guard',{gx:job.j.x,gy:job.j.y,dur:rf(50,130),ox:job.j.x>=job.v.cx?1:-1}); return; }
+  setTask(p,'villagejob',{v:job.v,j:job.j});return;
+ }}}
  if(wantsToQuest(p)){if(formExpedition(p))return}
  if(p.goal&&p.goal.k==='wander'&&!p.goal.done&&chance(.4)){wanderTask(p,true);return}
  if(p.farUntil>simMin&&chance(.5)){wanderTask(p,true);return}
@@ -4169,6 +4194,16 @@ function doTask(p,dt){
  const t=p.task;
  switch(t.k){
   case 'wander':{if(!p.path){p.task=null;break}if(moveAlong(p,dt))p.task=null;break}
+  case 'migrate':{if(!p.path){p.task=null;break}if(moveAlong(p,dt))p.task=null;break}
+  case 'guard':{
+   if(!t.arr){ if(!p.path){if(!goTo(p,t.gx,t.gy)){p.task=null;break}} if(moveAlong(p,dt)){t.arr=true;p.moving=false;p.fx=t.ox||1} break; }
+   // held post: face outward; break to think (and fight) the moment a monster nears
+   t.h=(t.h||0)+dt;
+   if(monsters.length&&nearestMonster(p,9*TILE)){p.task=null;break}
+   if(chance(dt*0.02))emote(p,'🛡');
+   if(t.h>=t.dur||isNight()&&p.energy<30){p.task=null}
+   break;
+  }
   case 'gather':{
    const n=t.node;
    if(!n||n.amt<=0){p.task=null;break}
@@ -4979,7 +5014,7 @@ function processExpeditions(){
 }
 
 /* ================= monsters (mostly peaceful surface — occasional risers) ================= */
-function monsterCap(){return Math.min(8,2+((people.length/4)|0))}
+function monsterCap(){return Math.min(16,3+((people.length/3)|0))}   // the dark presses harder now
 function spawnMonster(d){
  if(monsters.length>=monsterCap()||peaceful||(d&&d.cleansed))return;
  const r=R();
@@ -5164,13 +5199,15 @@ function updateMonsters(dt){
  for(let i=monsters.length-1;i>=0;i--)updateMonster(monsters[i],dt);
  if(peaceful)return;
  for(const d of dungeons){
-  d.spawnT=(d.spawnT||simMin+rf(2.5,5)*DAY);
+  d.spawnT=(d.spawnT||simMin+rf(1.6,3.2)*DAY);
   if(simMin>=d.spawnT){
-   d.spawnT=simMin+rf(2.8,5.5)*DAY/(0.6+d.danger);
+   d.spawnT=simMin+rf(1.6,3.4)*DAY/(0.6+d.danger);
    if(d.cleansed)continue;
-   if(people.length>=6&&chance(.5)){
+   if(people.length>=4&&chance(.75)){
     spawnMonster(d);
-    if(chance(.2+d.danger*0.35)){spawnMonster(d)}
+    // heavier waves only once a settlement is healthy, so a battered village can recover
+    if(people.length>=8&&chance(.4+d.danger*0.4)){spawnMonster(d)}
+    if(people.length>=12&&chance(d.danger*0.3)){spawnMonster(d)}
    }
   }
  }
@@ -5435,18 +5472,48 @@ function perimeterTiles(c){
  for(let y=c.y0+1;y<c.y1;y++){out.push([c.x0,y]);out.push([c.x1,y])}
  return out;
 }
+// Walls follow the TERRAIN, not a rectangle: flood the ground the town can hold
+// from its centre (bounded by the claim), then wall the organic boundary of that
+// region — so the rampart bends around rock, cliffs and water at every angle, and
+// re-shapes itself as folk mine and build. Gates open at the cardinal exits.
 function fortPlan(cl){
  const walls=new Map(),gates=new Set();
- const mx=Math.round((cl.x0+cl.x1)/2),my=Math.round((cl.y0+cl.y1)/2);
- for(let k=0;k<WALL_THICK;k++){
-  gates.add(mx+','+(cl.y0+k));gates.add(mx+','+(cl.y1-k));
-  gates.add((cl.x0+k)+','+my);gates.add((cl.x1-k)+','+my);
- }
- for(let k=0;k<WALL_THICK;k++){
-  const c={x0:cl.x0+k,y0:cl.y0+k,x1:cl.x1-k,y1:cl.y1-k};
-  if(c.x1-c.x0<3||c.y1-c.y0<3)break;
-  for(const[x,y]of perimeterTiles(c)){const key=x+','+y;if(!gates.has(key))walls.set(key,[x,y])}
- }
+ const cx=Math.round((cl.x0+cl.x1)/2),cy=Math.round((cl.y0+cl.y1)/2);
+ const inClaim=(x,y)=>x>=cl.x0&&x<=cl.x1&&y>=cl.y0&&y<=cl.y1;
+ // a tile the town holds: its own ground/buildings inside the claim (rock, water
+ // and the wilds beyond the claim are NOT held — the wall forms against them)
+ const held=(x,y)=>{ if(!inB(x,y)||!inClaim(x,y))return false; const i=idx(x,y);
+   return map[i]===0 || struct[i]===S_HOUSE || struct[i]===S_WALL || struct[i]===S_RUIN; };
+ let start=[cx,cy];
+ if(!held(cx,cy)){ const s=nearOpen(cx,cy); if(s&&inClaim(s[0],s[1]))start=s; else return {walls,gates}; }
+ const terr=new Set([start[0]+','+start[1]]), stack=[start];
+ while(stack.length){ const [x,y]=stack.pop();
+  for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ const nx=x+dx,ny=y+dy,k=nx+','+ny;
+   if(terr.has(k)||!held(nx,ny))continue; terr.add(k); stack.push([nx,ny]); } }
+ // flood the OUTSIDE (everything un-held reachable from the claim's rim) so that
+ // rock pockets sealed WITHIN the town don't each grow their own little wall — the
+ // rampart is only where the territory meets the open wilds
+ const bx0=cl.x0-1,by0=cl.y0-1,bx1=cl.x1+1,by1=cl.y1+1;
+ const outside=new Set(), os=[];
+ for(let x=bx0;x<=bx1;x++){ for(const y of [by0,by1]){const k=x+','+y; if(!terr.has(k)&&!outside.has(k)){outside.add(k);os.push([x,y]);}} }
+ for(let y=by0;y<=by1;y++){ for(const x of [bx0,bx1]){const k=x+','+y; if(!terr.has(k)&&!outside.has(k)){outside.add(k);os.push([x,y]);}} }
+ while(os.length){ const[x,y]=os.pop();
+  for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ const nx=x+dx,ny=y+dy; if(nx<bx0||ny<by0||nx>bx1||ny>by1)continue; const k=nx+','+ny;
+   if(outside.has(k)||terr.has(k))continue; outside.add(k); os.push([nx,ny]); } }
+ // boundary = held tiles that touch the OUTSIDE (the outer frontier only)
+ const bnd=[];
+ for(const k of terr){ const c=k.split(',');const x=+c[0],y=+c[1];
+  for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ if(outside.has((x+dx)+','+(y+dy))){ bnd.push([x,y]); break; } } }
+ if(!bnd.length)return {walls,gates};
+ // gates: the boundary tiles nearest the four cardinal extremes of the territory
+ const span=Math.max(cl.x1-cl.x0,cl.y1-cl.y0);
+ const nearestBnd=(fx,fy)=>{ let best=null,bd=1e18; for(const[x,y]of bnd){const d=(x-fx)*(x-fx)+(y-fy)*(y-fy);if(d<bd){bd=d;best=[x,y]}} return best; };
+ const bset=new Set(bnd.map(([x,y])=>x+','+y));
+ for(const[fx,fy]of[[cx,cy-span],[cx+span,cy],[cx,cy+span],[cx-span,cy]]){ const g=nearestBnd(fx,fy);
+  if(g){ gates.add(g[0]+','+g[1]);
+   // widen the gap by ONE along the boundary so folk can pass without a squeeze
+   for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const gk=(g[0]+dx)+','+(g[1]+dy);if(bset.has(gk)){gates.add(gk);break;}} } }
+ for(const[x,y]of bnd){ const key=x+','+y; if(!gates.has(key))walls.set(key,[x,y]); }
  return {walls,gates};
 }
 function claimCenter(c){return[Math.round((c.x0+c.x1)/2),Math.round((c.y0+c.y1)/2)]}
@@ -5490,7 +5557,7 @@ function detectVillages(){
     tale([],'The hedge-walls of '+v.name+' were planted anew, grander, to take in the growing town.');
    }
   }
-  for(const b of g){b.vid=v.id;for(const id of b.owners){const o=allById.get(id);if(o&&!o.dead)o.vid=v.id}}
+  for(const b of g){b.vid=v.id;for(const id of b.owners){const o=allById.get(id);if(o&&!o.dead){o.vid=v.id;o.founder=null;o.migrate=null;}}}
   live.push(v);
  }
  for(let i=villages.length-1;i>=0;i--)if(!live.includes(villages[i])){
@@ -5503,6 +5570,7 @@ function detectVillages(){
  }
 }
 function planVillage(v){
+ updateGovernance(v);
  v.jobs=v.jobs.filter(j=>{
   if(j.type==='wall')return walkable(j.x,j.y);
   if(j.type==='mine')return !walkable(j.x,j.y);
@@ -5613,11 +5681,29 @@ function planVillage(v){
    if(v.jobs.filter(j=>j.type==='pave').length>=10)break;
   }
  }
+ // --- guard duty: post watch at the gates. More monsters abroad (or nightfall)
+ //     calls up more of the watch. ---
+ if(v.gates && v.gates.size){
+  const threat=monsters.filter(m=>dist2(m.x,m.y,cx*TILE,cy*TILE)<((v.rad+16)*TILE)**2).length;
+  const wantGuards=clamp(1+(isNight()?1:0)+threat, 1, Math.min(3,v.gates.size));  // always a watch, more under threat
+  const posted=v.jobs.filter(j=>j.type==='guard').length + people.filter(p=>p.vid===v.id&&p.task&&p.task.k==='guard').length;
+  if(posted<wantGuards){
+   const gateList=[...v.gates].map(k=>k.split(',').map(Number));
+   for(const[gx,gy]of gateList){
+    if(v.jobs.filter(j=>j.type==='guard').length + posted >= wantGuards)break;
+    if(!walkable(gx,gy))continue;
+    if(v.jobs.some(j=>j.x===gx&&j.y===gy))continue;
+    v.jobs.push({type:'guard',x:gx,y:gy});
+   }
+  }
+ }
 }
 function villageTick(){
  detectVillages();
  for(const v of villages){
   if(simMin-v.lastPlan>rf(.4,.7)*DAY){v.lastPlan=simMin;planVillage(v)}
+  // the assembly meets every week or so to take the temperature of the town
+  if(simMin-(v.lastCouncil||0)>rf(8,12)*DAY){v.lastCouncil=simMin;holdCouncil(v)}
   if(v.stock.food>0){
    const pantries=v.homes.filter(b=>!b.gone&&!b.ruined&&b.stock);
    let guard=0;
@@ -5627,16 +5713,104 @@ function villageTick(){
   }
  }
 }
+
+/* ================= governance: leaders, votes, and schisms ================= */
+function villageMembers(v){ const out=[]; for(const p of people)if(!p.dead&&!p.inDungeon&&p.vid===v.id&&p.age>=16)out.push(p); return out; }
+// name the government after the leader's temperament
+function govStyle(leader){
+ if(!leader)return 'assembly';
+ if(leader.traits.includes('commanding'))return 'chiefdom';
+ if(leader.traits.includes('rebellious'))return 'commune';
+ if(leader.traits.includes('kind')||leader.traits.includes('charming'))return 'council';
+ if(leader.traits.includes('ambitious'))return 'dominion';
+ return 'assembly';
+}
+function updateGovernance(v){
+ const mem=villageMembers(v);
+ if(!mem.length){v.leader=null;return}
+ let best=mem[0],bl=-1e9,rival=null,rl=-1e9;
+ for(const p of mem){ const l=leadership(p);
+  if(l>bl){rival=best;rl=bl;best=p;bl=l;} else if(l>rl){rival=p;rl=l;} }
+ const prev=v.leader; v.leader=best.id; v.leadScore=bl;
+ v.rival=(rival&&rl>bl*0.72)?rival.id:null;      // a credible challenger waits in the wings
+ v.gov=govStyle(best);
+ if(prev&&prev!==best.id&&mem.length>=VILLAGE_MIN&&chance(.6))
+  tale([best],best.name+' now leads '+v.name+'; the '+v.gov+' turns to them.',true);
+}
+const ISSUES=[
+ {k:'expand',   say:'push the hedge-walls out for more room'},
+ {k:'fortify',  say:'raise the walls higher against the dark'},
+ {k:'farm',     say:'turn every free hand to the fields'},
+ {k:'festival', say:'down tools for a festival of the green'},
+ {k:'frontier', say:'send folk out to break new ground'},
+];
+// a town meeting: the members vote on an issue; a bruising, close vote breeds
+// unrest, and enough of it splits the town
+function holdCouncil(v){
+ const mem=villageMembers(v);
+ if(mem.length<VILLAGE_MIN)return;
+ updateGovernance(v);
+ const leader=allById.get(v.leader);
+ const issue=pick(ISSUES);
+ let aye=0,nay=0,dissenters=[];
+ for(const p of mem){
+  // loyalty to the leader vs a rebellious streak decides the vote
+  const rel=leader&&leader!==p?(p.rel[leader.id]?p.rel[leader.id].a:0):0;
+  let lean=(rel*0.02)+(p.traits.includes('loyal')?0.4:0)+(p.traits.includes('kind')?0.15:0)
+          -(p.traits.includes('rebellious')?0.55:0)-(p.traits.includes('stubborn')?0.2:0)-(p.traits.includes('grumpy')?0.15:0);
+  if(p===leader)lean+=1;
+  if(lean+rf(-0.4,0.4)>=0)aye++; else {nay++;dissenters.push(p);}
+ }
+ const dissentFrac=nay/mem.length;
+ v.unrest=clamp((v.unrest||0)*0.6 + dissentFrac*0.9 + (mem.length>v.homes.length*1.3?0.15:0) + (v.stock.food<mem.length?0.12:0), 0, 1.2);
+ if(dissentFrac>0.3&&chance(.7))
+  tale([leader],'The '+v.gov+' of '+v.name+' voted to '+issue.say+' — '+aye+' for, '+nay+' against. The losing side muttered into their tea.');
+ // a rival with a following peels off when the town can no longer hold together
+ if(v.unrest>0.8 && dissenters.length>=3){
+  const rl=dissenters.slice().sort((a,b)=>leadership(b)-leadership(a))[0];
+  if(rl&&leadership(rl)>0.45) schism(v,rl,dissenters);
+ }
+}
+// pick a founding site well away from the parent town and any other village
+function foundingSite(v){
+ for(let tries=0;tries<80;tries++){
+  const ang=R()*6.283, dist=(28+R()*20);
+  const tx=Math.round(v.cx+Math.cos(ang)*dist), ty=Math.round(v.cy+Math.sin(ang)*dist);
+  if(tx<4||ty<4||tx>=W-4||ty>=H-4)continue;
+  if(!walkable(tx,ty))continue;
+  if(villages.some(o=>dist2(o.cx,o.cy,tx,ty)<22*22))continue;
+  return [tx,ty];
+ }
+ return null;
+}
+function schism(v,leaderP,dissenters){
+ const site=foundingSite(v); if(!site)return;
+ // the breakaway faction: the firebrand, their close friends, and the disaffected
+ const band=new Set([leaderP]);
+ for(const d of dissenters)if(band.size<Math.max(3,(villageMembers(v).length/2)|0))band.add(d);
+ for(const[o,r] of knownRels(leaderP))if(r.a>=25&&o.vid===v.id&&band.size<8)band.add(o);
+ let n=0;
+ for(const p of band){
+  if(p.home&&!p.home.gone){ p.home.owners=p.home.owners.filter(id=>id!==p.id); p.home=null; }
+  p.vid=null; p.business=null; p.founder=leaderP.id; p.migrate=[site[0],site[1]]; p.task=null; p.path=null;
+  n++;
+ }
+ v.unrest=0.2; v.lastCouncil=simMin;
+ tale([leaderP],leaderP.name+' led '+n+' souls out of '+v.name+' after one vote too many — they mean to found a town of their own out past the wilds.',true);
+}
 function findVillageJob(p){
  const v=villages.find(vv=>vv.id===p.vid);
  if(!v||!v.jobs.length)return null;
- let harvest=null,hd=1e18,other=null,od=1e18;
+ const watchful=p.traits.includes('brave')||p.traits.includes('commanding')||p.traits.includes('ambitious');
+ let harvest=null,hd=1e18,other=null,od=1e18,guard=null,gd=1e18;
  for(const j of v.jobs){
   const d=dist2(p.x,p.y,j.x*TILE,j.y*TILE);
-  if(j.type==='harvest'){if(d<hd){hd=d;harvest=j}}
+  if(j.type==='guard'){ if(d<gd){gd=d;guard=j} }
+  else if(j.type==='harvest'){if(d<hd){hd=d;harvest=j}}
   else if(d<od){od=d;other=j}
  }
- const j=harvest||other;
+ // the bold rush to the watch; everyone else takes it only if nothing else calls
+ const j=(guard&&watchful)?guard:(harvest||other||guard);
  return j?{v,j}:null;
 }
 
@@ -7847,6 +8021,9 @@ return {
   tileState:(x,y)=>({map:map[idx(x,y)],struct:struct[idx(x,y)],rock:map[idx(x,y)]!==0&&struct[idx(x,y)]===S_ROCK}),
   carveAt:(x,y)=>{if(walkable(x,y))return false;carveFloor(x,y);return true},
   mineAt:(x,y,power)=>mineTile(x,y,power||999,{hero:true}),
+  governance:()=>villages.map(v=>{const l=allById.get(v.leader);return{name:v.name,gov:v.gov,leader:l?l.name:null,leadTraits:l?l.traits:null,members:villageMembers(v).length,unrest:+(v.unrest||0).toFixed(2),gates:v.gates?v.gates.size:0,wallDone:!!v.wallDone};}),
+  forceCouncil:()=>{for(const v of villages)holdCouncil(v);return villages.length},
+  forceSchism:()=>{for(const v of villages){const m=villageMembers(v);if(m.length>=6){const lead=allById.get(v.leader);const diss=m.filter(p=>p!==lead).sort((a,b)=>leadership(b)-leadership(a));if(diss.length>=3){schism(v,diss[0],diss);return v.name}}}return null},
   get heroStone(){return heroStone},
   get particleCount(){return particles.length},
   carvePatch:(x,y,r)=>{let n=0;for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const nx=x+dx,ny=y+dy;if(nx<1||ny<1||nx>=W-1||ny>=H-1)continue;const i=idx(nx,ny);if(map[i]!==0&&struct[i]===S_ROCK){carveFloor(nx,ny);n++}}return n},
