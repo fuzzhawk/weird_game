@@ -344,9 +344,24 @@ function makeFloraSpecies(seedBase){
   else if(tp==='herb'){ kind='berry';preset=pk(['wildflower','vine','bush']);cell=40;foodYield=rint(0,2);palette=pk(['meadow','duskViolet','forest']);suf=pk(PSUF_HERB); }
   else { kind='berry';preset='bush';cell=40;foodYield=rint(2,4);palette=pk(['meadow','forest']);suf=pk(PSUF_FOOD); }
   const boost=(!weed&&!wood&&(tp==='herb'||rng()<0.35))?{stat:pk(BOOST_STATS),v:+(0.15+rng()*0.4).toFixed(2)}:null;
-  const hueRot=((biome?biome.plantRot:0)+(rng()*70-35))%360;   // this world's cast + per-species jitter
+  // per-species SHAPE DNA — jitter every structural knob so no two rerolls grow
+  // alike; blooms and leaves pick wild forms to show off the generator
+  const shapeDNA={
+   height:rr(0.42,1.2), branchiness:rr(0,1), spread:rr(0.3,1.15), wobble:rr(0.05,0.95),
+   droop:rr(0,0.9), thickness:rint(1,4), leafDensity:rr(0.12,1.15), leafSize:rr(0.55,1.35),
+   leafShape:pk(['pointed','round','frond','heart','spike']),
+   bloomType:weed?pk(['none','berry','star']):pk(['daisy','bell','berry','cap','star','orb']),
+   sway:rr(0.05,1),
+  };
+  // colour: usually the world's own cast (with a wide jitter), but a good third of
+  // species go fully wild — a wacky hue and a hyper-saturated palette
+  const wildHue=rng()<0.32;
+  const hueRot=wildHue ? (rng()*360)|0 : (((biome?biome.plantRot:0)+(rng()*150-75))%360);
+  const palette2=rng()<0.38 ? pk(['neon','candy','inferno','ice','voidberry','acid','cavernGlow','duskViolet']) : palette;
   const bakeSet=(dead)=>{ const s=(rng()*1e9)|0;
-   const ov=dead?{palette:'autumn',bloomAmount:0.08,leafDensity:0.35,hueRot}:{palette,bloomAmount:weed?0.05:(boost?0.9:0.5),hueRot};
+   const ov=Object.assign({},shapeDNA, dead
+    ? {palette:'autumn',bloomAmount:0.06,leafDensity:shapeDNA.leafDensity*0.4,hueRot,bloomType:'none'}
+    : {palette:palette2,bloomAmount:weed?0.1:(boost?0.95:0.6),hueRot});
    return [0,1,2].map(st=>PF.bake(preset,ov,s+i*97,cell,(dead?0.5:0.55)+st*0.2)); };
   sps.push({ i, key:'sp'+i, name:cap(pk(PLANT_PRE))+suf, kind, preset, cell, palette,
    yield:foodYield, wood, weed, boost,
@@ -691,7 +706,7 @@ function genWorld(){
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
- AF.setWorld(biome.faunaShift);TF.setWorld(biome.relicRot);
+ AF.setWorld(biome.faunaShift);TF.setWorld(biome.relicRot,seed);relicIconCache.clear();
  bakeFlora('garden-'+seed);
  queueMonsterBakes();
  // cellular automata: open meadow carved out of the old bramble
@@ -1961,8 +1976,7 @@ function relicIcon(id,px){
 // build a fully generated relic (random look + a real payload) for the Tech Forge
 function forgeRelic(){
  const base=pick(RELICS);
- const preset=pick(TF.PRESET_KEYS),palette=pick(TF.PALETTE_KEYS);
- const params={...TF.PRESETS[preset],palette,size:32,grime:0.2+R()*0.4,seed:'relic-'+((R()*1e9)|0)};
+ const params=TF.randomParams(R);    // fully procedural: wild shape, greebles, palette & hue
  const iconBase=TF.bakeParams(params,32,0.5);
  return {g:base.g,n:base.n,k:base.k,v:base.v,d:base.d,id:base.id,skill:base.skill,
    treasure:base.treasure,heroStat:base.heroStat,_iconBase:iconBase,_params:params};
@@ -3521,6 +3535,21 @@ function draw(t){
    if(a1>0&&rockTiles[1]){ctx.globalAlpha=a1;ctx.drawImage(rockTiles[1][ci][vi],px,py);}
    if(a2>0&&rockTiles[2]){ctx.globalAlpha=a2;ctx.drawImage(rockTiles[2][ci][vi],px,py);}
    ctx.globalAlpha=1;
+   // mining cracks: a worked tile shows its damage so it's clear it is not yet
+   // broken (still solid) — bright fissures that branch and deepen toward shattering
+   const dm=rockDmg&&rockDmg[i]; if(dm>0){
+    const frac=clamp(dm/hardnessAt(x,y),0,1), gr=U.mulberry32(i*2654435761>>>0);
+    const nc=1+((frac*3)|0);
+    for(let pass=0;pass<2;pass++){
+     const g2=U.mulberry32(i*2654435761>>>0);   // same crack geometry, drawn twice
+     ctx.strokeStyle= pass===0 ? 'rgba(8,6,10,'+(0.5+frac*0.4)+')' : 'rgba(226,210,180,'+(0.5+frac*0.45)+')';
+     ctx.lineWidth= pass===0?2:1;
+     ctx.beginPath();
+     for(let cN=0;cN<nc;cN++){ let cxp=px+4+g2()*8, cyp=py+4+g2()*8; ctx.moveTo(cxp,cyp);
+      const segs=2+((frac*2)|0); for(let sN=0;sN<segs;sN++){cxp+=g2()*8-4;cyp+=g2()*8-4;ctx.lineTo(clamp(cxp,px+1,px+15),clamp(cyp,py+1,py+15));}}
+     ctx.stroke();
+    }
+   }
   }
  }
  // ---- water: calm, pre-baked ripple tiles in the world's own palette ----
@@ -3816,7 +3845,12 @@ function makeInterior(b){
   put(gw-2,gh-3,1,1,'hearth',1);
   put(dcx-1,gh-3,2,2,'rug',0);
  }
- const owners=(b.owners||[]).map(id=>allById.get(id)).filter(o=>o&&!o.dead&&o.sprite);
+ // continuity: only show occupants who are actually AT the house in the overworld
+ // (standing on/adjacent to its footprint — this is where they sleep), not those
+ // out working the fields, so the inside matches what you saw outside
+ const atHome=o=>{ const tx=(o.x/TILE)|0,ty=(o.y/TILE)|0;
+   return tx>=b.x-1&&tx<b.x+b.w+1&&ty>=b.y-1&&ty<b.y+b.h+1; };
+ const owners=(b.owners||[]).map(id=>allById.get(id)).filter(o=>o&&!o.dead&&o.sprite&&atHome(o));
  for(const o of owners.slice(0,3)){
   const s=freeSpotInt(intr,rng);
   intr.occupants.push({name:o.name,sprite:o.sprite,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,

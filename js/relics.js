@@ -15,8 +15,8 @@ function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;
   let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;
   return((t^t>>>14)>>>0)/4294967296;}}
 function hashStr(s){s=String(s);let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
-let worldRelicRot=0;                        // per-world hue rotation for relic neon
-function setWorld(h){ worldRelicRot=((h||0)%360+360)%360; }
+let worldRelicRot=0, worldSeed=1;           // per-world hue rotation + reroll seed
+function setWorld(h,seed){ worldRelicRot=((h||0)%360+360)%360; worldSeed=(seed>>>0)||1; }
 function rotHex(hex,deg){
   const n=parseInt(hex.slice(1),16), r=(n>>16)/255, g=((n>>8)&255)/255, b=(n&255)/255;
   const mx=Math.max(r,g,b), mn=Math.min(r,g,b), l=(mx+mn)/2, d=mx-mn; let h=0,s=0;
@@ -38,8 +38,15 @@ const PALETTES={
   cobalt:{metal:['#111a2e','#22385c','#3a5f92','#7aa6dc'], neon:'#3b83ff', neon2:'#bcd8ff'},
   ember: {metal:['#2c1410','#5a2a18','#8f4a26','#d18d5a'], neon:'#ff5a37', neon2:'#ffc4ad'},
   violet:{metal:['#1d1630','#352654','#5a4488','#9a86d6'], neon:'#9b5cff', neon2:'#d8c6ff'},
+  // ---- wacky, hyper-saturated finishes ----
+  plasma:{metal:['#2a0a2e','#5c1a5a','#a83a8a','#e87ac6'], neon:'#ff2ff0', neon2:'#c6ffff'},
+  slime: {metal:['#0a2a12','#1a5a24','#3aa83a','#8ae86a'], neon:'#5aff00', neon2:'#e0ffb0'},
+  candy: {metal:['#3a1030','#7a2a55','#c85a90','#ffb0d8'], neon:'#ff5aa8', neon2:'#fff0a8'},
+  voidk: {metal:['#08080f','#1a1830','#3a3466','#6a5ab0'], neon:'#7a3aff', neon2:'#4affe0'},
+  sun:   {metal:['#2e1a06','#6e451a','#c88a2a','#ffd86a'], neon:'#ffb000', neon2:'#fff6c6'},
 };
 const PAL_KEYS=Object.keys(PALETTES);
+const cl=(v,a,b)=>v<a?a:v>b?b:v;
 
 /* ---------- structural presets ---------- */
 // shape: box|round|diamond|oct|shard   core: none|orb|eye|screen|reactor|cross
@@ -59,9 +66,17 @@ const PRESET_KEYS=Object.keys(PRESETS);
 
 function defaults(){ return {...PRESETS.chip, palette:'chrome', size:32, grime:0.35, seed:'relic'}; }
 function randomParams(rng){
-  const preset=PRESET_KEYS[(rng()*PRESET_KEYS.length)|0];
-  return {...PRESETS[preset], palette:PAL_KEYS[(rng()*PAL_KEYS.length)|0],
-    size:32, grime:0.2+rng()*0.4, preset, seed:'relic-'+((rng()*1e9)|0)};
+  const pk=a=>a[(rng()*a.length)|0];
+  // fully procedural: every greeble rolled independently for maximum variety
+  return {
+    shape:pk(['box','round','diamond','oct','shard']),
+    w:5+((rng()*7)|0), h:5+((rng()*7)|0),
+    core:pk(['none','orb','eye','screen','reactor','cross']),
+    prongs:(rng()*4)|0, antenna:rng()<0.5, legs:pk([0,0,2,4,6]),
+    fins:rng()<0.5, blade:rng()<0.25, leds:1+((rng()*3)|0), screws:rng()<0.6,
+    palette:pk(PAL_KEYS), hueRot:(rng()*360)|0,
+    size:32, grime:0.15+rng()*0.4, preset:'random', seed:'relic-'+((rng()*1e9)|0),
+  };
 }
 
 /* ---------- hull mask ---------- */
@@ -86,7 +101,8 @@ function insideHull(dx,dy,shape,hw,hh){
 function renderRelic(ctx, P, cell, phase, seedNum){
   const rng=mulberry32((seedNum!==undefined?seedNum:hashStr(P.seed))>>>0 || 1);
   let pal=PALETTES[P.palette]||PALETTES.chrome;
-  if(worldRelicRot) pal={metal:pal.metal.map(c=>rotHex(c,worldRelicRot*0.4)),neon:rotHex(pal.neon,worldRelicRot),neon2:rotHex(pal.neon2,worldRelicRot)};
+  const rot=worldRelicRot+(P.hueRot||0);    // world cast + this relic's own wild hue
+  if(rot) pal={metal:pal.metal.map(c=>rotHex(c,rot*0.4)),neon:rotHex(pal.neon,rot),neon2:rotHex(pal.neon2,rot)};
   const cx=cell/2, cy=cell/2 + 1;
   const pulse=0.5+0.5*Math.sin((phase||0));
   const px=(x,y,c)=>{ x|=0; y|=0; if(x<0||y<0||x>=cell||y>=cell)return; ctx.fillStyle=c; ctx.fillRect(x,y,1,1); };
@@ -241,7 +257,22 @@ const CATALOG=[
     d:'a spare heart that never tires and occasionally coughs up ore'},
 ];
 const byId=Object.fromEntries(CATALOG.map(r=>[r.id,r]));
-function paramsFor(rel){ return {...PRESETS[rel.preset], palette:rel.palette, size:32, grime:0.3, seed:'relic-'+rel.id}; }
+// a catalog relic keeps its identity (glyph, payload, core), but each WORLD grows
+// it a little differently — jittered greebles, size, palette and a hue of its own —
+// so the same relic reads as freshly, wackily procedural on every reroll
+function paramsFor(rel){
+  const rng=mulberry32((hashStr(rel.id)^worldSeed^0xA17E5)>>>0||1);
+  const pk=a=>a[(rng()*a.length)|0], base=PRESETS[rel.preset];
+  return {
+    ...base,
+    shape: rng()<0.45?base.shape:pk(['box','round','diamond','oct','shard']),
+    w: cl(base.w+((rng()*5)|0)-2,5,12), h: cl(base.h+((rng()*5)|0)-2,5,12),
+    prongs:(rng()*4)|0, antenna:rng()<0.5, legs:pk([0,0,2,4,6]),
+    fins:rng()<0.5, blade:base.blade||rng()<0.2, leds:1+((rng()*3)|0), screws:rng()<0.6,
+    palette: rng()<0.42?pk(PAL_KEYS):rel.palette, hueRot:(rng()*360)|0,
+    size:32, grime:0.15+rng()*0.4, seed:'relic-'+rel.id+'-'+worldSeed,
+  };
+}
 function bakeCatalog(id, cell, phase){ const rel=byId[id]||CATALOG[0]; return bakeParams(paramsFor(rel), cell||32, phase||0); }
 
 return {PALETTES, PALETTE_KEYS:PAL_KEYS, PRESETS, PRESET_KEYS, CATALOG, byId,
