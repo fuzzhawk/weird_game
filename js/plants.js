@@ -34,6 +34,25 @@ const PALETTES={
   duskViolet:{stem:['#3a2f4a','#4d3f66','#5f5180'],
     leaf:['#5a4a8a','#7a63b8','#9c86d6','#c8b8f0'],
     blooms:[['#f2d0ff','#b86bd9'],['#ffd166','#c97b1e']],glow:'rgba(200,160,255,0.18)'},
+  // ---- wacky, hyper-saturated palettes to flaunt the procedural generation ----
+  neon:{stem:['#0b3d2e','#12715a','#19b38a'],
+    leaf:['#00ffa8','#3dffd6','#88fff0','#d8fffb'],
+    blooms:[['#ff2fd0','#a800ff'],['#00e5ff','#0077ff'],['#faff00','#ff8a00']],glow:'rgba(80,255,200,0.24)'},
+  candy:{stem:['#7a3b5a','#a8517d','#d072a0'],
+    leaf:['#ff9ecb','#ffc3e1','#ffe0f0','#ffffff'],
+    blooms:[['#fff27a','#ff5aa8'],['#8affff','#3aa0ff'],['#c6ff8a','#5ad0ff']]},
+  inferno:{stem:['#3a1208','#6e260f','#a8431a'],
+    leaf:['#ff6a00','#ff9d2f','#ffd05a','#fff0b0'],
+    blooms:[['#fff36a','#ff3a00'],['#ff9d2f','#c92f00']],glow:'rgba(255,120,40,0.22)'},
+  ice:{stem:['#1d3a4a','#2f5f78','#4a8fae'],
+    leaf:['#bfeaff','#e0f6ff','#ffffff','#a8d8ff'],
+    blooms:[['#e0faff','#7ac6ff'],['#c6b8ff','#8a6bff']],glow:'rgba(180,230,255,0.22)'},
+  voidberry:{stem:['#241432','#3d2456','#5a3a86'],
+    leaf:['#b26bff','#d0a0ff','#ecd8ff','#ffffff'],
+    blooms:[['#ff5ad0','#7a00ff'],['#5affd0','#00a8ff']],glow:'rgba(180,120,255,0.22)'},
+  acid:{stem:['#2a3a06','#516e0f','#7fa81a'],
+    leaf:['#c6ff00','#e4ff5a','#f4ffb0','#ffffff'],
+    blooms:[['#faff00','#00ff6a'],['#00ffd0','#00a8ff']],glow:'rgba(180,255,40,0.22)'},
 };
 
 const PRESETS={
@@ -324,6 +343,17 @@ function drawBloom(ctx,X,Y,sz,type,cols,cell,ph){
     }
     ctx.fillStyle=cols[1];
     ctx.fillRect((X-R+1)|0,(Y-2)|0,R*2-1,1);
+  }else if(type==='star'){
+    const R=Math.max(2,Math.round(sz*3.4*k));
+    for(let i=0;i<5;i++){ const a=ph+i*Math.PI*2/5, ca=Math.cos(a), sa=Math.sin(a);
+      for(let s=0;s<=R;s++){ const w=Math.round((1-s/R)*1.6);
+        for(let o=-w;o<=w;o++) px(ctx,X+ca*s-sa*o,Y+sa*s+ca*o, s>R*0.55?cols[0]:cols[1]); } }
+    ctx.fillStyle=cols[1]; ctx.fillRect((X-1)|0,(Y-1)|0,2,2);
+  }else if(type==='orb'){
+    const R=Math.max(1,Math.round(sz*2.6*k));
+    for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){ if(dx*dx+dy*dy>R*R+R*0.5)continue;
+      ctx.fillStyle=(dx+dy<-R*0.35)?cols[1]:cols[0]; ctx.fillRect((X+dx)|0,(Y+dy)|0,1,1); }
+    px(ctx,X-Math.max(1,R*0.3),Y-Math.max(1,R*0.3),'#ffffff');
   }
 }
 
