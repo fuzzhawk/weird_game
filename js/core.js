@@ -64,7 +64,7 @@ const U = (function(){
    garden and every Understory floor.                          */
 const Hero = {
   hp:5, maxHp:5,
-  level:1, xp:0, kills:0,
+  level:1, xp:0, kills:0, renown:0,          // dreams the Sage has helped realize
   dmg:1, rangeMul:1, arcMul:1, speedMul:1,
   cleansed:0,                                    // dungeons put to rest
   relics:[],                                     // tech-relic ids installed (skills that persist)

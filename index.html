@@ -104,6 +104,16 @@ button:active{transform:translateY(1px)}
 #sDialogName{color:#8fe0a0;font-size:12px;letter-spacing:2px;margin-bottom:6px;text-transform:uppercase}
 #sDialogText{font-family:Georgia,serif;font-size:15px;line-height:1.55;min-height:3.2em}
 #sDialogNext{text-align:right;color:#7a967a;font-size:11px;margin-top:6px;letter-spacing:1px}
+#sDialogChoice{display:none;gap:10px;margin-top:10px}
+#sDialogChoice button{flex:1;padding:11px 8px;font-size:13px;letter-spacing:.5px;border-radius:10px;border:2px solid #3fae54;background:#1a3524;color:#cfe8cf}
+#sDialogChoice #qDecline{border-color:#5a6b52;background:#20281b;color:#9db095}
+#questBtn{position:relative}
+#questBtn .qbadge{position:absolute;top:-5px;right:-5px;background:#e8c065;color:#1a2410;border-radius:9px;font-size:9px;font-weight:700;padding:0 4px;line-height:14px;min-width:14px;text-align:center}
+#questList .q{padding:9px 0;border-bottom:1px dashed #26331f}
+#questList .q .qt{color:#e8c065;font-weight:600;font-size:13.5px}
+#questList .q .qd{color:#cfc6b8;font-family:Georgia,serif;font-size:12.5px;line-height:1.45;margin-top:2px}
+#questList .q .qp{color:#8fa885;font-size:11px;font-family:system-ui;margin-top:3px}
+#questList .none{color:#8fa885;opacity:.7;padding:14px 0;font-family:Georgia,serif}
 
 /* ================= DUNGEON (the Understory) ================= */
 #cvD{position:fixed;inset:0;width:100vw;height:100vh;touch-action:none}
@@ -234,6 +244,7 @@ button:active{transform:translateY(1px)}
       <button data-s="0">⏸</button><button data-s="1" class="on">1×</button><button data-s="2">16×</button><button data-s="3">500×</button>
     </div>
     <button id="logBtn">📜</button>
+    <button id="questBtn">✦<span class="qbadge hidden" id="qbadge">0</span></button>
     <button id="edBtn">🛠</button>
     <button id="newBtn">↻</button>
   </div>
@@ -262,6 +273,11 @@ button:active{transform:translateY(1px)}
     <div id="logList" class="plist"></div>
   </div>
 
+  <div id="questPanel" class="panel hidden">
+    <div class="phead"><b>✦ Dreams in your keeping</b><div class="pbtns"><button id="questClose">✕</button></div></div>
+    <div id="questList" class="plist"></div>
+  </div>
+
   <div id="charPanel" class="panel hidden">
     <div class="phead">
       <canvas id="pcv" width="64" height="64"></canvas>
@@ -288,6 +304,10 @@ button:active{transform:translateY(1px)}
     <div id="sDialogName"></div>
     <div id="sDialogText"></div>
     <div id="sDialogNext">tap to continue ▸</div>
+    <div id="sDialogChoice">
+      <button id="qAccept">✦ I will help</button>
+      <button id="qDecline">Not now</button>
+    </div>
   </div>
 </div>
 
