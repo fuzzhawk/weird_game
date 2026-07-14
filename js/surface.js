@@ -716,7 +716,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];Hero.renown=0;chron=[];usedNames=new Set();graveBlooms=[];
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];trackedQuest=null;Hero.renown=0;chron=[];usedNames=new Set();graveBlooms=[];
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -1813,6 +1813,34 @@ function completeGoal(p){
 // ask for a concrete favour toward that dream. Accepted favours become quests.
 const QUEST_COOLDOWN=6*DAY;   // per-person gap between asks
 let questDirty=false;
+let trackedQuest=null;        // id of the quest the Sage is currently guided toward
+function trackedQuestObj(){return trackedQuest?quests.find(q=>q.id===trackedQuest):null}
+function ensureTracked(){
+ if(trackedQuest&&!quests.some(q=>q.id===trackedQuest))trackedQuest=null;
+ if(!trackedQuest&&quests.length)trackedQuest=quests[quests.length-1].id;
+}
+function trackQuest(id){ if(quests.some(q=>q.id===id))trackedQuest=id; questDirty=true; renderQuests(); }
+function nearestRockPx(x,y){
+ let best=null,bd=1e18;
+ for(const n of nodes){if(n.t!=='rock'||n.amt<=0)continue;const cx=n.x*TILE+TILE/2,cy=n.y*TILE+TILE/2;const d=dist2(x,y,cx,cy);if(d<bd){bd=d;best=[cx,cy]}}
+ if(best)return best;
+ const hx=(x/TILE)|0,hy=(y/TILE)|0;
+ for(let r=1;r<40;r++)for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
+  if(Math.max(Math.abs(dx),Math.abs(dy))!==r)continue;
+  const tx=hx+dx,ty=hy+dy;if(tx<0||ty<0||tx>=W||ty>=H)continue;
+  if(mineable(tx,ty))return[tx*TILE+TILE/2,ty*TILE+TILE/2];
+ }
+ return null;
+}
+// where the Sage should head to advance a quest (pixel coords), or null
+function questObjective(q){
+ if(!q)return null;
+ if(q.kind==='waypoint'&&q.mark)return[q.mark[0]*TILE+TILE/2,q.mark[1]*TILE+TILE/2];
+ if(q.kind==='courier'){const tgt=allById.get(q.targetId);return tgt&&!tgt.dead?[tgt.x,tgt.y]:null}
+ if(q.kind==='slay'){const m=monsters.length?nearestMonster(hero,0):null;return m?[m.x,m.y]:null}
+ if(q.kind==='gather')return nearestRockPx(hero.x,hero.y);
+ return null;
+}
 function questGiverEligible(p){
  return !!(p&&!p.dead&&!p.inDungeon&&p.age>=16&&p.goal&&!p.goal.done&&!p.questId&&simMin-(p.lastQuest||0)>QUEST_COOLDOWN);
 }
@@ -1859,6 +1887,7 @@ function acceptQuest(q){
  q.accepted=simMin;
  if(q.kind==='gather')q.base=heroStone;
  quests.push(q);
+ trackedQuest=q.id;   // guide toward the freshly-taken dream
  const g=allById.get(q.giver);
  if(g){g.questId=q.id;g.lastQuest=simMin;emote(g,'✦')}
  toast('✦ Dream taken up: '+q.title,'card');
@@ -1930,15 +1959,18 @@ function finishQuest(q){
  if(selected&&!selected.dead)renderPanelLive(selected);
 }
 function renderQuests(){
+ ensureTracked();
  const badge=$('qbadge');
  if(badge){badge.textContent=quests.length;badge.classList.toggle('hidden',quests.length===0)}
  const list=$('questList');if(!list)return;
  list.innerHTML='';
  if(!quests.length){const d=document.createElement('div');d.className='none';d.textContent='No dreams in your keeping just now. Talk to the folk of the garden — some will ask for help.';list.appendChild(d);return}
  for(const q of quests){
-  const row=document.createElement('div');row.className='q';
+  const row=document.createElement('div');row.className='q'+(q.id===trackedQuest?' tracked':'');
   const prog=q.kind==='gather'?(' — '+Math.min(q.progress,q.need)+'/'+q.need+' stone'):q.kind==='slay'?(' — '+(q.progress>=q.need?'done':'0/1')):'';
-  row.innerHTML='<div class="qt">✦ '+q.title+'</div><div class="qd">'+q.desc+'</div><div class="qp">for '+(q.giverName||'—')+prog+'</div>';
+  const tag=q.id===trackedQuest?'<span class="qtrack">◎ guiding</span>':'';
+  row.innerHTML='<div class="qt">✦ '+q.title+tag+'</div><div class="qd">'+q.desc+'</div><div class="qp">for '+(q.giverName||'—')+prog+'</div>';
+  row.onclick=()=>{trackedQuest=q.id;renderQuests();toast('◎ Guiding you to: '+q.title)};
   list.appendChild(row);
  }
 }
@@ -4127,6 +4159,34 @@ function draw(t){
   ctx.fillStyle='rgba(240,205,110,'+(0.7+pulse*0.3)+')';
   ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText('✦',qx,qy-14-pulse*4);
  }
+ // guide the Sage toward the tracked objective: a flowing dotted trail, a
+ // directional arrow near the hero, and a ring at the goal
+ {
+  const tq=trackedQuestObj(),obj=tq?questObjective(tq):null;
+  if(obj){
+   const hx=hero.x,hy=hero.y,ox=obj[0],oy=obj[1];
+   const dx=ox-hx,dy=oy-hy,L=Math.hypot(dx,dy)||1;
+   if(L>TILE*0.9){
+    const ux=dx/L,uy=dy/L,ang=Math.atan2(uy,ux);
+    ctx.save();
+    ctx.strokeStyle='rgba(240,205,110,0.55)';ctx.lineWidth=2;ctx.lineCap='round';
+    ctx.setLineDash([2,8]);ctx.lineDashOffset=(t*0.05)%10;   // flow toward the goal
+    ctx.beginPath();ctx.moveTo(hx+ux*20,hy+uy*20);ctx.lineTo(ox-ux*8,oy-uy*8);ctx.stroke();
+    ctx.setLineDash([]);
+    // arrowhead a short step ahead of the Sage — always on-screen
+    const pulse=0.5+0.5*Math.sin(t*0.01);
+    ctx.translate(hx+ux*(26+pulse*3),hy+uy*(26+pulse*3));ctx.rotate(ang);
+    ctx.fillStyle='rgba(245,215,120,0.92)';
+    ctx.beginPath();ctx.moveTo(8,0);ctx.lineTo(-4,-5.5);ctx.lineTo(-4,5.5);ctx.closePath();ctx.fill();
+    ctx.restore();
+    // a soft ring pulsing at the objective itself
+    ctx.save();
+    ctx.strokeStyle='rgba(245,215,120,'+(0.35+pulse*0.4)+')';ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(ox,oy,7+pulse*4,0,7);ctx.stroke();
+    ctx.restore();
+   }
+  }
+ }
  for(const m of monsters){
   if(m.x/TILE<vx0-2||m.x/TILE>vx1+2||m.y/TILE<vy0-2||m.y/TILE>vy1+2)continue;
   drawMonster(ctx,m,t);
@@ -5527,7 +5587,11 @@ return {
   camps:()=>camps.map(c=>{const mem=campMembers(c);const l=mem.find(m=>m.id===c.leader);return{name:c.name,x:c.tx,y:c.ty,members:mem.length,leader:l?l.name:null,raiding:mem.some(m=>m.raid),age:+((simMin-c.founded)/DAY).toFixed(1)};}),
   forceCamp:()=>{const free=monsters.filter(m=>!m.camp);if(free.length<1)return null;const camp=foundCamp(free[0]);if(!camp)return null;for(const m of free.slice(1,4))joinCamp(m,camp);return camp.name},
   get renown(){return Hero.renown||0},
-  quests:()=>quests.map(q=>({title:q.title,kind:q.kind,goal:q.goal,giver:q.giverName,target:q.targetName||null,progress:q.progress,need:q.need,mark:q.mark||null})),
+  quests:()=>quests.map(q=>({id:q.id,title:q.title,kind:q.kind,goal:q.goal,giver:q.giverName,target:q.targetName||null,progress:q.progress,need:q.need,mark:q.mark||null,tracked:q.id===trackedQuest})),
+  get tracked(){return trackedQuest},
+  trackQuest:(id)=>{trackQuest(id);return trackedQuest},
+  trackIndex:(i)=>{if(quests[i]){trackQuest(quests[i].id);return quests[i].title}return null},
+  objective:()=>{const q=trackedQuestObj();const o=q?questObjective(q):null;return o?{tx:(o[0]/TILE)|0,ty:(o[1]/TILE)|0,kind:q.kind}:null},
   offerQuest:(name)=>{const p=name?people.find(x=>!x.dead&&x.name===name):people.find(questGiverEligible);if(!p)return null;if(p.age>=16&&(!p.goal||p.goal.done)){p.goal=pickGoal(p)}p.lastQuest=0;p.questId=null;const q=buildQuest(p);if(!q)return null;acceptQuest(q);return {title:q.title,kind:q.kind,giver:q.giverName,target:q.targetName||null,mark:q.mark||null};},
   completeQuestNow:()=>{if(!quests.length)return null;const q=quests[0];if(q.kind==='gather')heroStone=q.base+q.need;else if(q.kind==='slay')q.progress=q.need;else if(q.mark){hero.x=q.mark[0]*TILE+TILE/2;hero.y=q.mark[1]*TILE+TILE/2}const before=Hero.renown||0;updateQuests(0.1);return {renown:Hero.renown||0,advanced:(Hero.renown||0)>before,title:q.title};},
   get heroStone(){return heroStone},
