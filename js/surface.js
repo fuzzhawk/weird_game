@@ -716,7 +716,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];trackedQuest=null;Hero.renown=0;chron=[];usedNames=new Set();graveBlooms=[];
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -1270,6 +1270,7 @@ function nearestBiz(p){
  return best;
 }
 function socialize(p){
+ if(chance(.5)&&specialSocial(p))return;   // a richer act than a plain chat?
  let cand=null;
  const bel=p.courting||((p.partner&&chance(.5))?p.partner:null);
  if(bel){const o=allById.get(bel);if(o&&!o.dead&&!o.sleeping)cand=o}
@@ -1485,6 +1486,29 @@ function doTask(p,dt){
     if(t.h>=14){
      interact(p,o);
      p.socialN=0;o.socialN=Math.max(0,o.socialN-45);
+     p.task=null;
+    }
+   }
+   break;
+  }
+  case 'gift': case 'console': case 'mentor': case 'rival':{
+   // walk to the other soul, then resolve the particular act
+   const o=t.o;
+   if(!o||o.dead||(o.sleeping&&!t.arr)||o.inDungeon){p.task=null;break}
+   if(!t.arr){
+    if(!p.path||simMin-t.rp>25){t.rp=simMin;if(!goTo(p,(o.x/TILE)|0,(o.y/TILE)|0)){p.task=null;break}}
+    moveAlong(p,dt);
+    if(dist2(p.x,p.y,o.x,o.y)<(TILE*1.6)**2){t.arr=true;p.path=null;p.moving=false;p.fx=o.x>p.x?1:-1;o.fx=p.x>o.x?1:-1;o.chatHold=simMin+16;emote(p,{gift:'🎁',console:'🫂',mentor:'📖',rival:'😤'}[t.k])}
+    else if(simMin-t.t0>220){p.task=null}
+   }else{
+    t.h=(t.h||0)+dt;
+    if(chance(dt*0.03))emote(p,'💬');
+    if(t.h>=(t.k==='mentor'?16:10)){
+     if(t.k==='gift')giveGift(p,o);
+     else if(t.k==='console')doConsole(p,o);
+     else if(t.k==='mentor')doMentor(p,o);
+     else doRival(p,o);
+     p.socialN=Math.max(0,p.socialN-40);
      p.task=null;
     }
    }
@@ -1744,6 +1768,7 @@ function interact(p,o){
  }
  else d=rf(-1,2.5);
  applyAff(p,o,d);applyAff(o,p,d*rf(.7,1.1));
+ if(chance(.5))interactGossip(p,o);   // and a little talk about who-did-what travels
  if(p.courting===o.id&&o.courting===p.id){
   r.cN++;ro.cN++;
   applyAff(p,o,rf(4,9));applyAff(o,p,rf(4,9));
@@ -1776,6 +1801,106 @@ function becomePartners(p,o){
   tale([mover],mover.name+' moved in with '+(keep===p.home?p.name:o.name)+'.');
  }else if(ph&&!oh)setHome(o,p.home);
  else if(oh&&!ph)setHome(p,o.home);
+}
+/* ================= richer NPC↔NPC interactions ================= */
+// five ways the folk of the garden reach for one another beyond a plain chat:
+// gifts, gossip, mentorship, consolation, and rivalry.
+const socialLog={gift:0,gossip:0,mentor:0,console:0,rival:0};
+// a third soul both p and o know, that p holds a strong opinion of
+function gossipTarget(p,o){
+ const cands=[];
+ for(const id in p.rel){
+  const r=p.rel[id];if(!r.met||Math.abs(r.a)<20)continue;
+  const third=allById.get(+id);
+  if(!third||third.dead||third===o||third===p)continue;
+  if(!o.rel[id]||!o.rel[id].met)continue;   // gossip only lands about someone o has met
+  cands.push(third);
+ }
+ return cands.length?pick(cands):null;
+}
+// word about a third party rubs off — reputations travel the hedgerows
+function interactGossip(p,o){
+ const third=gossipTarget(p,o);
+ if(!third)return false;
+ const src=relOf(p,third);
+ const drift=clamp(src.a*0.12,-6,6)+rf(-1,1);
+ applyAff(o,third,drift);
+ socialLog.gossip++;
+ if(Math.abs(src.a)>40&&chance(.25))tale([p,o],p.name+(src.a>0?' spoke warmly of ':' had little good to say of ')+third.name+', and '+o.name+' took it to heart.');
+ return true;
+}
+function giveGift(p,o){
+ let g=null;
+ if(p.inv.food>=5){p.inv.food-=3;o.inv.food+=3;g='ripe thoughtfruit'}
+ else if(p.inv.wood>=6){p.inv.wood-=3;o.inv.wood+=3;g='good cane-wood'}
+ else if(p.inv.stone>=6){p.inv.stone-=3;o.inv.stone+=3;g='sound stone'}
+ applyAff(p,o,rf(5,10));applyAff(o,p,rf(8,15));
+ buff(o,'social',.15,4,'gift');emote(o,'💗');
+ socialLog.gift++;
+ if(g&&chance(.5))tale([p,o],p.name+' brought '+o.name+' a gift of '+g+'. '+pick(['A kindness remembered.','Small gifts, deep roots.','The bees approved.']));
+}
+function doConsole(p,o){
+ o.gloomUntil=o.gloomUntil>simMin?Math.max(simMin,o.gloomUntil-rf(3,6)*DAY):o.gloomUntil;
+ if(o.gloomUntil<=simMin)o.gloomUntil=0;
+ buff(o,'social',.2,4,'comforted');
+ applyAff(p,o,rf(4,9));applyAff(o,p,rf(8,16));
+ emote(o,'🫂');
+ socialLog.console++;
+ if(chance(.5))tale([p,o],p.name+' sat a long while with '+o.name+', who was heartsore, and the weight of it lifted a little.');
+}
+function doMentor(p,o){
+ const skill=pick(['work','charm','luck']);
+ buff(o,skill,.2,8,'mentored');
+ applyAff(p,o,rf(4,8));applyAff(o,p,rf(5,10));
+ Mind.mingle(o.mind,p.mind);
+ emote(o,'📖');
+ socialLog.mentor++;
+ if(chance(.5))tale([p,o],pick([p.name+' taught '+o.name+' the old way of '+pick(['reading soil by smell','coaxing shy seeds','mending a trellis','listening to bees','naming the winds'])+'.',o.name+' learned much sitting at '+p.name+"'s side."]));
+}
+function doRival(p,o){
+ const r=relOf(p,o),ro=relOf(o,p);
+ r.rival=true;ro.rival=true;
+ buff(p,'work',.2,6,'rivalry');buff(o,'work',.2,6,'rivalry');   // competition spurs both harder
+ applyAff(p,o,rf(-3,1));applyAff(o,p,rf(-3,1));
+ emote(p,'😤');
+ socialLog.rival++;
+ if(chance(.4))tale([p,o],pick([p.name+' and '+o.name+' traded barbs, each set on out-doing the other.',p.name+' measured every row against '+o.name+"'s, and dug the harder for it.",o.name+' and '+p.name+' are locked in a quiet rivalry the whole garden can feel.']));
+}
+// find the best target person for a social act; pred returns a score or null
+function bestSocial(p,pred){
+ let best=null,bs=-1e18;
+ for(const o of people){
+  if(o===p||o.dead||o.sleeping||o.inDungeon)continue;
+  const s=pred(o);if(s==null)continue;
+  if(s>bs){bs=s;best=o}
+ }
+ return best;
+}
+// try a richer act than a plain chat; returns true if one was set as the task
+function specialSocial(p){
+ const adult=p.age>=16;
+ // GIFT — the generous share surplus with someone they hold dear
+ if(adult&&(p.traits.includes('kind')||p.traits.includes('loyal')||p.traits.includes('cheerful'))
+    &&(p.inv.food>=5||p.inv.wood>=6||p.inv.stone>=6)&&chance(.55)){
+  const o=bestSocial(p,o=>{const r=p.rel[o.id];return(o.age>=6&&r&&r.a>=25)?r.a-Math.sqrt(dist2(p.x,p.y,o.x,o.y))/TILE:null});
+  if(o){setTask(p,'gift',{o,rp:0});return true}
+ }
+ // CONSOLE — comfort a heartsore friend
+ if(adult&&(p.traits.includes('kind')||p.traits.includes('loyal')||p.traits.includes('passionate'))&&chance(.6)){
+  const o=bestSocial(p,o=>{const r=p.rel[o.id];return(o.gloomUntil>simMin&&r&&r.a>=12)?r.a:null});
+  if(o){setTask(p,'console',{o,rp:0});return true}
+ }
+ // MENTOR — elders pass their craft to the young
+ if(p.age>=46&&(p.traits.includes('hardworking')||p.traits.includes('creative')||p.traits.includes('ambitious')||mod(p,'work')>0.12)&&chance(.5)){
+  const o=bestSocial(p,o=>{const st=stageOf(o);return(st==='kid'||st==='youth')?60-Math.sqrt(dist2(p.x,p.y,o.x,o.y))/TILE:null});
+  if(o){setTask(p,'mentor',{o,rp:0});return true}
+ }
+ // RIVAL — the ambitious seek out those they measure themselves against
+ if(adult&&(p.traits.includes('ambitious')||p.traits.includes('jealous'))&&chance(.4)){
+  const o=bestSocial(p,o=>{if(o.age<16)return null;const r=p.rel[o.id];const rivalrous=o.traits.includes('ambitious')||o.traits.includes('jealous');return((r&&r.rival)||(rivalrous&&(!r||r.a<22)))?100-Math.sqrt(dist2(p.x,p.y,o.x,o.y))/TILE:null});
+  if(o){setTask(p,'rival',{o,rp:0});return true}
+ }
+ return false;
 }
 function wed(p,o){
  p.married=true;o.married=true;p.wedSoon=false;o.wedSoon=false;
@@ -5177,6 +5302,10 @@ function taskLabel(p){
   case 'gohome':return p.task.why==='sleep'?'heading home to rest':p.task.why==='eat'?'heading home to eat':'hauling goods home';
   case 'build':return 'building a '+(p.task.b?(p.task.b.tp==='biz'?'shop':p.task.b.tp):'structure');
   case 'chat':return p.courting===(p.task.o&&p.task.o.id)?'courting '+p.task.o.name:'talking with '+(p.task.o?p.task.o.name:'someone');
+  case 'gift':return '🎁 bringing '+(p.task.o?p.task.o.name:'someone')+' a gift';
+  case 'console':return '🫂 comforting '+(p.task.o?p.task.o.name:'someone');
+  case 'mentor':return '📖 teaching '+(p.task.o?p.task.o.name:'a youngster');
+  case 'rival':return '😤 sizing up '+(p.task.o?p.task.o.name:'a rival');
   case 'visit':return 'visiting '+(p.task.b?p.task.b.name:'a shop');
   case 'togodungeon':return 'mustering to brave '+(p.task.d?p.task.d.name:'an Understory');
   case 'fight':return '⚔ fighting a '+(p.task.m?p.task.m.name:'monster');
@@ -5592,6 +5721,21 @@ return {
   trackQuest:(id)=>{trackQuest(id);return trackedQuest},
   trackIndex:(i)=>{if(quests[i]){trackQuest(quests[i].id);return quests[i].title}return null},
   objective:()=>{const q=trackedQuestObj();const o=q?questObjective(q):null;return o?{tx:(o[0]/TILE)|0,ty:(o[1]/TILE)|0,kind:q.kind}:null},
+  socialStats:()=>Object.assign({},socialLog),
+  forceSocialAct:(kind)=>{
+   const a=people.filter(x=>!x.dead&&!x.inDungeon);
+   if(a.length<2)return null;
+   let p=a.find(x=>x.age>=16)||a[0];
+   let o=a.find(x=>x!==p&&x.age>=6);if(!o)return null;
+   relOf(p,o).met=true;relOf(o,p).met=true;relOf(p,o).a=40;relOf(o,p).a=40;
+   if(kind==='gift'){p.inv.food=8;giveGift(p,o)}
+   else if(kind==='console'){o.gloomUntil=simMin+6*DAY;doConsole(p,o)}
+   else if(kind==='mentor'){o=a.find(x=>x!==p&&(stageOf(x)==='kid'||stageOf(x)==='youth'))||o;relOf(p,o).met=true;doMentor(p,o)}
+   else if(kind==='rival'){doRival(p,o)}
+   else if(kind==='gossip'){const third=a.find(x=>x!==p&&x!==o);if(!third)return null;relOf(p,third).met=true;relOf(p,third).a=70;relOf(o,third).met=true;interactGossip(p,o)}
+   else return null;
+   return {p:p.name,o:o.name,stats:Object.assign({},socialLog)};
+  },
   offerQuest:(name)=>{const p=name?people.find(x=>!x.dead&&x.name===name):people.find(questGiverEligible);if(!p)return null;if(p.age>=16&&(!p.goal||p.goal.done)){p.goal=pickGoal(p)}p.lastQuest=0;p.questId=null;const q=buildQuest(p);if(!q)return null;acceptQuest(q);return {title:q.title,kind:q.kind,giver:q.giverName,target:q.targetName||null,mark:q.mark||null};},
   completeQuestNow:()=>{if(!quests.length)return null;const q=quests[0];if(q.kind==='gather')heroStone=q.base+q.need;else if(q.kind==='slay')q.progress=q.need;else if(q.mark){hero.x=q.mark[0]*TILE+TILE/2;hero.y=q.mark[1]*TILE+TILE/2}const before=Hero.renown||0;updateQuests(0.1);return {renown:Hero.renown||0,advanced:(Hero.renown||0)>before,title:q.title};},
   get heroStone(){return heroStone},
