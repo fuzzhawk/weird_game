@@ -3267,7 +3267,7 @@ function voronoiElev(seedN){
 // summed at halving amplitude → rolling highlands and lowlands across the world
 function fbmElev(seedN){
  const out=new Float32Array(W*H);
- const octaves=[{G:4,a:1},{G:8,a:0.4},{G:16,a:0.15},{G:32,a:0.06}];   // low-freq weighted → big smooth blobs
+ const octaves=[{G:6,a:1},{G:12,a:0.42},{G:24,a:0.16},{G:40,a:0.07}];   // tighter → more, smaller blobs
  let tot=0;
  for(const oc of octaves){
   const G=oc.G, gr=new Float32Array((G+1)*(G+1)), rng=U.mulberry32(((seedN>>>0)^((G*2654435761)>>>0))>>>0);
@@ -6375,6 +6375,7 @@ let decorList=null,solidCornerIdx=null;
 // corners × a few variants), blitted from the LIVE map so a cleared tile shows
 // the ground beneath at once. silDirty triggers a silhouette recompute.
 let rockTiles=null, rockNub=[[],[],[]], silDirty=false, silBuf=null, lastSil=0;
+let rockRGB=null;   // per-era-layer sampled interior colours for flat blob-centre fill
 let crackCv=null, crackCtx=null;   // scratch tile for clipping mining cracks to the rock shape
 const ROCK_VARIANTS=3, SIL_THROTTLE=120;   // ms between silhouette recomputes
 let urbanBaked=null,villageStamp='';
@@ -6619,6 +6620,18 @@ function bakeRockTiles(){
   for(let ci=0;ci<16;ci++){ rockTiles[k][ci]=[]; for(let v=0;v<ROCK_VARIANTS;v++)rockTiles[k][ci].push(bakeRockTile(ci,v,pals,style)); }
   for(let v=0;v<ROCK_VARIANTS;v++)rockNub[k].push(bakeRockNub(v,pals,style));
  }
+ // sample a solid interior tile from each era layer → flat fill colours for the
+ // blob centres, so large chunks fill with a couple of rects instead of one blit
+ // per tile (blended live by the urban tide at render time)
+ rockRGB=[];
+ try{
+  for(let k=0;k<3;k++){
+   const full=rockTiles[k][15][0];
+   const sc=document.createElement('canvas');sc.width=sc.height=TILE;const sg=sc.getContext('2d');
+   sg.drawImage(full,0,0);const px=sg.getImageData((TILE/2)|0,(TILE/2)|0,1,1).data;
+   rockRGB[k]=[px[0],px[1],px[2]];
+  }
+ }catch(e){ rockRGB=[[90,90,98],[80,80,84],[70,68,74]]; }
 }
 // (re)compute the rock silhouette autotile index from the live map. Reuses a
 // persistent buffer to avoid per-frame garbage. The per-tile reveal is instant
@@ -7005,37 +7018,63 @@ function draw(t){
  // the map every frame, a tile an NPC clears reveals the soil beneath instantly.
  if(rockTiles){
   if(silDirty&&performance.now()-lastSil>SIL_THROTTLE)computeSilhouette();
-  for(let y=vy0;y<=vy1;y++)for(let x=vx0;x<=vx1;x++){
-   const i=idx(x,y);
-   if(map[i]===0||struct[i]!==S_ROCK)continue;
-   const ci=solidCornerIdx[i], vi=(x*7+y*13)%ROCK_VARIANTS, px=x*TILE,py=y*TILE;
-   // lone tiles (corner index 0) autotile to nothing → fall back to a boulder so
-   // the terrain never vanishes while it is still solid
-   const iso=ci===0;
-   const tile0=iso?rockNub[0][vi]:rockTiles[0][ci][vi];
-   ctx.drawImage(tile0,px,py);
-   const u=urbanAt(i), a1=clamp(u*2,0,1), a2=clamp((u-0.5)*2,0,1);
-   if(a1>0&&rockTiles[1]){ctx.globalAlpha=a1;ctx.drawImage(iso?rockNub[1][vi]:rockTiles[1][ci][vi],px,py);}
-   if(a2>0&&rockTiles[2]){ctx.globalAlpha=a2;ctx.drawImage(iso?rockNub[2][vi]:rockTiles[2][ci][vi],px,py);}
-   ctx.globalAlpha=1;
-   // hard highland reads darker & denser than the weak upland (shape-correct multiply)
-   if(terTier&&terTier[i]===2){const pop=ctx.globalCompositeOperation;ctx.globalCompositeOperation='multiply';ctx.globalAlpha=0.55;ctx.drawImage(tile0,px,py);ctx.globalAlpha=1;ctx.globalCompositeOperation=pop;}
-   // mining cracks: a subtle fissure that deepens toward shattering, clipped to the
-   // rock's own shape (via a scratch tile) so it never hangs over the edge
-   const dm=rockDmg&&rockDmg[i]; if(dm>0){
-    const frac=clamp(dm/hardnessAt(x,y),0,1);
-    if(!crackCv){crackCv=document.createElement('canvas');crackCv.width=crackCv.height=TILE;crackCtx=crackCv.getContext('2d');}
-    const cc=crackCtx, g2=U.mulberry32(i*2654435761>>>0), nc=1+((frac*2.2)|0);
-    cc.clearRect(0,0,TILE,TILE);
-    cc.strokeStyle='rgba(20,16,22,'+(0.22+frac*0.33)+')'; cc.lineWidth=1;
-    cc.beginPath();
-    for(let cN=0;cN<nc;cN++){ let ax=5+g2()*6, ay=5+g2()*6; cc.moveTo(ax,ay);
-     const segs=1+((frac*2)|0); for(let sN=0;sN<segs;sN++){ax=clamp(ax+g2()*6-3,2,14);ay=clamp(ay+g2()*6-3,2,14);cc.lineTo(ax,ay);}}
-    cc.stroke();
-    cc.globalCompositeOperation='destination-in'; cc.drawImage(tile0,0,0);   // keep cracks only on rock
-    cc.globalCompositeOperation='source-over';
-    ctx.drawImage(crackCv,px,py);
+  // per-frame interior fill palette: layer-0 rock blended toward the urban layers by
+  // the age's tide, bucketed (7 steps) so the smooth field still batches into runs
+  const fillW=[],fillH=[];
+  if(rockRGB){ for(let bk=0;bk<=6;bk++){ const uu=bk/6, a1=clamp(uu*2,0,1), a2=clamp((uu-0.5)*2,0,1);
+   let r=rockRGB[0][0]+(rockRGB[1][0]-rockRGB[0][0])*a1, g=rockRGB[0][1]+(rockRGB[1][1]-rockRGB[0][1])*a1, b2=rockRGB[0][2]+(rockRGB[1][2]-rockRGB[0][2])*a1;
+   r+= (rockRGB[2][0]-r)*a2; g+=(rockRGB[2][1]-g)*a2; b2+=(rockRGB[2][2]-b2)*a2;
+   fillW[bk]='rgb('+(r|0)+','+(g|0)+','+(b2|0)+')'; fillH[bk]='rgb('+((r*0.55)|0)+','+((g*0.55)|0)+','+((b2*0.55)|0)+')';
+  } }
+  // Only the EDGE tiles of a blob get per-tile autotile detail; the fully-solid
+  // interior (corner index 15) is filled as batched horizontal rects — a couple of
+  // fillRects per row instead of one blit per tile, so big chunks stay cheap.
+  for(let y=vy0;y<=vy1;y++){
+   let runX=-1, runTier=-1, runBk=-1;
+   const flushRun=(endX)=>{ if(runX<0)return; ctx.fillStyle=(runTier===2?fillH:fillW)[runBk]||(runTier===2?'#2f2f36':'#5a5a62'); ctx.fillRect(runX*TILE,y*TILE,(endX-runX)*TILE,TILE); runX=-1; };
+   for(let x=vx0;x<=vx1;x++){
+    const i=idx(x,y);
+    if(map[i]===0||struct[i]!==S_ROCK){ flushRun(x); continue; }
+    const ci=solidCornerIdx[i];
+    const dm=rockDmg&&rockDmg[i];
+    const u=urbanAt(i);
+    const tier=terTier?terTier[i]:1;
+    // fast interior fill: a full solid tile, undamaged — flat-filled in the era's tint
+    if(ci===15 && !dm){
+     const bk=clamp((u*6+0.5)|0,0,6);
+     if(runX>=0 && (runTier!==tier||runBk!==bk))flushRun(x);
+     if(runX<0){runX=x;runTier=tier;runBk=bk;}
+     continue;
+    }
+    flushRun(x);
+    // ---- detailed edge (or damaged / urbanising) tile ----
+    const vi=(x*7+y*13)%ROCK_VARIANTS, px=x*TILE,py=y*TILE, iso=ci===0;
+    const tile0=iso?rockNub[0][vi]:rockTiles[0][ci][vi];
+    ctx.drawImage(tile0,px,py);
+    const a1=clamp(u*2,0,1), a2=clamp((u-0.5)*2,0,1);
+    if(a1>0&&rockTiles[1]){ctx.globalAlpha=a1;ctx.drawImage(iso?rockNub[1][vi]:rockTiles[1][ci][vi],px,py);}
+    if(a2>0&&rockTiles[2]){ctx.globalAlpha=a2;ctx.drawImage(iso?rockNub[2][vi]:rockTiles[2][ci][vi],px,py);}
+    ctx.globalAlpha=1;
+    // hard highland reads darker & denser than the weak upland (shape-correct multiply)
+    if(tier===2){const pop=ctx.globalCompositeOperation;ctx.globalCompositeOperation='multiply';ctx.globalAlpha=0.55;ctx.drawImage(tile0,px,py);ctx.globalAlpha=1;ctx.globalCompositeOperation=pop;}
+    // mining cracks: a subtle fissure that deepens toward shattering, clipped to the
+    // rock's own shape (via a scratch tile) so it never hangs over the edge
+    if(dm>0){
+     const frac=clamp(dm/hardnessAt(x,y),0,1);
+     if(!crackCv){crackCv=document.createElement('canvas');crackCv.width=crackCv.height=TILE;crackCtx=crackCv.getContext('2d');}
+     const cc=crackCtx, g2=U.mulberry32(i*2654435761>>>0), nc=1+((frac*2.2)|0);
+     cc.clearRect(0,0,TILE,TILE);
+     cc.strokeStyle='rgba(20,16,22,'+(0.22+frac*0.33)+')'; cc.lineWidth=1;
+     cc.beginPath();
+     for(let cN=0;cN<nc;cN++){ let ax=5+g2()*6, ay=5+g2()*6; cc.moveTo(ax,ay);
+      const segs=1+((frac*2)|0); for(let sN=0;sN<segs;sN++){ax=clamp(ax+g2()*6-3,2,14);ay=clamp(ay+g2()*6-3,2,14);cc.lineTo(ax,ay);}}
+     cc.stroke();
+     cc.globalCompositeOperation='destination-in'; cc.drawImage(tile0,0,0);   // keep cracks only on rock
+     cc.globalCompositeOperation='source-over';
+     ctx.drawImage(crackCv,px,py);
+    }
    }
+   flushRun(vx1+1);
   }
  }
  // ---- water: calm, pre-baked ripple tiles in the world's own palette ----
