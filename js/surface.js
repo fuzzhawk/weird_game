@@ -26,7 +26,7 @@ const SZ={shelter:[1,1],home:[2,2],biz:[2,2],grave:[1,1]};
 const RUIN_DELAY=6*DAY,CRUMBLE_DELAY=10*DAY;
 // graves settle, then the ground gives them back as flowers: the stone sinks and
 // blooms take over, the tile is freed, and the turned earth is left richer.
-const GRAVE_LIFE=16*DAY, GRAVE_BLOOM_GROW=4*DAY;
+const GRAVE_LIFE=16*DAY, GRAVE_BLOOM_GROW=4*DAY, GRAVE_BLOOM_LIFE=30*DAY, GRAVE_BLOOM_FADE=6*DAY;
 let graveBlooms=[];
 const VILLAGE_MIN=4;
 const WALL_STONE=0;
@@ -41,6 +41,7 @@ const MONSTERS={
 
 /* ================= state ================= */
 let map,bld,nodeAt,nodes,openTiles,openChunks;
+let terTier=null;          // 0 open · 1 weak upland · 2 hard highland (destroyable-terrain tiers)
 let struct,farmGrid,farmTimer;
 let farmTiles=new Set();
 let region,regionsDirty=true;
@@ -82,7 +83,7 @@ const HERO_SPEED=132, HERO_RANGE=56, HERO_ARC=Math.PI*0.85;
 /* ================= terrain editing ================= */
 function markMod(i){modTiles.add(i);terrainDirty=true;regionsDirty=true;silDirty=true}
 function setSolid(x,y,type){const i=idx(x,y);map[i]=1;struct[i]=type;farmGrid[i]=0;pavedTiles.delete(i);markMod(i)}
-function carveFloor(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_FLOOR;markMod(i)}
+function carveFloor(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_FLOOR;if(terTier)terTier[i]=0;markMod(i)}
 function revertTile(x,y){const i=idx(x,y);map[i]=0;struct[i]=S_ROCK;farmGrid[i]=0;pavedTiles.delete(i);markMod(i)}
 function computeRegions(){
  if(!region)region=new Int32Array(W*H);
@@ -447,9 +448,45 @@ function voronoiElev(seedN){
  }
  return e;
 }
+// fractal value-noise (perlin-style fBm): several octaves of smooth lattice noise
+// summed at halving amplitude → rolling highlands and lowlands across the world
+function fbmElev(seedN){
+ const out=new Float32Array(W*H);
+ const octaves=[{G:4,a:1},{G:8,a:0.5},{G:16,a:0.27},{G:32,a:0.14}];
+ let tot=0;
+ for(const oc of octaves){
+  const G=oc.G, gr=new Float32Array((G+1)*(G+1)), rng=U.mulberry32(((seedN>>>0)^((G*2654435761)>>>0))>>>0);
+  for(let i=0;i<gr.length;i++)gr[i]=rng();
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+   const gx=x/W*G, gy=y/H*G, x0=gx|0, y0=gy|0, fx=gx-x0, fy=gy-y0;
+   const a=gr[y0*(G+1)+x0],b=gr[y0*(G+1)+x0+1],c=gr[(y0+1)*(G+1)+x0],d=gr[(y0+1)*(G+1)+x0+1];
+   const sx=fx*fx*(3-2*fx), sy=fy*fy*(3-2*fy);
+   out[idx(x,y)]+=oc.a*((a+(b-a)*sx)*(1-sy)+(c+(d-c)*sx)*sy);
+  }
+  tot+=oc.a;
+ }
+ let mn=1e9,mx=-1e9;
+ for(let i=0;i<W*H;i++){out[i]/=tot; if(out[i]<mn)mn=out[i]; if(out[i]>mx)mx=out[i];}
+ const sp=(mx-mn)||1;
+ for(let i=0;i<W*H;i++)out[i]=(out[i]-mn)/sp;
+ return out;
+}
+// the world's elevation: perlin fBm, then a gentle radial bowl so lowlands gather
+// in the middle (room to settle) and the destroyable highlands ring the edges
+function genElevation(){
+ elevF=fbmElev(seed*2+1);
+ const cx=W/2, cy=H/2, R0=Math.hypot(cx,cy)||1;
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const rr=Math.hypot(x-cx,y-cy)/R0;                 // 0 centre .. 1 corner
+  elevF[idx(x,y)]=elevF[idx(x,y)]*0.72 + rr*rr*0.5;
+ }
+ let mn=1e9,mx=-1e9; for(let i=0;i<W*H;i++){if(elevF[i]<mn)mn=elevF[i];if(elevF[i]>mx)mx=elevF[i];}
+ const sp=(mx-mn)||1; for(let i=0;i<W*H;i++)elevF[i]=(elevF[i]-mn)/sp;
+ return elevF;
+}
 function genFertility(){
  fert=new Float32Array(W*H);
- elevF=voronoiElev(seed*2+1); const elev=elevF, moist=valNoise(seed*7+3);
+ if(!elevF)elevF=fbmElev(seed*2+1); const elev=elevF, moist=valNoise(seed*7+3);
  for(let i=0;i<W*H;i++){
   // damp lowland loam is richest; dry uplands are poorer
   fert[i]=clamp(0.24 + moist[i]*0.52 + (1-elev[i])*0.30 - 0.12, 0, 1);
@@ -722,23 +759,24 @@ function genWorld(){
  AF.setWorld(biome.faunaShift);TF.setWorld(biome.relicRot,seed);relicIconCache.clear();
  bakeFlora('garden-'+seed);
  queueMonsterBakes();
- // cellular automata: open meadow carved out of the old bramble
+ // terrain from elevation: the highest ground is HARD highland, the medium-high
+ // ring around it is WEAKER upland, and everything lower is the open valley.
+ genElevation();
+ terTier=new Uint8Array(W*H);
+ const sorted=Float32Array.from(elevF).sort();
+ const weakT=sorted[(W*H*0.60)|0], hardT=sorted[(W*H*0.82)|0];   // ~40% solid: 22% weak, 18% hard
  let g=new Uint8Array(W*H);
- for(let y=0;y<H;y++)for(let x=0;x<W;x++)g[idx(x,y)]=(x<2||y<2||x>=W-2||y>=H-2)?1:(R()<0.46?1:0);
- for(let it=0;it<5;it++){
-  const n2=new Uint8Array(W*H);
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-   let n=0;
-   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
-    if(!dx&&!dy)continue;
-    const nx=x+dx,ny=y+dy;
-    if(nx<0||ny<0||nx>=W||ny>=H||g[idx(nx,ny)])n++;
-   }
-   n2[idx(x,y)]=(x<2||y<2||x>=W-2||y>=H-2)?1:(n>=5?1:(n<=3?0:g[idx(x,y)]));
-  }
-  g=n2;
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const i=idx(x,y), border=(x<2||y<2||x>=W-2||y>=H-2), e=elevF[i];
+  let tier= (border||e>=hardT)?2 : (e>=weakT)?1 : 0;
+  terTier[i]=tier; g[i]=tier>0?1:0;
  }
- // keep largest region
+ // one majority pass to declutter the contour edges
+ { const g2=g.slice();
+   for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const i=idx(x,y),n=g[i-1]+g[i+1]+g[i-W]+g[i+W];
+    if(g[i]&&n<=1){g2[i]=0;terTier[i]=0} else if(!g[i]&&n>=3){g2[i]=1;if(terTier[i]===0)terTier[i]=1}}
+   g=g2; }
+ // keep largest open region so the valley is one connected space
  const reg=new Int32Array(W*H).fill(-1);let best=-1,bestN=0,rid=0;
  const q=new Int32Array(W*H);
  for(let i=0;i<W*H;i++){
@@ -754,9 +792,9 @@ function genWorld(){
   if(n>bestN){bestN=n;best=rid}
   rid++;
  }
- for(let i=0;i<W*H;i++){if(!g[i]&&reg[i]!==best)g[i]=1}
+ for(let i=0;i<W*H;i++){ if(!g[i]&&reg[i]!==best){g[i]=1;if(terTier[i]===0)terTier[i]=1} if(!g[i])terTier[i]=0; }
  map=g;
- genFertility();        // Voronoi elevation + hydraulic erosion → the soil-fertility field
+ genFertility();        // fBm elevation + hydraulic erosion → the soil-fertility field
  if(WATER_ON){ genHydrology(); initWeather(); }   // lakes/streams/weather (muted for now)
  else { water=null; waterMax=null; wetUntil=null; clouds=[]; }
  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(!map[idx(x,y)]&&!(water&&water[idx(x,y)]))openTiles.push([x,y]);
@@ -1650,7 +1688,8 @@ function removeNode(nd){
 /* ================= mining: break the terrain, find what's inside ================= */
 // how much punishment a rock tile takes before it shatters — the high, deep
 // ground is tougher (and hides richer finds)
-function hardnessAt(x,y){ return 26 + (elevF?elevF[idx(x,y)]:0.5)*46; }
+// two destroyable tiers: the weak upland gives way quickly, the hard highland resists
+function hardnessAt(x,y){ const t=terTier?terTier[idx(x,y)]:1; return t===2?54:22; }
 function rockColor(){ const r=(terPals&&terPals[0])?terPals[0].rock.base:[104,104,116]; return 'rgb('+r[0]+','+r[1]+','+r[2]+')'; }
 function mineable(x,y){
  const i=idx(x,y);
@@ -3443,6 +3482,19 @@ function upkeepTick(){
    if(!b.ancient&&simMin-b.emptySince>CRUMBLE_DELAY)crumbleBuilding(b);   // ancient ruins persist
   }
  }
+ // old roads & walls, left untended, slowly return to ruin. A wall or lane close to
+ // a living village is maintained; out past the last tended plot, time wins.
+ {
+  const tended=(x,y)=>villages.some(v=>villageMembers(v).length>0 && dist2(x,y,v.cx,v.cy)<((v.rad+4)*(v.rad+4)));
+  for(let i=0;i<W*H;i++){
+   const s=struct[i];
+   if(s===S_WALL&&bld[i]<0){ if(chance(0.006)&&!tended(i%W,(i/W)|0)){struct[i]=S_RUIN;markMod(i)} }
+   else if(s===S_RUIN&&bld[i]<0){ if(chance(0.004)){const x=i%W,y=(i/W)|0;if(!tended(x,y))carveFloor(x,y)} }   // rubble finally clears
+  }
+  if(pavedTiles.size)for(const i of [...pavedTiles]){ if(chance(0.004)){const x=i%W,y=(i/W)|0;if(!tended(x,y)){pavedTiles.delete(i);markMod(i)}} }
+ }
+ // grave-flowers are not forever: after a few years the wild patch fades back to grass
+ for(let i=graveBlooms.length-1;i>=0;i--)if(simMin-graveBlooms[i].born>GRAVE_BLOOM_LIFE)graveBlooms.splice(i,1);
 }
 function ripenAll(dt){
  if(!farmTiles.size)return;
@@ -3646,9 +3698,11 @@ function repaintDynAll(){
 // soil quality colours the open ground: rich earth reads deep and green, poor
 // ground pales toward dry tan — so the fertility field is legible in the texture.
 const FERT_LUSH=[34,84,38], FERT_POOR=[156,146,110];
+// only two ground textures now: VERDANT where the soil is fertile, BARREN where it
+// is poor. Each still takes the incoming palette colour, so it keeps recolouring
+// with the age-cycle and the world's own hue — just snapped into two clear looks.
 function fertTint(col,f){
- if(f>=0.5)return TileGen.mix(col,FERT_LUSH,(f-0.5)*0.7);
- return TileGen.mix(col,FERT_POOR,(0.5-f)*0.6);
+ return f>=0.46 ? TileGen.mix(col,FERT_LUSH,0.34) : TileGen.mix(col,FERT_POOR,0.46);
 }
 function paintCellTextureTo(c,x,y,solidMask,pals,style){
  const img=c.createImageData(TILE,TILE),data=img.data;
@@ -4153,6 +4207,8 @@ function draw(t){
    if(a1>0&&rockTiles[1]){ctx.globalAlpha=a1;ctx.drawImage(iso?rockNub[1][vi]:rockTiles[1][ci][vi],px,py);}
    if(a2>0&&rockTiles[2]){ctx.globalAlpha=a2;ctx.drawImage(iso?rockNub[2][vi]:rockTiles[2][ci][vi],px,py);}
    ctx.globalAlpha=1;
+   // hard highland reads darker & denser than the weak upland (shape-correct multiply)
+   if(terTier&&terTier[i]===2){const pop=ctx.globalCompositeOperation;ctx.globalCompositeOperation='multiply';ctx.globalAlpha=0.55;ctx.drawImage(tile0,px,py);ctx.globalAlpha=1;ctx.globalCompositeOperation=pop;}
    // mining cracks: a subtle fissure that deepens toward shattering, clipped to the
    // rock's own shape (via a scratch tile) so it never hangs over the edge
    const dm=rockDmg&&rockDmg[i]; if(dm>0){
@@ -4226,14 +4282,19 @@ function draw(t){
   const BC=['#e8e8f0','#e6c14a','#d76a9a','#b48ad6','#7fc7e6','#f0a0c0'];
   for(const gb of graveBlooms){
    if(gb.x<vx0||gb.x>vx1||gb.y<vy0||gb.y>vy1)continue;
-   const grow=clamp((simMin-gb.born)/GRAVE_BLOOM_GROW,0,1), sc=0.4+grow*0.6;
+   const age=simMin-gb.born;
+   const fade=clamp((GRAVE_BLOOM_LIFE-age)/GRAVE_BLOOM_FADE,0,1);   // wilts back to grass at the end
+   if(fade<=0)continue;
+   const grow=clamp(age/GRAVE_BLOOM_GROW,0,1), sc=(0.4+grow*0.6)*(0.55+fade*0.45);
    const gr=U.mulberry32(gb.seed||1), cx=gb.x*TILE+TILE/2, cy=gb.y*TILE+TILE-2;
    const n=5+((gr()*4)|0);
+   ctx.globalAlpha=fade;
    for(let f=0;f<n;f++){
     const fx=cx+(gr()*2-1)*6, fy=cy+(gr()*2-1)*4, h=(2.5+gr()*3)*sc;
     ctx.strokeStyle='#3f6a38';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(fx,fy);ctx.lineTo(fx,fy-h);ctx.stroke();
     ctx.fillStyle=BC[(gr()*BC.length)|0];ctx.beginPath();ctx.arc(fx,fy-h,1.5*sc+0.4,0,7);ctx.fill();
    }
+   ctx.globalAlpha=1;
   }
  }
  for(const n of nodes){
@@ -5734,6 +5795,7 @@ return {
   trackIndex:(i)=>{if(quests[i]){trackQuest(quests[i].id);return quests[i].title}return null},
   objective:()=>{const q=trackedQuestObj();const o=q?questObjective(q):null;return o?{tx:(o[0]/TILE)|0,ty:(o[1]/TILE)|0,kind:q.kind}:null},
   socialStats:()=>Object.assign({},socialLog),
+  terrain:()=>{ if(!terTier)return null; let open=0,weak=0,hard=0,lush=0,barren=0; for(let i=0;i<W*H;i++){ if(map[i]===0){open++; if(fert&&fert[i]>=0.46)lush++; else barren++;} else if(terTier[i]===2)hard++; else weak++;} let emn=1,emx=0; if(elevF)for(let i=0;i<W*H;i++){if(elevF[i]<emn)emn=elevF[i];if(elevF[i]>emx)emx=elevF[i];} return {W,H,open,weak,hard,lush,barren,solidPct:+((weak+hard)/(W*H)*100).toFixed(1),elevMin:+emn.toFixed(3),elevMax:+emx.toFixed(3),blooms:graveBlooms.length}; },
   forceSocialAct:(kind)=>{
    const a=people.filter(x=>!x.dead&&!x.inDungeon);
    if(a.length<2)return null;
