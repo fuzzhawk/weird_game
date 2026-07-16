@@ -4211,12 +4211,15 @@ function draw(t){
    r+= (rockRGB[2][0]-r)*a2; g+=(rockRGB[2][1]-g)*a2; b2+=(rockRGB[2][2]-b2)*a2;
    fillW[bk]='rgb('+(r|0)+','+(g|0)+','+(b2|0)+')'; fillH[bk]='rgb('+((r*0.55)|0)+','+((g*0.55)|0)+','+((b2*0.55)|0)+')';
   } }
-  // Only the EDGE tiles of a blob get per-tile autotile detail; the fully-solid
-  // interior (corner index 15) is filled as batched horizontal rects — a couple of
-  // fillRects per row instead of one blit per tile, so big chunks stay cheap.
+  // Only the deep, same-tier interior (corner index 15, no neighbouring tier change)
+  // is filled as batched horizontal rects; every EDGE — blob rim AND the seam where
+  // a hard black core meets its weak grey ring — gets the per-tile autotile detail.
+  // A small outward bleed (interior tiles never touch open ground) overlaps the rects
+  // so the terrain reads as one solid surface with no sub-pixel grid lines.
+  const B=clamp(1/z,0.4,2);
   for(let y=vy0;y<=vy1;y++){
    let runX=-1, runTier=-1, runBk=-1;
-   const flushRun=(endX)=>{ if(runX<0)return; ctx.fillStyle=(runTier===2?fillH:fillW)[runBk]||(runTier===2?'#2f2f36':'#5a5a62'); ctx.fillRect(runX*TILE,y*TILE,(endX-runX)*TILE,TILE); runX=-1; };
+   const flushRun=(endX)=>{ if(runX<0)return; ctx.fillStyle=(runTier===2?fillH:fillW)[runBk]||(runTier===2?'#2f2f36':'#5a5a62'); ctx.fillRect(runX*TILE-B,y*TILE-B,(endX-runX)*TILE+2*B,TILE+2*B); runX=-1; };
    for(let x=vx0;x<=vx1;x++){
     const i=idx(x,y);
     if(map[i]===0||struct[i]!==S_ROCK){ flushRun(x); continue; }
@@ -4224,24 +4227,26 @@ function draw(t){
     const dm=rockDmg&&rockDmg[i];
     const u=urbanAt(i);
     const tier=terTier?terTier[i]:1;
-    // fast interior fill: a full solid tile, undamaged — flat-filled in the era's tint
-    if(ci===15 && !dm){
+    // uniform-tier deep interior only: a tier boundary keeps its detailed edge
+    const uniform = !terTier || (x>0&&x<W-1&&y>0&&y<H-1 && terTier[i-1]===tier && terTier[i+1]===tier && terTier[i-W]===tier && terTier[i+W]===tier);
+    if(ci===15 && !dm && uniform){
      const bk=clamp((u*6+0.5)|0,0,6);
      if(runX>=0 && (runTier!==tier||runBk!==bk))flushRun(x);
      if(runX<0){runX=x;runTier=tier;runBk=bk;}
      continue;
     }
     flushRun(x);
-    // ---- detailed edge (or damaged / urbanising) tile ----
+    // ---- detailed edge (rim / tier seam / damaged / urbanising) tile ----
     const vi=(x*7+y*13)%ROCK_VARIANTS, px=x*TILE,py=y*TILE, iso=ci===0;
+    const W2=TILE+2*B;
     const tile0=iso?rockNub[0][vi]:rockTiles[0][ci][vi];
-    ctx.drawImage(tile0,px,py);
+    ctx.drawImage(tile0,px-B,py-B,W2,W2);
     const a1=clamp(u*2,0,1), a2=clamp((u-0.5)*2,0,1);
-    if(a1>0&&rockTiles[1]){ctx.globalAlpha=a1;ctx.drawImage(iso?rockNub[1][vi]:rockTiles[1][ci][vi],px,py);}
-    if(a2>0&&rockTiles[2]){ctx.globalAlpha=a2;ctx.drawImage(iso?rockNub[2][vi]:rockTiles[2][ci][vi],px,py);}
+    if(a1>0&&rockTiles[1]){ctx.globalAlpha=a1;ctx.drawImage(iso?rockNub[1][vi]:rockTiles[1][ci][vi],px-B,py-B,W2,W2);}
+    if(a2>0&&rockTiles[2]){ctx.globalAlpha=a2;ctx.drawImage(iso?rockNub[2][vi]:rockTiles[2][ci][vi],px-B,py-B,W2,W2);}
     ctx.globalAlpha=1;
     // hard highland reads darker & denser than the weak upland (shape-correct multiply)
-    if(tier===2){const pop=ctx.globalCompositeOperation;ctx.globalCompositeOperation='multiply';ctx.globalAlpha=0.55;ctx.drawImage(tile0,px,py);ctx.globalAlpha=1;ctx.globalCompositeOperation=pop;}
+    if(tier===2){const pop=ctx.globalCompositeOperation;ctx.globalCompositeOperation='multiply';ctx.globalAlpha=0.55;ctx.drawImage(tile0,px-B,py-B,W2,W2);ctx.globalAlpha=1;ctx.globalCompositeOperation=pop;}
     // mining cracks: a subtle fissure that deepens toward shattering, clipped to the
     // rock's own shape (via a scratch tile) so it never hangs over the edge
     if(dm>0){
