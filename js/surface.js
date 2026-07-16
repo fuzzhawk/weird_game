@@ -215,7 +215,6 @@ function drawCard(p,occasion){
  p.cards.push({i:ci,d:cday()});
  emote(p,'🎴');
  tale([p],'🎴 '+(occasion||'The garden stirred, and')+' dealt '+p.name+' '+c.n+'. '+c.line,!!c.major);
- toast(c.g+' '+c.n+' — '+p.name,'card');
  c.fx(p);
 }
 
@@ -4284,34 +4283,6 @@ function draw(t){
   ctx.fillStyle='rgba(240,205,110,'+(0.7+pulse*0.3)+')';
   ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText('✦',qx,qy-14-pulse*4);
  }
- // guide the Sage toward the tracked objective: a flowing dotted trail, a
- // directional arrow near the hero, and a ring at the goal
- {
-  const tq=trackedQuestObj(),obj=tq?questObjective(tq):null;
-  if(obj){
-   const hx=hero.x,hy=hero.y,ox=obj[0],oy=obj[1];
-   const dx=ox-hx,dy=oy-hy,L=Math.hypot(dx,dy)||1;
-   if(L>TILE*0.9){
-    const ux=dx/L,uy=dy/L,ang=Math.atan2(uy,ux);
-    ctx.save();
-    ctx.strokeStyle='rgba(240,205,110,0.55)';ctx.lineWidth=2;ctx.lineCap='round';
-    ctx.setLineDash([2,8]);ctx.lineDashOffset=(t*0.05)%10;   // flow toward the goal
-    ctx.beginPath();ctx.moveTo(hx+ux*20,hy+uy*20);ctx.lineTo(ox-ux*8,oy-uy*8);ctx.stroke();
-    ctx.setLineDash([]);
-    // arrowhead a short step ahead of the Sage — always on-screen
-    const pulse=0.5+0.5*Math.sin(t*0.01);
-    ctx.translate(hx+ux*(26+pulse*3),hy+uy*(26+pulse*3));ctx.rotate(ang);
-    ctx.fillStyle='rgba(245,215,120,0.92)';
-    ctx.beginPath();ctx.moveTo(8,0);ctx.lineTo(-4,-5.5);ctx.lineTo(-4,5.5);ctx.closePath();ctx.fill();
-    ctx.restore();
-    // a soft ring pulsing at the objective itself
-    ctx.save();
-    ctx.strokeStyle='rgba(245,215,120,'+(0.35+pulse*0.4)+')';ctx.lineWidth=2;
-    ctx.beginPath();ctx.arc(ox,oy,7+pulse*4,0,7);ctx.stroke();
-    ctx.restore();
-   }
-  }
- }
  for(const m of monsters){
   if(m.x/TILE<vx0-2||m.x/TILE>vx1+2||m.y/TILE<vy0-2||m.y/TILE>vy1+2)continue;
   drawMonster(ctx,m,t);
@@ -4429,6 +4400,47 @@ function draw(t){
   }
   ctx.globalAlpha=1;
   ctx.globalCompositeOperation=go;
+ }
+ // quest guide (screen space): a bold dotted trail + arrow steering the Sage to
+ // the tracked objective — with an edge arrow when the goal is off-screen
+ if(!interior){
+  const tq=trackedQuestObj(),obj=tq?questObjective(tq):null;
+  if(obj){
+   ctx.setTransform(dpr,0,0,dpr,0,0);
+   const ox=(obj[0]-cam.x)*z+cw/2, oy=(obj[1]-cam.y)*z+ch/2;
+   const hx=(hero.x-cam.x)*z+cw/2, hy=(hero.y-cam.y)*z+ch/2;
+   const dx=ox-hx, dy=oy-hy, L=Math.hypot(dx,dy)||1, ux=dx/L, uy=dy/L, ang=Math.atan2(uy,ux);
+   const pulse=0.5+0.5*Math.sin(t*0.008);
+   if(L>18){
+    // flowing dotted trail from the Sage toward the goal
+    ctx.strokeStyle='rgba(245,215,120,0.85)';ctx.lineWidth=3;ctx.lineCap='round';
+    ctx.setLineDash([3,9]);ctx.lineDashOffset=-(t*0.06)%12;
+    ctx.beginPath();ctx.moveTo(hx+ux*24,hy+uy*24);ctx.lineTo(ox,oy);ctx.stroke();
+    ctx.setLineDash([]);
+    const margin=52;
+    const onScreen=ox>=margin&&ox<=cw-margin&&oy>=margin&&oy<=ch-margin;
+    if(onScreen){
+     // pulsing ring + star right on the objective
+     ctx.strokeStyle='rgba(245,215,120,'+(0.55+pulse*0.35)+')';ctx.lineWidth=2.5;
+     ctx.beginPath();ctx.arc(ox,oy,11+pulse*5,0,7);ctx.stroke();
+     ctx.fillStyle='rgba(245,215,120,0.95)';ctx.font='14px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';
+     ctx.fillText('✦',ox,oy);ctx.textBaseline='alphabetic';
+    }else{
+     // objective is off-screen: a bold arrow pinned to the screen edge
+     const ex=clamp(ox,margin,cw-margin), ey=clamp(oy,margin,ch-margin);
+     ctx.save();ctx.translate(ex,ey);ctx.rotate(ang);
+     ctx.fillStyle='rgba(20,28,17,0.8)';ctx.beginPath();ctx.arc(0,0,16,0,7);ctx.fill();
+     ctx.fillStyle='rgba(245,215,120,0.98)';
+     ctx.beginPath();ctx.moveTo(15,0);ctx.lineTo(-7,-10);ctx.lineTo(-2,0);ctx.lineTo(-7,10);ctx.closePath();ctx.fill();
+     ctx.restore();
+    }
+    // a small arrow just ahead of the Sage, always visible
+    ctx.save();ctx.translate(hx+ux*28,hy+uy*28);ctx.rotate(ang);
+    ctx.fillStyle='rgba(245,215,120,0.9)';
+    ctx.beginPath();ctx.moveTo(10,0);ctx.lineTo(-5,-6.5);ctx.lineTo(-5,6.5);ctx.closePath();ctx.fill();
+    ctx.restore();
+   }
+  }
  }
  // hurt vignette (screen space)
  if(hero.hurtFlash>0){
