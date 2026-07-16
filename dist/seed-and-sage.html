@@ -3267,7 +3267,7 @@ function voronoiElev(seedN){
 // summed at halving amplitude → rolling highlands and lowlands across the world
 function fbmElev(seedN){
  const out=new Float32Array(W*H);
- const octaves=[{G:4,a:1},{G:8,a:0.5},{G:16,a:0.27},{G:32,a:0.14}];
+ const octaves=[{G:4,a:1},{G:8,a:0.4},{G:16,a:0.15},{G:32,a:0.06}];   // low-freq weighted → big smooth blobs
  let tot=0;
  for(const oc of octaves){
   const G=oc.G, gr=new Float32Array((G+1)*(G+1)), rng=U.mulberry32(((seedN>>>0)^((G*2654435761)>>>0))>>>0);
@@ -3286,17 +3286,10 @@ function fbmElev(seedN){
  for(let i=0;i<W*H;i++)out[i]=(out[i]-mn)/sp;
  return out;
 }
-// the world's elevation: perlin fBm, then a gentle radial bowl so lowlands gather
-// in the middle (room to settle) and the destroyable highlands ring the edges
+// the world's elevation: pure perlin fBm — rolling highlands scattered as islands
+// across the open lowland, each peak a hard core wrapped in a weaker slope
 function genElevation(){
- elevF=fbmElev(seed*2+1);
- const cx=W/2, cy=H/2, R0=Math.hypot(cx,cy)||1;
- for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const rr=Math.hypot(x-cx,y-cy)/R0;                 // 0 centre .. 1 corner
-  elevF[idx(x,y)]=elevF[idx(x,y)]*0.72 + rr*rr*0.5;
- }
- let mn=1e9,mx=-1e9; for(let i=0;i<W*H;i++){if(elevF[i]<mn)mn=elevF[i];if(elevF[i]>mx)mx=elevF[i];}
- const sp=(mx-mn)||1; for(let i=0;i<W*H;i++)elevF[i]=(elevF[i]-mn)/sp;
+ elevF=fbmElev(seed*2+1);   // already normalised 0..1
  return elevF;
 }
 function genFertility(){
@@ -3579,11 +3572,14 @@ function genWorld(){
  genElevation();
  terTier=new Uint8Array(W*H);
  const sorted=Float32Array.from(elevF).sort();
- const weakT=sorted[(W*H*0.60)|0], hardT=sorted[(W*H*0.82)|0];   // ~40% solid: 22% weak, 18% hard
+ // mostly-open world: scattered islands of a HARD black core inside a wider WEAK
+ // grey ring. ~32% solid — 17% weak, 15% hard.
+ const weakT=sorted[(W*H*0.68)|0], hardT=sorted[(W*H*0.85)|0];
  let g=new Uint8Array(W*H);
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const i=idx(x,y), border=(x<2||y<2||x>=W-2||y>=H-2), e=elevF[i];
-  let tier= (border||e>=hardT)?2 : (e>=weakT)?1 : 0;
+  const i=idx(x,y), border=(x<1||y<1||x>=W-1||y>=H-1), e=elevF[i];
+  // a thin weak rim just contains the world; the interior is pure elevation
+  let tier= border?1 : (e>=hardT)?2 : (e>=weakT)?1 : 0;
   terTier[i]=tier; g[i]=tier>0?1:0;
  }
  // one majority pass to declutter the contour edges
@@ -4523,18 +4519,18 @@ function mineTile(x,y,power,agent){
 // the tile shatters: a burst of debris, the ground opens, stone (and sometimes a
 // buried relic or a glint of ore) comes out
 function unearthRock(x,y,agent){
- const i=idx(x,y), elev=elevF?elevF[i]:0.5, px=x*TILE+TILE/2, py=y*TILE+TILE/2;
+ const i=idx(x,y), elev=elevF?elevF[i]:0.5, hard=terTier&&terTier[i]===2, px=x*TILE+TILE/2, py=y*TILE+TILE/2;
  spawnDebris(px,py,16,rockColor(),1.4);
- carveFloor(x,y);           // opens the tile → silDirty re-rounds the neighbouring rock
+ carveFloor(x,y);           // opens the tile → silDirty re-rounds the neighbouring rock (also clears terTier)
  rockDmg[i]=0;
- const stone=2+(chance(0.35)?1:0)+(elev>0.68?1:0);
+ const stone=2+(chance(0.35)?1:0)+(hard?2:0);   // the hard highland is richer in stone
  if(agent){
   if(agent.hero)heroStone+=stone;
   if(agent.p)agent.p.inv.stone++;
   if(agent.v)agent.v.stock.stone+=stone;
  }
- // buried treasure — deeper, harder rock hides more of it
- if(chance(0.05+elev*0.13)){
+ // buried treasure — the hard black highland hides far more of it
+ if(chance(hard?0.24:0.05+elev*0.08)){
   spawnSalvageAt(x,y); spawnSparkle(px,py);
   if(agent&&agent.hero)toast('You struck something buried in the rock — salvage glints in the rubble.');
   else if(agent&&agent.p&&chance(.5))tale([agent.p],agent.p.name+' pried something strange out of the deep rock near '+((agent.v&&agent.v.name)||'the diggings')+'.');
