@@ -54,17 +54,26 @@ function make(key, seed){
  const temper = h? h.temper : pick(rng,['prey','prey','prey','neutral','predator','predator']);
 
  // --- body build (everything the quad renderer needs lives in params) ---
- const buildLo = h? h.build[0] : 0.5, buildHi = h? h.build[1] : 1.2;
- const build = rr(rng, buildLo, buildHi);                 // overall bulk 0.45..1.25
- const legLen = h? rr(rng,h.legLen[0],h.legLen[1]) : rr(rng,4,11);
- const neckLen = h? rr(rng,h.neck[0],h.neck[1]) : rr(rng,1.5,8.5);
- const bodyLen = clampN(8+build*11 + rr(rng,-1.5,2.5), 8, 21);
- const bodyWid = clampN(4.5+build*5.5 + rr(rng,-1,1.5), 4, 11.5);
- const bodyHt  = clampN(3.5+build*3.6 + rr(rng,-0.6,1), 3, 7.5);
- const legThick= clampN(1.1+build*1.4 + rr(rng,-0.2,0.4), 1, 2.7);
- const neckRise= clampN(neckLen*rr(rng,0.35,0.95), 0, 8);
- const headSize= clampN(2.8+build*2.2 + rr(rng,-0.4,0.8), 2.6, 5.6);
- const snout   = rr(rng,0,1)<0.82 ? rr(rng,0.6,4.2) : 0;
+ // hinted species keep recognisable proportions; WILD ones roll independent shape
+ // genes on top of overall bulk, so silhouettes differ wildly — spindly long-legs,
+ // squat tanks, long-necked browsers, tiny compact darters, lumbering giants.
+ const wild = !h;
+ const buildLo = h? h.build[0] : 0.3, buildHi = h? h.build[1] : 1.7;
+ const build = rr(rng, buildLo, buildHi);                 // overall bulk
+ const legF   = wild? rr(rng,0.55,1.65) : 1;              // decorrelated proportions
+ const girthF = wild? rr(rng,0.6,1.6)   : 1;
+ const heightF= wild? rr(rng,0.62,1.5)  : 1;
+ const neckF  = wild? rr(rng,0.25,1.75) : 1;
+ const headF  = wild? rr(rng,0.7,1.55)  : 1;
+ const legLen = clampN((h? rr(rng,h.legLen[0],h.legLen[1]) : rr(rng,3.5,11)) * legF, 2.6, 14);
+ const neckLen = clampN((h? rr(rng,h.neck[0],h.neck[1]) : rr(rng,0.8,8)) * neckF, 0.3, 10.5);
+ const bodyLen = clampN((7.5+build*12)*(wild?rr(rng,0.8,1.3):1) + rr(rng,-1.5,2), 7, 24);
+ const bodyWid = clampN((4+build*6)*girthF + rr(rng,-1,1.5), 3, 13.5);
+ const bodyHt  = clampN((3+build*4)*heightF + rr(rng,-0.6,1), 2.6, 8.8);
+ const legThick= clampN(1+build*1.5 + rr(rng,-0.2,0.5), 0.9, 3);
+ const neckRise= clampN(neckLen*rr(rng,0.35,0.95), 0, 9);
+ const headSize= clampN((2.6+build*2.4)*headF + rr(rng,-0.4,0.8), 2.2, 6.4);
+ const snout   = rr(rng,0,1)<0.82 ? rr(rng,0.5,4.5) : 0;
 
  const earType = h? pick(rng,h.ears) : pick(rng,EAR_TYPES);
  const earSize = rr(rng,2,4.6);
