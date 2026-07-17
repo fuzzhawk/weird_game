@@ -477,6 +477,26 @@ function genElevation(){
  elevF=fbmElev(seed*2+1);   // already normalised 0..1
  return elevF;
 }
+// tier the solid terrain by depth: a multi-source BFS gives each solid tile its
+// chebyshev distance to the nearest open tile; tiles more than `shrink` deep form
+// the HARD core (the blob eroded inward by `shrink`), the rest is the WEAK rim
+function computeTerTier(shrink){
+ const dist=new Int16Array(W*H).fill(-1);
+ const q=new Int32Array(W*H); let head=0,tail=0;
+ for(let i=0;i<W*H;i++)if(map[i]===0){dist[i]=0;q[tail++]=i;}
+ while(head<tail){
+  const c=q[head++], cx=c%W, cy=(c/W)|0, d=dist[c];
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+   if(!dx&&!dy)continue;
+   const nx=cx+dx, ny=cy+dy; if(nx<0||ny<0||nx>=W||ny>=H)continue;
+   const j=idx(nx,ny); if(dist[j]>=0)continue;
+   dist[j]=d+1; q[tail++]=j;
+  }
+ }
+ const t=new Uint8Array(W*H);
+ for(let i=0;i<W*H;i++) if(map[i]!==0) t[i]= dist[i]>shrink ? 2 : 1;
+ return t;
+}
 function genFertility(){
  fert=new Float32Array(W*H);
  if(!elevF)elevF=fbmElev(seed*2+1); const elev=elevF, moist=valNoise(seed*7+3);
@@ -752,27 +772,25 @@ function genWorld(){
  AF.setWorld(biome.faunaShift);TF.setWorld(biome.relicRot,seed);relicIconCache.clear();
  bakeFlora('garden-'+seed);
  queueMonsterBakes();
- // terrain from elevation: the highest ground is HARD highland, the medium-high
- // ring around it is WEAKER upland, and everything lower is the open valley.
- genElevation();
- terTier=new Uint8Array(W*H);
- const sorted=Float32Array.from(elevF).sort();
- // mostly-open world: scattered islands of a HARD black core inside a wider WEAK
- // grey ring. ~32% solid — 17% weak, 15% hard.
- const weakT=sorted[(W*H*0.68)|0], hardT=sorted[(W*H*0.85)|0];
+ genElevation();        // still shapes the fertility field (verdant/barren ground)
+ // terrain shape: the classic seeded cellular-automata caves — organic blobs of
+ // weak terrain carved out of the open meadow.
  let g=new Uint8Array(W*H);
- for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const i=idx(x,y), border=(x<1||y<1||x>=W-1||y>=H-1), e=elevF[i];
-  // a thin weak rim just contains the world; the interior is pure elevation
-  let tier= border?1 : (e>=hardT)?2 : (e>=weakT)?1 : 0;
-  terTier[i]=tier; g[i]=tier>0?1:0;
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++)g[idx(x,y)]=(x<2||y<2||x>=W-2||y>=H-2)?1:(R()<0.46?1:0);
+ for(let it=0;it<5;it++){
+  const n2=new Uint8Array(W*H);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+   let n=0;
+   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+    if(!dx&&!dy)continue;
+    const nx=x+dx,ny=y+dy;
+    if(nx<0||ny<0||nx>=W||ny>=H||g[idx(nx,ny)])n++;
+   }
+   n2[idx(x,y)]=(x<2||y<2||x>=W-2||y>=H-2)?1:(n>=5?1:(n<=3?0:g[idx(x,y)]));
+  }
+  g=n2;
  }
- // one majority pass to declutter the contour edges
- { const g2=g.slice();
-   for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const i=idx(x,y),n=g[i-1]+g[i+1]+g[i-W]+g[i+W];
-    if(g[i]&&n<=1){g2[i]=0;terTier[i]=0} else if(!g[i]&&n>=3){g2[i]=1;if(terTier[i]===0)terTier[i]=1}}
-   g=g2; }
- // keep largest open region so the valley is one connected space
+ // keep largest open region so the meadow is one connected space
  const reg=new Int32Array(W*H).fill(-1);let best=-1,bestN=0,rid=0;
  const q=new Int32Array(W*H);
  for(let i=0;i<W*H;i++){
@@ -788,8 +806,12 @@ function genWorld(){
   if(n>bestN){bestN=n;best=rid}
   rid++;
  }
- for(let i=0;i<W*H;i++){ if(!g[i]&&reg[i]!==best){g[i]=1;if(terTier[i]===0)terTier[i]=1} if(!g[i])terTier[i]=0; }
+ for(let i=0;i<W*H;i++){if(!g[i]&&reg[i]!==best)g[i]=1}
  map=g;
+ // the harder inner terrain is each blob's core: shrink the blobs inward by 3 tiles
+ // (chebyshev distance from open ground). Tiles more than 3 deep are HARD (tier 2),
+ // the outer 3-tile band stays WEAK (tier 1).
+ terTier=computeTerTier(3);
  genFertility();        // fBm elevation + hydraulic erosion → the soil-fertility field
  if(WATER_ON){ genHydrology(); initWeather(); }   // lakes/streams/weather (muted for now)
  else { water=null; waterMax=null; wetUntil=null; clouds=[]; }
