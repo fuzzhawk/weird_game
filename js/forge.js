@@ -81,8 +81,8 @@ function makeCA(w,h,fill,steps,sym,rng){
 const DIRS=[
   {n:'S', fx: 0,fy: 1},{n:'SW',fx:-1,fy: 1},{n:'W', fx:-1,fy: 0},{n:'NW',fx:-1,fy:-1},
   {n:'N', fx: 0,fy:-1},{n:'NE',fx: 1,fy:-1},{n:'E', fx: 1,fy: 0},{n:'SE',fx: 1,fy: 1}];
-const ANIM_NAMES=['walk','run','attack','talk'];
-function animFrames(P,a){return(a==='walk'||a==='run')?P.walkFrames:(a==='attack'?4:3)}
+const ANIM_NAMES=['walk','run','attack','talk','work'];
+function animFrames(P,a){return(a==='walk'||a==='run')?P.walkFrames:(a==='attack'||a==='work')?4:3}
 
 // ---------- parameter schema ----------
 const SCHEMA=[
@@ -224,6 +224,14 @@ function renderFrame(P,C,dirIdx,anim,fi){
     bob=[0,-1,1,0][fi]*u;
   }else if(anim==='talk'){
     headDy=[0,-1,0][fi]*u;mouth=[0,2,1][fi];gesture=[0,2,3][fi];
+  }else if(anim==='work'){
+    // a downward hammer / dig swing: raise, strike low-and-forward, recoil
+    const fwd=(fx!==0?fx:1);
+    armAdy=[0,-2.4,3.4,0.6][fi]*u; armBdy=[0,-2.4,3.4,0.6][fi]*u;
+    armAdx=[0,-0.5,1.2,0.5][fi]*u*fwd; armBdx=[0,-0.5,1.2,0.5][fi]*u*fwd;
+    bob=[0,-1,1.4,0][fi]*u;
+    headDy=[0,-0.6,1,0][fi]*u;
+    leanX=(fx!==0)?fx*[0,-0.7,1.3,0.4][fi]*u*(diag?.7:1):0;
   }
 
   // ----- geometry -----
@@ -624,7 +632,7 @@ const CFHelp = (function(){
         FRAMES[a].push(arr);
       }
     }
-    return { FRAMES, params:P, native:S, scale, box, fps:{walk:9,run:13,attack:11,talk:6} };
+    return { FRAMES, params:P, native:S, scale, box, fps:{walk:9,run:13,attack:11,talk:6,work:8} };
   }
 
   // draw a baked creature with its feet anchored at (x,y); optional extra scale

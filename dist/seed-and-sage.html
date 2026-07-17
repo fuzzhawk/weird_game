@@ -1095,8 +1095,8 @@ function makeCA(w,h,fill,steps,sym,rng){
 const DIRS=[
   {n:'S', fx: 0,fy: 1},{n:'SW',fx:-1,fy: 1},{n:'W', fx:-1,fy: 0},{n:'NW',fx:-1,fy:-1},
   {n:'N', fx: 0,fy:-1},{n:'NE',fx: 1,fy:-1},{n:'E', fx: 1,fy: 0},{n:'SE',fx: 1,fy: 1}];
-const ANIM_NAMES=['walk','run','attack','talk'];
-function animFrames(P,a){return(a==='walk'||a==='run')?P.walkFrames:(a==='attack'?4:3)}
+const ANIM_NAMES=['walk','run','attack','talk','work'];
+function animFrames(P,a){return(a==='walk'||a==='run')?P.walkFrames:(a==='attack'||a==='work')?4:3}
 
 // ---------- parameter schema ----------
 const SCHEMA=[
@@ -1238,6 +1238,14 @@ function renderFrame(P,C,dirIdx,anim,fi){
     bob=[0,-1,1,0][fi]*u;
   }else if(anim==='talk'){
     headDy=[0,-1,0][fi]*u;mouth=[0,2,1][fi];gesture=[0,2,3][fi];
+  }else if(anim==='work'){
+    // a downward hammer / dig swing: raise, strike low-and-forward, recoil
+    const fwd=(fx!==0?fx:1);
+    armAdy=[0,-2.4,3.4,0.6][fi]*u; armBdy=[0,-2.4,3.4,0.6][fi]*u;
+    armAdx=[0,-0.5,1.2,0.5][fi]*u*fwd; armBdx=[0,-0.5,1.2,0.5][fi]*u*fwd;
+    bob=[0,-1,1.4,0][fi]*u;
+    headDy=[0,-0.6,1,0][fi]*u;
+    leanX=(fx!==0)?fx*[0,-0.7,1.3,0.4][fi]*u*(diag?.7:1):0;
   }
 
   // ----- geometry -----
@@ -1638,7 +1646,7 @@ const CFHelp = (function(){
         FRAMES[a].push(arr);
       }
     }
-    return { FRAMES, params:P, native:S, scale, box, fps:{walk:9,run:13,attack:11,talk:6} };
+    return { FRAMES, params:P, native:S, scale, box, fps:{walk:9,run:13,attack:11,talk:6,work:8} };
   }
 
   // draw a baked creature with its feet anchored at (x,y); optional extra scale
@@ -2466,17 +2474,26 @@ function make(key, seed){
  const temper = h? h.temper : pick(rng,['prey','prey','prey','neutral','predator','predator']);
 
  // --- body build (everything the quad renderer needs lives in params) ---
- const buildLo = h? h.build[0] : 0.5, buildHi = h? h.build[1] : 1.2;
- const build = rr(rng, buildLo, buildHi);                 // overall bulk 0.45..1.25
- const legLen = h? rr(rng,h.legLen[0],h.legLen[1]) : rr(rng,4,11);
- const neckLen = h? rr(rng,h.neck[0],h.neck[1]) : rr(rng,1.5,8.5);
- const bodyLen = clampN(8+build*11 + rr(rng,-1.5,2.5), 8, 21);
- const bodyWid = clampN(4.5+build*5.5 + rr(rng,-1,1.5), 4, 11.5);
- const bodyHt  = clampN(3.5+build*3.6 + rr(rng,-0.6,1), 3, 7.5);
- const legThick= clampN(1.1+build*1.4 + rr(rng,-0.2,0.4), 1, 2.7);
- const neckRise= clampN(neckLen*rr(rng,0.35,0.95), 0, 8);
- const headSize= clampN(2.8+build*2.2 + rr(rng,-0.4,0.8), 2.6, 5.6);
- const snout   = rr(rng,0,1)<0.82 ? rr(rng,0.6,4.2) : 0;
+ // hinted species keep recognisable proportions; WILD ones roll independent shape
+ // genes on top of overall bulk, so silhouettes differ wildly — spindly long-legs,
+ // squat tanks, long-necked browsers, tiny compact darters, lumbering giants.
+ const wild = !h;
+ const buildLo = h? h.build[0] : 0.3, buildHi = h? h.build[1] : 1.7;
+ const build = rr(rng, buildLo, buildHi);                 // overall bulk
+ const legF   = wild? rr(rng,0.55,1.65) : 1;              // decorrelated proportions
+ const girthF = wild? rr(rng,0.6,1.6)   : 1;
+ const heightF= wild? rr(rng,0.62,1.5)  : 1;
+ const neckF  = wild? rr(rng,0.25,1.75) : 1;
+ const headF  = wild? rr(rng,0.7,1.55)  : 1;
+ const legLen = clampN((h? rr(rng,h.legLen[0],h.legLen[1]) : rr(rng,3.5,11)) * legF, 2.6, 14);
+ const neckLen = clampN((h? rr(rng,h.neck[0],h.neck[1]) : rr(rng,0.8,8)) * neckF, 0.3, 10.5);
+ const bodyLen = clampN((7.5+build*12)*(wild?rr(rng,0.8,1.3):1) + rr(rng,-1.5,2), 7, 24);
+ const bodyWid = clampN((4+build*6)*girthF + rr(rng,-1,1.5), 3, 13.5);
+ const bodyHt  = clampN((3+build*4)*heightF + rr(rng,-0.6,1), 2.6, 8.8);
+ const legThick= clampN(1+build*1.5 + rr(rng,-0.2,0.5), 0.9, 3);
+ const neckRise= clampN(neckLen*rr(rng,0.35,0.95), 0, 9);
+ const headSize= clampN((2.6+build*2.4)*headF + rr(rng,-0.4,0.8), 2.2, 6.4);
+ const snout   = rr(rng,0,1)<0.82 ? rr(rng,0.5,4.5) : 0;
 
  const earType = h? pick(rng,h.ears) : pick(rng,EAR_TYPES);
  const earSize = rr(rng,2,4.6);
@@ -3549,7 +3566,7 @@ function processBakeQueue(){
   if(job.kind==='person'){
    if(job.p.dead)return;
    const params=CFHelp.villagerParams(job.p.lookSeed,{elder:job.p.age>=56});
-   job.p.sprite=CFHelp.bakeCreature(params,48,['walk','talk']);
+   job.p.sprite=CFHelp.bakeCreature(params,48,['walk','talk','work']);
   }else if(job.kind==='hero'){
    const hrng=CF.mulberry32(U.hashStr(Hero.lookSeed)^0xC0DE);
    const arch=CFHelp.ARCHETYPES.player(hrng);
@@ -4073,7 +4090,7 @@ function addGrave(p){
 }
 
 /* ================= tasks & AI ================= */
-function setTask(p,k,data){p.task=Object.assign({k,t0:simMin},data||{});p.path=null;p.pi=0}
+function setTask(p,k,data){p.task=Object.assign({k,t0:simMin},data||{});p.path=null;p.pi=0;p.working=false}
 function findNode(p,types,pred){
  if(regionsDirty)computeRegions();
  const pr=region[idx(clamp((p.x/TILE)|0,0,W-1),clamp((p.y/TILE)|0,0,H-1))];
@@ -4332,10 +4349,14 @@ function doTask(p,dt){
   case 'build':{
    const b=t.b;
    if(!b||b.gone||b.done){p.task=null;break}
+   const[hx,hy]=homeTile(b);
    if(!t.arr){
-    if(!p.path&&!t.pathed){t.pathed=true;const[hx,hy]=homeTile(b);if(!goTo(p,hx,hy)){p.task=null;break}}
+    if(!p.path&&!t.pathed){t.pathed=true;if(!goTo(p,hx,hy)){p.task=null;break}}
     if(moveAlong(p,dt))t.arr=true;else break;
    }
+   // the builder must actually be on the site — no raising it from across the meadow
+   if(dist2(p.x,p.y,hx*TILE+TILE/2,hy*TILE+TILE/2)>(2.4*TILE)**2){t.arr=false;t.pathed=false;p.working=false;break}
+   p.working=true;p.moving=false;
    b.prog+=dt*(1+Math.max(-0.6,mod(p,'work')));
    if(chance(dt*0.02))emote(p,'🔨');
    if(b.prog>=b.need){completeBuild(b);p.task=null}
@@ -4447,6 +4468,14 @@ function doTask(p,dt){
     }
     if(moveAlong(p,dt))t.arr=true;else break;
    }
+   // the worker must be standing on (or right beside) the job tile before it counts —
+   // if pathing dropped them off too far, close the gap or give the job back
+   if(dist2(p.x,p.y,j.x*TILE+TILE/2,j.y*TILE+TILE/2)>(1.7*TILE)**2){
+    const tgt=walkable(j.x,j.y)?[j.x,j.y]:(nearOpen(j.x,j.y)||null);
+    if(!tgt||!goTo(p,tgt[0],tgt[1])){releaseJob(v,j);p.task=null;break}
+    t.arr=false;p.working=false;break;
+   }
+   p.working=true;p.moving=false;
    t.h=(t.h||0)+dt;
    if(chance(dt*0.03))emote(p,{mine:'⛏',wall:'🌿',harvest:'🌾',clear:'⛏',tidywall:'🧹',pave:'🧱',weed:'🌿',till:'🌱'}[j.type]||'🌱');
    if(t.h>=(j.type==='wall'||j.type==='pave'||j.type==='tidywall'||j.type==='weed'?6:12)){doVillageJob(p,v,j);p.task=null}
@@ -5134,7 +5163,7 @@ function updatePerson(p,dt){
  p.age+=dt/(DAY*2);
  p.hunger=clamp(p.hunger+0.055*dt*(p.age<12?0.7:1),0,100);
  if(p.hp<100){const threatened=monsters.length&&nearestMonster(p,12*TILE);p.hp=clamp(p.hp+(threatened?0:0.05)*dt,0,100)}
- if(p.moving)p.animClock+=dt*0.12;
+ if(p.moving||p.working)p.animClock+=dt*0.12;
  if(p.sleeping){
   p.energy=clamp(p.energy+(p.home&&!p.home.gone?0.18:0.10)*dt,0,100);
   const t=tod();
@@ -5703,7 +5732,7 @@ function spawnAnimal(key,made){
  if(!spot)return null;
  // natural spawns mostly invent brand-new species; the rest lean on the familiar
  // archetypes (which themselves reroll into something novel each time)
- if(!key&&!made&&R()<0.4){const bag=['deer','deer','rabbit','rabbit','boar','fox','wolf'];key=pick(bag)}
+ if(!key&&!made&&R()<0.28){const bag=['deer','deer','rabbit','rabbit','boar','fox','wolf'];key=pick(bag)}
  made=made||AF.make(key||null,seed+'-'+nextId+'-'+((R()*1e9)|0));
  const s=made.spec;
  const a={id:nextId++,made,key:made.key,spec:s,name:made.name,temper:s.temper,
@@ -5715,34 +5744,52 @@ function spawnAnimal(key,made){
  return a;
 }
 function emoteA(a,g){a.em={g,until:performance.now()+1600}}
+// move a critter by (dx,dy), sliding along blocked axes; returns the distance
+// actually travelled so callers can tell when the animal is stuck
 function moveCritter(a,dx,dy){
- const nx=a.x+dx,ny=a.y+dy;
+ const ox=a.x,oy=a.y, nx=a.x+dx,ny=a.y+dy;
  if(walkable((nx/TILE)|0,(ny/TILE)|0)){a.x=nx;a.y=ny}
  else if(walkable((nx/TILE)|0,(a.y/TILE)|0))a.x=nx;
  else if(walkable((a.x/TILE)|0,(ny/TILE)|0))a.y=ny;
- else{const o=nearOpen((a.x/TILE)|0,(a.y/TILE)|0);if(o){a.x+=Math.sign(o[0]*TILE+TILE/2-a.x)*0.6;a.y+=Math.sign(o[1]*TILE+TILE/2-a.y)*0.6}}
  a.x=clamp(a.x,TILE,W*TILE-TILE);a.y=clamp(a.y,TILE,H*TILE-TILE);
+ return Math.hypot(a.x-ox,a.y-oy);
 }
 function steer(a,tx,ty,dt,mul){
  const dx=tx-a.x,dy=ty-a.y,L=Math.hypot(dx,dy)||1;
  const step=WALK*a.spd*(mul||1)*dt;
- moveCritter(a,dx/L*step,dy/L*step);
- if(Math.abs(dx)>0.4)a.fx=dx>0?1:-1;
- a.dirIdx=CFHelp.angToDir(Math.atan2(dy,dx));
- a.anim='walk';
+ const ox=a.x,oy=a.y;
+ const moved=moveCritter(a,dx/L*step,dy/L*step);
+ // face by the direction actually travelled, not the goal vector — so an animal
+ // sliding along a wall points along the wall instead of twitching toward the goal
+ if(moved>step*0.2){
+  const mvx=a.x-ox,mvy=a.y-oy;
+  if(Math.abs(mvx)>0.2)a.fx=mvx>0?1:-1;
+  a.dirIdx=CFHelp.angToDir(Math.atan2(mvy,mvx));
+  a.anim='walk';
+ }
+ return moved;
 }
 function fleeCritter(a,fx,fy,dt){
  const ax=a.x-fx,ay=a.y-fy,L=Math.hypot(ax,ay)||1;
  steer(a,a.x+ax/L*6*TILE,a.y+ay/L*6*TILE,dt,1.35);
 }
 function wanderCritter(a,dt){
- if(!a.wgoal||simMin>=a.wgoalT||dist2(a.x,a.y,a.wgoal[0],a.wgoal[1])<(TILE*0.8)**2){
-  if(chance(.45)){a.wgoal=null;a.wgoalT=simMin+rf(15,55)}  // graze/idle
-  else{const tx=clamp(((a.x/TILE)|0)+ri(-6,6),1,W-2),ty=clamp(((a.y/TILE)|0)+ri(-6,6),1,H-2);
-   if(walkable(tx,ty)){a.wgoal=[tx*TILE+TILE/2,ty*TILE+TILE/2];a.wgoalT=simMin+rf(30,80)}}
+ const reached=a.wgoal&&dist2(a.x,a.y,a.wgoal[0],a.wgoal[1])<(TILE*1.1)**2;
+ // pick a fresh goal when we arrive, the dwell expires, or we've been stuck a while
+ if(!a.wgoal||simMin>=a.wgoalT||reached||(a.stuck||0)>7){
+  a.stuck=0;
+  if(reached||chance(.4)){a.wgoal=null;a.wgoalT=simMin+rf(20,60);a.anim='idle'}  // graze/rest
+  else{
+   for(let tries=0;tries<8;tries++){
+    const tx=clamp(((a.x/TILE)|0)+ri(-5,5),1,W-2),ty=clamp(((a.y/TILE)|0)+ri(-5,5),1,H-2);
+    if(walkable(tx,ty)){a.wgoal=[tx*TILE+TILE/2,ty*TILE+TILE/2];a.wgoalT=simMin+rf(45,95);break}
+   }
+  }
  }
- if(a.wgoal&&simMin<a.wgoalT)steer(a,a.wgoal[0],a.wgoal[1],dt,0.55);
- else a.anim='walk';
+ if(a.wgoal&&simMin<a.wgoalT){
+  const moved=steer(a,a.wgoal[0],a.wgoal[1],dt,0.55);
+  if(moved<WALK*a.spd*0.55*dt*0.2)a.stuck=(a.stuck||0)+1; else a.stuck=0;
+ }else{a.anim='idle'}
 }
 function biteAnimalTarget(a,tgt){
  emoteA(a,a.temper==='predator'?'🦷':'💢');
@@ -5902,7 +5949,8 @@ function drawAnimal(c,a,t){
  c.fillStyle='rgba(0,0,0,0.30)';c.beginPath();c.ellipse(px,py+2,6*s,2.4*s,0,0,7);c.fill();
  if(a.sprite){
   const anim=(a.anim==='attack'&&a.sprite.FRAMES.attack)?'attack':'walk';
-  CFHelp.drawCreatureSprite(c,a.sprite,px,py+3,a.dirIdx||0,anim,a.animClock,s);
+  const clock=a.anim==='idle'?0:a.animClock;   // grazing animals stand still, not walk-in-place
+  CFHelp.drawCreatureSprite(c,a.sprite,px,py+3,a.dirIdx||0,anim,clock,s);
  }else{
   c.fillStyle='#8a7a5a';c.beginPath();c.ellipse(px,py-3,5*s,4*s,0,0,7);c.fill();
  }
@@ -6987,9 +7035,10 @@ function drawPersonSprite(c,p,t){
   const s=stageScale(p);
   c.fillStyle='rgba(0,0,0,0.32)';
   c.beginPath();c.ellipse(0,1,6*s,2.4*s,0,0,7);c.fill();
-  const chatting=p.chatHold>simMin&&p.sprite.FRAMES.talk;
-  const anim=chatting?'talk':'walk';
-  const clock=p.moving||chatting?p.animClock:0;
+  const working=p.working&&p.sprite.FRAMES.work;
+  const chatting=!working&&p.chatHold>simMin&&p.sprite.FRAMES.talk;
+  const anim=working?'work':chatting?'talk':'walk';
+  const clock=p.moving||chatting||working?p.animClock:0;
   CFHelp.drawCreatureSprite(c,p.sprite,0,3,p.dirIdx||0,anim,clock,s);
  }else drawSprite(c,p,t);
 }
