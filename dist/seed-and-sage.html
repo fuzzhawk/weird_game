@@ -2852,9 +2852,27 @@ const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[
 /* ================= config ================= */
 const W=112,H=112,TILE=16,DAY=1440,RATE=12,WALK=2.15;
 const SPEEDS=[0,1,16,500];
-const COST={shelter:{wood:5},home:{wood:10,stone:6},biz:{wood:12,stone:8}};
-const NEED={shelter:50,home:130,biz:150};
-const SZ={shelter:[1,1],home:[2,2],biz:[2,2],grave:[1,1]};
+const COST={shelter:{wood:5},home:{wood:10,stone:6},biz:{wood:12,stone:8},
+ apartment:{wood:22,stone:16},warehouse:{wood:20,stone:14},park:{wood:8,stone:2},
+ venue:{wood:26,stone:20},factory:{wood:24,stone:24},highrise:{wood:42,stone:44}};
+const NEED={shelter:50,home:130,biz:150,apartment:260,warehouse:210,park:110,venue:320,factory:340,highrise:560};
+const SZ={shelter:[1,1],home:[2,2],biz:[2,2],grave:[1,1],apartment:[2,3],warehouse:[3,2],park:[3,3],venue:[3,3],factory:[3,3],highrise:[3,3]};
+// as a settlement grows it unlocks grander builds. cat drives who tends it (so it
+// knows when to fall to ruin), cap = households it holds, stories = drawn height.
+const BMETA={
+ shelter:{cat:'house',cap:1,stories:1,minDev:0},
+ home:{cat:'house',cap:1,stories:1,minDev:0},
+ biz:{cat:'shop',cap:0,stories:1,minDev:0},
+ apartment:{cat:'house',cap:4,stories:2,minDev:1,label:'tenement'},
+ warehouse:{cat:'civic',cap:0,stories:1,minDev:1,label:'warehouse'},
+ park:{cat:'park',cap:0,stories:0,solid:false,minDev:1,label:'green'},
+ venue:{cat:'civic',cap:0,stories:2,minDev:2,label:'meeting hall'},
+ factory:{cat:'civic',cap:0,stories:1,minDev:2,label:'manufactory'},
+ highrise:{cat:'house',cap:9,stories:5,minDev:3,label:'tower'},
+ grave:{cat:'grave',cap:0,stories:0,minDev:0},
+};
+function bcap(b){const m=BMETA[b.tp];return m?m.cap:0}   // unknown/graves are never homes
+function bsolid(b){const m=BMETA[b.tp];return m?m.solid!==false:true}
 const RUIN_DELAY=6*DAY,CRUMBLE_DELAY=10*DAY;
 // graves settle, then the ground gives them back as flowers: the stone sinks and
 // blooms take over, the tile is freed, and the turned earth is left richer.
@@ -3905,14 +3923,14 @@ function nearestVillage(p,maxTiles){
  return best;
 }
 function townCentroid(){
- const hs=buildings.filter(b=>!b.gone&&!b.ruined&&(b.tp==='home'||b.tp==='shelter'||b.tp==='biz'));
+ const hs=buildings.filter(b=>!b.gone&&!b.ruined&&(b.tp==='biz'||(BMETA[b.tp]&&BMETA[b.tp].cat==='house')));
  if(hs.length<2)return null;
  let cx=0,cy=0;for(const b of hs){cx+=b.x+b.w/2;cy+=b.y+b.h/2}
  return [Math.round(cx/hs.length),Math.round(cy/hs.length)];
 }
-function startBuild(p,tp,forP){
+function startBuild(p,tp,forP,vill){
  const cost=COST[tp];
- if(!canAfford(p,cost))return false;
+ if(!vill&&!canAfford(p,cost))return false;
  const[w,h]=SZ[tp];
  let anchor=[(p.x/TILE)|0,(p.y/TILE)|0],bounds=null,s=null;
  if(forP&&forP.home){anchor=homeTile(forP.home)}
@@ -3930,10 +3948,10 @@ function startBuild(p,tp,forP){
  }
  if(!s)s=findSpot(anchor[0],anchor[1],w,h,bounds);
  if(!s)return false;
- takeMat(p,cost);
+ if(!vill)takeMat(p,cost);
  const b={i:buildings.length,id:nextId++,tp,x:s[0],y:s[1],w,h,prog:0,need:NEED[tp],done:false,gone:false,
   owners:[],builder:p.id,forId:forP?forP.id:null,stock:{food:0,wood:0,stone:0},prosperity:0,sub:null,name:null,ref:null,
-  emptySince:0,ruined:false,vid:null};
+  emptySince:0,ruined:false,vid:vill?vill.id:(p.vid||null)};
  if(tp==='biz'){
   b.sub=pick(BIZKINDS);
   const bizName=()=>Lore.active?'The '+Lore.name(4,10):'The '+pick(BIZ_ADJ)+' '+pick(BIZ_NOUN);
@@ -3944,8 +3962,10 @@ function startBuild(p,tp,forP){
  buildings.push(b);
  for(let y=b.y;y<b.y+h;y++)for(let x=b.x;x<b.x+w;x++)bld[idx(x,y)]=b.i;
  setTask(p,'build',{b});
+ const lbl=(tp==='biz'?'shop':(BMETA[tp]&&BMETA[tp].label)||tp);
  if(forP)tale([p],p.name+' began building a shelter — not for themselves, but for '+forP.name+'.');
- else tale([p],p.name+' started work on a '+(tp==='biz'?'shop':tp)+', hauling '+pick(['bundled cane','lashed stalks','good hillstone','salvaged timber'])+'.');
+ else if(vill)tale([p],p.name+' broke ground on a new '+lbl+' for '+vill.name+' — the settlement is growing.',true);
+ else tale([p],p.name+' started work on a '+lbl+', hauling '+pick(['bundled cane','lashed stalks','good hillstone','salvaged timber'])+'.');
  return true;
 }
 function setHome(p,b){
@@ -3954,6 +3974,7 @@ function setHome(p,b){
  if(!b.owners.includes(p.id))b.owners.push(p.id);
 }
 function solidifyBuilding(b){
+ if(!bsolid(b))return;   // parks stay open ground you can walk through
  for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++){
   shoveOccupants(x,y);
   setSolid(x,y,S_HOUSE);
@@ -3993,12 +4014,15 @@ function demolish(b){
 }
 function ruinBuilding(b){
  if(b.gone||b.ruined||b.tp==='grave')return;
+ // an abandoned park just goes wild again rather than leaving rubble
+ if(BMETA[b.tp]&&BMETA[b.tp].cat==='park'){tale([],'The green went untended and the wilds reclaimed it.');demolish(b);return}
  b.ruined=true;b.emptySince=simMin;
  for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++)if(bld[idx(x,y)]===b.i)setSolid(x,y,S_RUIN);
  for(const id of b.owners){const p=allById.get(id);if(p&&p.home===b)p.home=null}
  b.owners=[];
  if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
- const what=b.tp==='biz'?b.name:'a '+b.tp;
+ const lbl=b.tp==='biz'?b.name:(BMETA[b.tp]&&BMETA[b.tp].label)||('a '+b.tp);
+ const what=b.tp==='biz'||BMETA[b.tp]&&BMETA[b.tp].cat!=='house'?lbl:'a '+lbl;
  tale([],'With no one to tend it, '+what+' fell to ruin, and the vines moved in without asking.');
 }
 // turn a building into a lasting ruin — it stays standing (as rubble) instead of
@@ -4070,7 +4094,7 @@ function maintainCivilization(){
   return;
  }
  civFallen=false;
- const hasHome=buildings.some(b=>!b.gone&&!b.ruined&&(b.tp==='home'||b.tp==='shelter'));
+ const hasHome=buildings.some(b=>!b.gone&&!b.ruined&&BMETA[b.tp]&&BMETA[b.tp].cat==='house');
  if(hasHome){ if(n<8&&chance(.2))arrive(); else if(n<24&&chance(.045))arrive(); }
  else if(n<6&&chance(.1))arrive();                        // a young party still gathering
 }
@@ -4134,14 +4158,17 @@ function goSleep(p){
 function claimVacant(p){
  let best=null,bd=1e18;
  for(const b of buildings){
-  if(b.gone||b.ruined||!b.done||b.tp==='biz'||b.tp==='grave'||b.owners.length)continue;
+  if(b.gone||b.ruined||!b.done)continue;
+  if(bcap(b)<=0||b.owners.length>=bcap(b))continue;   // houses only, and only if a unit is free
   const[hx,hy]=homeTile(b);
   const d=dist2(p.x,p.y,hx*TILE,hy*TILE);
   if(d<bd){bd=d;best=b}
  }
  if(best){
+  const shared=best.owners.length>0;
   setHome(p,best);best.emptySince=0;
-  tale([p],p.name+' took up residence in an empty '+best.tp+'. It still smelled of someone else’s tea.');
+  const lbl=(BMETA[best.tp]&&BMETA[best.tp].label)||best.tp;
+  tale([p],shared?(p.name+' moved into a unit in the '+lbl+', neighbours through the wall.'):(p.name+' took up residence in an empty '+lbl+'. It still smelled of someone else’s tea.'));
   return true;
  }
  return false;
@@ -6033,7 +6060,7 @@ function fortPlan(cl){
 }
 function claimCenter(c){return[Math.round((c.x0+c.x1)/2),Math.round((c.y0+c.y1)/2)]}
 function detectVillages(){
- const homes=buildings.filter(b=>!b.gone&&!b.ruined&&b.done&&(b.tp==='home'||b.tp==='biz'||b.tp==='shelter')&&b.owners.some(id=>{const o=allById.get(id);return o&&!o.dead}));
+ const homes=buildings.filter(b=>!b.gone&&!b.ruined&&b.done&&(b.tp==='biz'||(BMETA[b.tp]&&BMETA[b.tp].cat==='house'))&&b.owners.some(id=>{const o=allById.get(id);return o&&!o.dead}));
  const CL=20;
  const groups=[];
  for(const b of homes){
@@ -6049,7 +6076,7 @@ function detectVillages(){
  }
  const live=[];
  for(const g of groups){
-  const homeCount=g.filter(b=>b.tp==='home'||b.tp==='shelter').length;
+  const homeCount=g.filter(b=>BMETA[b.tp]&&BMETA[b.tp].cat==='house').length;
   let cx=0,cy=0;for(const b of g){cx+=b.x+b.w/2;cy+=b.y+b.h/2}cx/=g.length;cy/=g.length;
   let existing=villages.find(vv=>dist2(vv.cx,vv.cy,cx,cy)<26*26);
   if(homeCount<VILLAGE_MIN&&!(existing&&homeCount>=2))continue;
@@ -6219,6 +6246,8 @@ function villageTick(){
   if(simMin-v.lastPlan>rf(.4,.7)*DAY){v.lastPlan=simMin;planVillage(v)}
   // the assembly meets every week or so to take the temperature of the town
   if(simMin-(v.lastCouncil||0)>rf(8,12)*DAY){v.lastCouncil=simMin;holdCouncil(v)}
+  // as the town grows, it commissions grander buildings (paced out over days)
+  if(simMin-(v.lastDevelop||0)>rf(1.2,2.2)*DAY){v.lastDevelop=simMin;developVillage(v)}
   if(v.stock.food>0){
    const pantries=v.homes.filter(b=>!b.gone&&!b.ruined&&b.stock);
    let guard=0;
@@ -6227,6 +6256,47 @@ function villageTick(){
    }
   }
  }
+}
+// how developed a settlement is (0..4), driven by how many souls it holds
+function villageDev(v){ const m=villageMembers(v).length; return m>=15?4 : m>=11?3 : m>=8?2 : m>=5?1 : 0; }
+// the town's collective larder = its own stock plus each household's SURPLUS
+// (a reserve stays with every home so investing in the town never leaves a
+// family without the means to keep their own roof)
+const HOME_RESERVE=4;
+function villagePool(v){ let wood=v.stock.wood||0, stone=v.stock.stone||0; const seen=new Set();
+ for(const p of villageMembers(v)){const b=p.home; if(b&&!b.gone&&b.stock&&!seen.has(b)){seen.add(b);wood+=Math.max(0,(b.stock.wood||0)-HOME_RESERVE);stone+=Math.max(0,(b.stock.stone||0)-HOME_RESERVE);}}
+ return {wood,stone}; }
+function spendPool(v,cost){ let nw=cost.wood||0,ns=cost.stone||0;
+ take(v.stock);
+ function take(st,reserve){if(!st)return;const dw=Math.min(nw,Math.max(0,(st.wood||0)-(reserve||0)));st.wood-=dw;nw-=dw;const ds=Math.min(ns,Math.max(0,(st.stone||0)-(reserve||0)));st.stone-=ds;ns-=ds;}
+ for(const p of villageMembers(v)){if(nw<=0&&ns<=0)break;const b=p.home;if(b&&b.stock)take(b.stock,HOME_RESERVE);}
+}
+// commission the next building the growing town wants, funded from the shared pool
+function developVillage(v){
+ const dev=villageDev(v); v.dev=dev;
+ if(dev<1)return;
+ const members=villageMembers(v);
+ if(!members.length)return;
+ const has=(tp)=>buildings.filter(b=>!b.gone&&!b.ruined&&b.vid===v.id&&b.tp===tp).length;
+ const pool=villagePool(v);
+ const afford=(tp)=>{const c=COST[tp];return pool.wood>=(c.wood||0)&&pool.stone>=(c.stone||0)};
+ const pickBuilder=()=>{let fallback=null;for(const pp of members){if(pp.dead||pp.age<16)continue;if(buildings.some(b=>!b.gone&&!b.done&&b.builder===pp.id))continue;if(!pp.task||['wander','villagejob','chat','visit','gather','gohome'].includes(pp.task.k))return pp;if(!fallback)fallback=pp;}return fallback;};
+ const commission=(tp)=>{ if(!afford(tp))return false; const bp=pickBuilder(); if(!bp)return false; if(startBuild(bp,tp,null,v)){spendPool(v,COST[tp]);return true;} return false; };
+ // 1) housing: raise tenements then towers when folk sleep rough OR the town has
+ // grown dense enough to want to build UP instead of sprawling further out
+ const homeless=members.filter(pp=>!pp.home||pp.home.gone).length;
+ const vacant=buildings.filter(b=>!b.gone&&!b.ruined&&b.done&&b.vid===v.id&&bcap(b)>0).reduce((a,b)=>a+(bcap(b)-b.owners.length),0);
+ const shelters=buildings.filter(b=>!b.gone&&!b.ruined&&b.vid===v.id&&b.tp==='shelter').length;
+ if(homeless>vacant+1 || (dev>=2 && shelters>=3)){
+  if(dev>=3&&has('highrise')<dev-1){ if(commission('highrise'))return; }
+  if(commission('apartment'))return;
+ }
+ // 2) civic ambitions unlock by tier
+ const wish=[];
+ if(dev>=1){wish.push(['warehouse',1],['park',dev>=3?3:1]);}
+ if(dev>=2){wish.push(['venue',1],['factory',1]);}
+ if(dev>=4){wish.push(['factory',2],['highrise',3]);}
+ for(const[tp,lim]of wish){ if(has(tp)<lim && commission(tp))return; }
 }
 
 /* ================= governance: leaders, votes, and schisms ================= */
@@ -6352,10 +6422,14 @@ function upkeepTick(){
   if(b.gone)continue;
   if(b.tp==='grave'){ if(simMin-(b.born||0)>=GRAVE_LIFE)bloomGrave(b); continue; }
   if(!b.done)continue;
-  if(!b.done)continue;
+  const cat=BMETA[b.tp]?BMETA[b.tp].cat:'house';
   const livingOwners=b.owners.filter(id=>{const o=allById.get(id);return o&&!o.dead});
-  const proprietorGone=b.tp==='biz'&&(()=>{const o=allById.get(b.builder);return !o||o.dead})();
-  const empty=(b.tp==='biz')?proprietorGone:livingOwners.length===0;
+  // civic buildings & parks are tended by the town itself — abandoned only when the
+  // village that raised them has no one left; houses go empty when their owners do
+  const villGone=()=>{const vil=b.vid!=null&&villages.find(x=>x.id===b.vid);return !vil||villageMembers(vil).length===0;};
+  const empty=(b.tp==='biz')?(()=>{const o=allById.get(b.builder);return !o||o.dead})()
+            :(cat==='civic'||cat==='park')?villGone()
+            :livingOwners.length===0;
   if(!b.ruined){
    if(empty){if(!b.emptySince)b.emptySince=simMin;else if(simMin-b.emptySince>RUIN_DELAY)ruinBuilding(b)}
    else b.emptySince=0;
@@ -6923,6 +6997,57 @@ function drawNode(c,n,t){
  c.fillStyle=n.t==='tree'?'#4a8a5a':'#7aa85a';
  c.beginPath();c.ellipse(px,py,5,4,0,0,7);c.fill();
 }
+// the grander builds a growing town raises — drawn as elevated facades with
+// storeys of windows, rising above their footprint
+const BSTYLE={
+ apartment:{wall:'#6a5b74',edge:'#4a3d54',roof:'#8a76c2',win:'#ffd98a'},
+ warehouse:{wall:'#6d6152',edge:'#463c30',roof:'#8a7a5a',win:'#9fb0c0'},
+ venue:{wall:'#5a4a6a',edge:'#3a2b4a',roof:'#c77ad0',win:'#ffe07a'},
+ factory:{wall:'#585560',edge:'#37343e',roof:'#7a7a86',win:'#a0d0ff'},
+ highrise:{wall:'#556072',edge:'#323b49',roof:'#7f93b5',win:'#bfe0ff'},
+};
+function drawTallBuilding(c,b){
+ const st=BSTYLE[b.tp]||BSTYLE.apartment, t=performance.now();
+ const px=b.x*TILE,py=b.y*TILE,w=b.w*TILE,h=b.h*TILE;
+ const stories=BMETA[b.tp].stories||1, STORY=9, rise=stories*STORY;
+ const byTop=py-rise, bh=h+rise;
+ c.fillStyle='rgba(0,0,0,0.30)';c.beginPath();c.ellipse(px+w/2,py+h-1,w*0.52,3.2,0,0,7);c.fill();
+ c.fillStyle=st.wall;c.fillRect(px,byTop,w,bh);
+ c.fillStyle=st.edge;c.fillRect(px+w-3,byTop,3,bh);
+ c.fillStyle='rgba(255,255,255,0.05)';c.fillRect(px,byTop,2,bh);
+ c.fillStyle=st.roof;c.fillRect(px-1,byTop-3,w+2,4);
+ // storeys of lit windows
+ const cols=Math.max(2,Math.round(w/6)), gapX=(w-4)/cols;
+ c.fillStyle=st.win;
+ for(let r=0;r<stories;r++){const wy=byTop+4+r*STORY;
+  for(let cc=0;cc<cols;cc++)c.fillRect(Math.round(px+3+cc*gapX),Math.round(wy),2.5,3.5);}
+ c.fillStyle='#161320';c.fillRect(px+w/2-3,py+h-6,6,6);   // door
+ if(b.tp==='factory'){
+  const chx=px+w-7,chy=byTop-2;
+  c.fillStyle=st.edge;c.fillRect(chx,chy-8,4,10);
+  c.fillStyle='rgba(185,185,195,0.32)';
+  for(let k=0;k<3;k++){const pk=((t*0.02+k*2.1)%6); c.beginPath();c.arc(chx+2+Math.sin(t*0.01+k)*2,chy-10-pk*3,2.1+pk*0.5,0,7);c.fill();}
+ }else if(b.tp==='venue'){
+  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+  c.drawImage(GLOW_PINK,px+w/2-11,py+h-16,22,18);c.globalCompositeOperation=go;
+  c.fillStyle=st.roof;c.fillRect(px+w/2-8,byTop+1,16,3);
+ }else if(b.tp==='warehouse'){
+  c.fillStyle=st.edge;c.fillRect(px+w/2-7,py+h-10,14,10);
+  c.fillStyle=st.wall;c.fillRect(px+w/2-6,py+h-9,12,8);
+ }else if(b.tp==='highrise'){
+  c.strokeStyle=st.edge;c.lineWidth=1;c.beginPath();c.moveTo(px+w/2,byTop-3);c.lineTo(px+w/2,byTop-9);c.stroke();
+  c.fillStyle=(Math.sin(t*0.006)>0)?'#ff5a5a':'#6a2626';c.beginPath();c.arc(px+w/2,byTop-9,1.4,0,7);c.fill();
+ }
+}
+function drawPark(c,b){
+ const px=b.x*TILE,py=b.y*TILE,w=b.w*TILE,h=b.h*TILE, gr=U.mulberry32((b.id*2654435761)>>>0);
+ c.fillStyle='#3f6a3a';c.fillRect(px,py,w,h);
+ c.fillStyle='#4c7a44';for(let k=0;k<16;k++)c.fillRect(px+2+gr()*(w-4),py+2+gr()*(h-4),2,2);
+ c.fillStyle='rgba(150,140,110,0.45)';c.fillRect(px+w/2-2,py+2,4,h-4);
+ for(let k=0;k<3;k++){const tx=px+5+gr()*(w-10),ty=py+5+gr()*(h-10);
+  c.fillStyle='#5a3f2a';c.fillRect(tx-1,ty-1,2,4);
+  c.fillStyle=k%2?'#4a8a4a':'#5a9a54';c.beginPath();c.arc(tx,ty-3,3.6,0,7);c.fill();}
+}
 function drawBuilding(c,b,nf){
  const px=b.x*TILE,py=b.y*TILE,w=b.w*TILE,h=b.h*TILE;
  if(b.tp==='grave'){
@@ -6955,6 +7080,8 @@ function drawBuilding(c,b,nf){
   c.fillStyle='#e8c065';c.fillRect(px+2,py-5,(w-4)*Math.min(1,b.prog/b.need),3);
   return;
  }
+ if(b.tp==='park'){drawPark(c,b);return}
+ if(['apartment','warehouse','venue','factory','highrise'].includes(b.tp)){drawTallBuilding(c,b);return}
  c.fillStyle='#1b1626';c.fillRect(px+w/2-2,py+h-4,4,4);
  if(b.tp==='biz'){
   // neon storefront sign
@@ -8721,6 +8848,7 @@ return {
   trackIndex:(i)=>{if(quests[i]){trackQuest(quests[i].id);return quests[i].title}return null},
   objective:()=>{const q=trackedQuestObj();const o=q?questObjective(q):null;return o?{tx:(o[0]/TILE)|0,ty:(o[1]/TILE)|0,kind:q.kind}:null},
   socialStats:()=>Object.assign({},socialLog),
+  settlement:()=>{const counts={};for(const b of buildings){if(b.gone)continue;const k=b.ruined?b.tp+'(ruin)':b.tp;counts[k]=(counts[k]||0)+1;}return {villages:villages.map(v=>({name:v.name,members:villageMembers(v).length,dev:villageDev(v)})),buildings:counts};},
   terrain:()=>{ if(!terTier)return null; let open=0,weak=0,hard=0,lush=0,barren=0; for(let i=0;i<W*H;i++){ if(map[i]===0){open++; if(fert&&fert[i]>=0.46)lush++; else barren++;} else if(terTier[i]===2)hard++; else weak++;} let emn=1,emx=0; if(elevF)for(let i=0;i<W*H;i++){if(elevF[i]<emn)emn=elevF[i];if(elevF[i]>emx)emx=elevF[i];} return {W,H,open,weak,hard,lush,barren,solidPct:+((weak+hard)/(W*H)*100).toFixed(1),elevMin:+emn.toFixed(3),elevMax:+emx.toFixed(3),blooms:graveBlooms.length}; },
   forceSocialAct:(kind)=>{
    const a=people.filter(x=>!x.dead&&!x.inDungeon);
