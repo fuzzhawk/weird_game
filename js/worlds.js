@@ -69,46 +69,55 @@ const Worlds = (function(){
    text:'Hedgerows and footpaths and a summer fête that everyone swears they are not competing in. Neighbours nosy in the caring way; the pub is the true town hall. Sundays for roasts and rambling and the long civilised silence of people who have run out of news and do not mind. Little happens. Everyone knows about it twice. Bees in the foxgloves, cake on the trestle table, and that — the village agrees — is exactly, precisely how a place ought to be.'},
  ];
 
- let onEnter=null, sel=null;
+ // the world sliders — id → worldParams key. Each drives generation directly.
+ const SLD=['wBuildup','wFlora','wFertility','wFauna','wMonsters','wTreasure','wHue','wSat'];
+ const SKEY={wBuildup:'buildup',wFlora:'flora',wFertility:'fertility',wFauna:'fauna',wMonsters:'monsters',wTreasure:'treasure',wHue:'hue',wSat:'sat'};
+
+ let onEnter=null, theme='fantasy';
+ function pickTheme(t){
+  theme=t;
+  [...$('wThemes').querySelectorAll('button')].forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+ }
  function boot(cb){
   onEnter=cb;
-  const grid=$('wgrid');
-  grid.innerHTML='';
-  WORLDS.forEach((w,i)=>{
-   const th=THEMES[w.t];
-   const card=document.createElement('button');
-   card.className='wcard'; card.dataset.i=i;
-   card.innerHTML='<span class="wchip" style="color:'+th.c+';border-color:'+th.c+'44">'+th.g+' '+th.n+'</span>'
-    +'<div class="wtitle">'+w.title+'</div><div class="wblurb">'+w.blurb+'</div>';
-   card.onclick=()=>select(i);
-   grid.appendChild(card);
-  });
-  $('wRandom').onclick=()=>select((Math.random()*WORLDS.length)|0);
+  [...$('wThemes').querySelectorAll('button')].forEach(b=>b.onclick=()=>pickTheme(b.dataset.t));
+  pickTheme('fantasy');
+  seedLore();                       // start with a coherent lore paragraph + seed
+  $('wRandomAll').onclick=randomizeAll;
   $('wEnter').onclick=enter;
-  $('wSheetBack').onclick=()=>$('wsheet').classList.remove('open');
   $('boot').classList.remove('hidden');
  }
- function select(i){
-  sel=i; const w=WORLDS[i], th=THEMES[w.t];
-  [...document.querySelectorAll('.wcard')].forEach(c=>c.classList.toggle('on',+c.dataset.i===i));
-  $('wSheetTitle').textContent=w.title;
-  $('wSheetTheme').textContent=th.g+' '+th.n;
-  $('wSheetTheme').style.color=th.c;
+ // drop a fresh lore paragraph + seed matching the chosen theme into the text field
+ function seedLore(t){
+  t=t||theme;
+  const pool=WORLDS.filter(w=>w.t===t); const w=pool[(Math.random()*pool.length)|0]||WORLDS[0];
   $('wSeedText').value=w.text;
   $('wSeedNum').value=w.seed;
-  $('wsheet').classList.add('open');
-  $('wsheet').scrollIntoView&&$('wsheet').scrollIntoView({behavior:'smooth',block:'nearest'});
+ }
+ function randomizeAll(){
+  const t=['fantasy','cyberpunk','modern'][(Math.random()*3)|0];
+  pickTheme(t);
+  seedLore(t);
+  $('wSeedNum').value=(Math.random()*1e5)|0;
+  // buildup skews low so most rolls are livable wilds, with the occasional metropolis
+  const roll={wBuildup:Math.pow(Math.random(),1.7),wFlora:Math.random(),wFertility:Math.random(),
+   wFauna:Math.random(),wMonsters:Math.random(),wTreasure:Math.random(),wHue:Math.random(),wSat:Math.random()};
+  for(const id of SLD)$(id).value=roll[id];
+ }
+ function collectParams(){
+  const p={};
+  for(const id of SLD)p[SKEY[id]]=parseFloat($(id).value);
+  return p;
  }
  function enter(){
-  if(sel==null)return;
-  const w=WORLDS[sel];
   const text=$('wSeedText').value;
   const seedNum=parseInt($('wSeedNum').value,10);
-  const seed=isNaN(seedNum)?w.seed:seedNum;
-  Lore.train(text, seed, w.t);
+  const seed=isNaN(seedNum)?((Math.random()*1e5)|0):seedNum;
+  const params=collectParams();
+  Lore.train(text, seed, theme);
   Mind.seedWorld(text, seed);   // per-NPC mutating memory shares the world's substrate
   $('boot').classList.add('hidden');
-  if(onEnter)onEnter({seed, theme:w.t, title:w.title, text});
+  if(onEnter)onEnter({seed, theme, title:THEMES[theme].n, text, params});
  }
  return { boot, WORLDS };
 })();

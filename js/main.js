@@ -40,7 +40,7 @@ function loop(t){
 
 // dream up the chosen world and start (the loading screen has already trained Lore)
 function enterWorld(cfg){
-  Surface.api.reseed(cfg?cfg.seed:undefined, cfg?cfg.theme:undefined);
+  Surface.api.reseed(cfg?cfg.seed:undefined, cfg?cfg.theme:undefined, cfg?cfg.params:undefined);
   showSurface();
   if(!running){ running=true; requestAnimationFrame(loop); }
 }

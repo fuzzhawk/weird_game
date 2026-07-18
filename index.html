@@ -193,45 +193,66 @@ button:active{transform:translateY(1px)}
 /* ================= world-select loading screen ================= */
 #boot{position:fixed;inset:0;z-index:100;background:radial-gradient(120% 90% at 50% -10%,#16241a,#0a0f0c 70%);color:#e8e2d5;display:flex;flex-direction:column;overflow:hidden;padding-top:env(safe-area-inset-top)}
 #boot.hidden{display:none}
-#bootHead{padding:20px 18px 8px;text-align:center;flex:0 0 auto}
+#bootHead{padding:18px 18px 6px;text-align:center;flex:0 0 auto}
 #bootHead h1{font-family:Georgia,serif;font-size:26px;letter-spacing:.14em;margin:0;color:#cfe37a}
 #bootHead p{margin:6px 0 0;font-size:12.5px;color:#8fa885;letter-spacing:.03em}
-#wgrid{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;padding:12px 14px 20px;align-content:start}
-.wcard{text-align:left;background:rgba(24,34,22,.85);border:1px solid #2c4022;border-radius:12px;padding:11px 12px;cursor:pointer;color:#e8e2d5;transition:border-color .12s,transform .06s;display:flex;flex-direction:column;gap:5px}
-.wcard:active{transform:translateY(1px)}
-.wcard.on{border-color:#cfe37a;background:rgba(40,54,32,.95);box-shadow:0 0 0 1px #cfe37a55}
-.wchip{font-size:9.5px;font-weight:700;letter-spacing:.04em;border:1px solid;border-radius:99px;padding:2px 7px;align-self:flex-start}
-.wtitle{font-family:Georgia,serif;font-size:15px;font-weight:700;color:#f0ead9;line-height:1.15}
-.wblurb{font-size:11px;color:#9db09a;line-height:1.35}
-#wsheet{flex:0 0 auto;background:rgba(14,20,14,.98);border-top:1px solid #3c4f33;border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.6);padding:12px 16px calc(14px + env(safe-area-inset-bottom));max-height:0;overflow:hidden;transition:max-height .25s ease}
-#wsheet.open{max-height:62vh;overflow-y:auto}
-.wsheetTop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-#wSheetTitle{font-family:Georgia,serif;font-size:18px;font-weight:700;color:#f0ead9}
-#wSheetTheme{font-size:11px;font-weight:700}
-#wsheet label{display:block;font-size:11px;color:#8fa885;margin:10px 0 4px;letter-spacing:.03em}
-#wSeedText{width:100%;box-sizing:border-box;min-height:96px;resize:vertical;background:#141c14;border:1px solid #3c4f33;border-radius:10px;color:#cfc6b8;font-family:Georgia,serif;font-size:12.5px;line-height:1.5;padding:9px 11px}
+#wbody{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 16px 24px;max-width:560px;width:100%;margin:0 auto;box-sizing:border-box}
+#wRandomAll{width:100%;background:linear-gradient(180deg,#274a30,#1a3524);color:#dff3df;border:2px solid #4fbe64;border-radius:12px;padding:14px;font-size:16px;font-weight:700;letter-spacing:.05em;cursor:pointer;margin:6px 0 4px}
+#wRandomAll:active{transform:translateY(1px)}
+.wsecLbl{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#7f9877;margin:16px 0 8px}
+.wthemes{display:flex;gap:8px;flex-wrap:wrap}
+.wthemes button{flex:1 1 auto;background:rgba(24,34,22,.85);border:1px solid #2c4022;border-radius:10px;padding:9px 6px;color:#cdd9c4;font-size:12px;font-weight:700;cursor:pointer;transition:border-color .12s}
+.wthemes button.on{border-color:currentColor;box-shadow:0 0 0 1px currentColor inset}
+.wsld{margin:11px 0}
+.wsld .wsldTop{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+.wsld .wsldName{font-size:12.5px;color:#e0dccf;font-weight:600}
+.wsld .wsldEnds{font-size:10px;color:#7f9877;letter-spacing:.02em}
+.wsld input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:6px;border-radius:99px;background:#243021;outline:none;margin:0}
+.wsld input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;border-radius:50%;background:#cfe37a;border:2px solid #16241a;cursor:pointer}
+.wsld input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#cfe37a;border:2px solid #16241a;cursor:pointer}
+#wHue{background:linear-gradient(90deg,#e05a5a,#e0c85a,#5ae06a,#5ac8e0,#6a5ae0,#e05ad0,#e05a5a)}
+#wHue::-webkit-slider-thumb{background:#fff}
+#wHue::-moz-range-thumb{background:#fff}
+#wbody label{display:block;font-size:11px;color:#8fa885;margin:16px 0 5px;letter-spacing:.03em}
+#wSeedText{width:100%;box-sizing:border-box;min-height:84px;resize:vertical;background:#141c14;border:1px solid #3c4f33;border-radius:10px;color:#cfc6b8;font-family:Georgia,serif;font-size:12.5px;line-height:1.5;padding:9px 11px}
 .wseedRow{display:flex;gap:9px;align-items:center;margin-top:9px}
 #wSeedNum{width:110px;background:#141c14;border:1px solid #3c4f33;border-radius:8px;color:#cfe37a;padding:8px 10px;font-size:13px}
-.wsheetBtns{display:flex;gap:8px;margin-top:12px}
-#wEnter{flex:1 1 auto;background:#1a3524;color:#cfe8cf;border:2px solid #3fae54;border-radius:10px;padding:12px;font-size:15px;font-weight:700;letter-spacing:.06em;cursor:pointer}
+#wEnter{width:100%;box-sizing:border-box;background:#1a3524;color:#cfe8cf;border:2px solid #3fae54;border-radius:10px;padding:14px;font-size:15px;font-weight:700;letter-spacing:.06em;cursor:pointer;margin-top:16px}
 #wEnter:active{transform:translateY(1px)}
-#wSheetBack,#wRandom{background:rgba(30,38,26,.9);border:1px solid #3c4f33;color:#e8e2d5;border-radius:10px;padding:12px 16px;font-size:13px;cursor:pointer}
-#wRandom{position:absolute;top:calc(18px + env(safe-area-inset-top));right:16px}
 </style>
 </head>
 <body>
 
 <!-- ================= WORLD SELECT (loading screen) ================= -->
 <div id="boot">
-  <button id="wRandom">🎲 Surprise me</button>
-  <div id="bootHead"><h1>SEED &amp; SAGE</h1><p>Choose a world to seed — or paste your own lore.</p></div>
-  <div id="wgrid"></div>
-  <div id="wsheet">
-    <div class="wsheetTop"><span id="wSheetTitle">—</span><span id="wSheetTheme"></span></div>
-    <label>Seed text — paste a paragraph; it teaches the world its names &amp; voice</label>
+  <div id="bootHead"><h1>SEED &amp; SAGE</h1><p>Shape a world, then seed its voice.</p></div>
+  <div id="wbody">
+    <button id="wRandomAll">🎲 Randomize all</button>
+
+    <div class="wsecLbl">Voice &amp; era</div>
+    <div class="wthemes" id="wThemes">
+      <button data-t="fantasy" style="color:#c9a24a">⚔️ Fantasy</button>
+      <button data-t="cyberpunk" style="color:#37e6ff">🌃 Cyberpunk</button>
+      <button data-t="modern" style="color:#8fd3a0">🏙️ Modern</button>
+    </div>
+
+    <div class="wsecLbl">World</div>
+    <div class="wsld"><div class="wsldTop"><span class="wsldName">Buildup</span><span class="wsldEnds">wild ↔ city</span></div><input type="range" id="wBuildup" min="0" max="1" step="0.01" value="0"></div>
+    <div class="wsld"><div class="wsldTop"><span class="wsldName">Greenery</span><span class="wsldEnds">bare ↔ lush</span></div><input type="range" id="wFlora" min="0" max="1" step="0.01" value="0.5"></div>
+    <div class="wsld"><div class="wsldTop"><span class="wsldName">Fertility</span><span class="wsldEnds">barren ↔ rich</span></div><input type="range" id="wFertility" min="0" max="1" step="0.01" value="0.5"></div>
+    <div class="wsld"><div class="wsldTop"><span class="wsldName">Animals</span><span class="wsldEnds">few ↔ teeming</span></div><input type="range" id="wFauna" min="0" max="1" step="0.01" value="0.5"></div>
+    <div class="wsld"><div class="wsldTop"><span class="wsldName">Monsters</span><span class="wsldEnds">calm ↔ dangerous</span></div><input type="range" id="wMonsters" min="0" max="1" step="0.01" value="0.5"></div>
+    <div class="wsld"><div class="wsldTop"><span class="wsldName">Treasure</span><span class="wsldEnds">scarce ↔ rich</span></div><input type="range" id="wTreasure" min="0" max="1" step="0.01" value="0.5"></div>
+
+    <div class="wsecLbl">Palette</div>
+    <div class="wsld"><div class="wsldTop"><span class="wsldName">Hue</span><span class="wsldEnds">colour of the world</span></div><input type="range" id="wHue" min="0" max="1" step="0.01" value="0.3"></div>
+    <div class="wsld"><div class="wsldTop"><span class="wsldName">Saturation</span><span class="wsldEnds">muted ↔ vivid</span></div><input type="range" id="wSat" min="0" max="1" step="0.01" value="0.4"></div>
+
+    <label>Lore seed — paste a paragraph; it teaches the world its names &amp; voice</label>
     <textarea id="wSeedText" spellcheck="false"></textarea>
     <div class="wseedRow"><label style="margin:0">World seed</label><input id="wSeedNum" inputmode="numeric" value="0"></div>
-    <div class="wsheetBtns"><button id="wSheetBack">Back</button><button id="wEnter">◈ Enter this world</button></div>
+
+    <button id="wEnter">◈ Enter this world</button>
   </div>
 </div>
 

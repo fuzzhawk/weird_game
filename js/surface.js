@@ -46,6 +46,10 @@ const RUIN_DELAY=6*DAY,CRUMBLE_DELAY=10*DAY;
 // blooms take over, the tile is freed, and the turned earth is left richer.
 const GRAVE_LIFE=16*DAY, GRAVE_BLOOM_GROW=4*DAY, GRAVE_BLOOM_LIFE=30*DAY, GRAVE_BLOOM_FADE=6*DAY;
 let graveBlooms=[];
+// world-generation knobs the loading-screen randomizer sets (each 0..1; -1 = auto).
+// 0.5 reproduces the classic feel; the multiplier maps 0.5 → 1× so mid = default.
+let worldParams={buildup:0,flora:.5,fertility:.5,fauna:.5,monsters:.5,treasure:.5,hue:-1,sat:-1};
+function wpMul(k){const v=worldParams&&worldParams[k]!=null?worldParams[k]:.5;return 0.25+v*1.5}   // 0→.25, .5→1, 1→1.75
 const VILLAGE_MIN=4;
 const WALL_STONE=0;
 const FARM_RIPEN=1.4*DAY;
@@ -535,7 +539,7 @@ function genFertility(){
  if(!elevF)elevF=fbmElev(seed*2+1); const elev=elevF, moist=valNoise(seed*7+3);
  for(let i=0;i<W*H;i++){
   // damp lowland loam is richest; dry uplands are poorer
-  fert[i]=clamp(0.24 + moist[i]*0.52 + (1-elev[i])*0.30 - 0.12, 0, 1);
+  fert[i]=clamp((0.24 + moist[i]*0.52 + (1-elev[i])*0.30 - 0.12)*wpMul('fertility'), 0, 1);
  }
  // gentle hydraulic erosion: a little fertility creeps downhill into the valleys
  for(let pass=0;pass<2;pass++){
@@ -865,8 +869,8 @@ function genWorld(){
    const nd={x,y,t:'rock',amt:5,max:5,reg:1500,rt:0,yield:'stone'};
    nodes.push(nd);nodeAt.set(idx(x,y),nd);continue;
   }
-  // a plant takes root with probability rising in fertile soil
-  if(R() < 0.012+f*0.06){
+  // a plant takes root with probability rising in fertile soil (and the flora dial)
+  if(R() < (0.012+f*0.06)*wpMul('flora')){
    const sp=pickSpeciesFor(f);
    if(sp) plantNode(x,y,sp);
   }
@@ -915,12 +919,83 @@ function genWorld(){
  flyers=[];flockSeq=1;
  for(let i=0;i<3;i++)spawnFlock();
  for(let i=0;i<4;i++)spawnFlyer();
+ if(worldParams.buildup>0)seedCity(worldParams.buildup);
  refreshChron();
+}
+// pre-build a settlement at world start, scaled by the "buildup" slider (0..1):
+// low buildup dots the meadow with a few homes; high buildup raises a dense city of
+// towers, tenements, factories and halls. Places completed buildings around the
+// people-centroid, moves settlers into the housing, then wakes the village system.
+function seedCity(bu){
+ bu=clamp(bu,0,1);
+ const cen=townCentroid()||[Math.round(cam.x/TILE),Math.round(cam.y/TILE)];
+ // how many structures to plant, and the type mix, both ramp with buildup
+ const n=Math.round(3+bu*34);
+ // weighted type table: as bu rises the mix tilts from cottages toward towers/civic
+ function pickType(){
+  const t=[];
+  const add=(tp,w)=>{if(w>0)t.push([tp,w])};
+  add('shelter', 3*(1-bu));
+  add('home',    4);
+  add('biz',     1.5+bu*1.5);
+  add('park',    0.6+bu*1.4);
+  add('apartment', bu*3);
+  add('warehouse', bu*1.2);
+  add('venue',   bu*1.2);
+  add('factory', bu*bu*2.2);
+  add('highrise', bu*bu*3.5);
+  let tot=0;for(const e of t)tot+=e[1];
+  let r=rng()*tot;
+  for(const e of t){r-=e[1];if(r<=0)return e[0]}
+  return 'home';
+ }
+ const placed=[];
+ for(let k=0;k<n;k++){
+  const tp=pickType();
+  const[w,h]=SZ[tp];
+  // scatter tighter for a dense city, wider for a sparse hamlet
+  const spread=Math.round(6+(1-bu)*10);
+  const s=findSpot(cen[0]+ri(-spread,spread),cen[1]+ri(-spread,spread),w,h,null);
+  if(!s)continue;
+  const b={i:buildings.length,id:nextId++,tp,x:s[0],y:s[1],w,h,prog:0,need:NEED[tp],done:false,gone:false,
+   owners:[],builder:null,forId:null,stock:{food:0,wood:0,stone:0},prosperity:0,sub:null,name:null,ref:null,
+   emptySince:0,ruined:false,vid:null};
+  if(tp==='biz'){
+   b.sub=pick(BIZKINDS);
+   const bizName=()=>Lore.active?'The '+Lore.name(4,10):'The '+pick(BIZ_ADJ)+' '+pick(BIZ_NOUN);
+   let nm=bizName(),tr=0;while(usedBiz.has(nm)&&tr++<15)nm=bizName();
+   usedBiz.add(nm);b.name=nm;
+  }
+  buildings.push(b);
+  for(let y=b.y;y<b.y+h;y++)for(let x=b.x;x<b.x+w;x++)bld[idx(x,y)]=b.i;
+  completeBuild(b);
+  placed.push(b);
+ }
+ // move the founding settlers into whatever housing was raised
+ const houses=placed.filter(b=>!b.gone&&BMETA[b.tp]&&BMETA[b.tp].cat==='house');
+ if(houses.length){
+  for(const p of people){
+   if(p.home)continue;
+   const h=houses.find(b=>b.owners.length<bcap(b))||houses[ri(0,houses.length-1)];
+   setHome(p,h);
+   const[hx,hy]=homeTile(h);
+   p.x=hx*TILE+TILE/2;p.y=hy*TILE+TILE/2;
+  }
+ }
+ // recompute the camera on the new town heart, wake the village system, and
+ // register any civic buildings with the freshly-formed village so they persist
+ if(people.length){
+  const c=people.reduce((a,p)=>[a[0]+p.x,a[1]+p.y],[0,0]);
+  cam.x=c[0]/people.length;cam.y=c[1]/people.length;
+ }
+ detectVillages();
+ const v=nearestVillage({x:cen[0]*TILE,y:cen[1]*TILE},60);
+ if(v)for(const b of placed)if(!b.gone&&!b.vid)b.vid=v.id;
 }
 // relics surface as the world industrialises: few in the forest, many in the
 // waste — and the built themes (modern, cyberpunk) are strewn with far more.
 function relicMult(){ return worldTheme==='cyberpunk'?2.1 : worldTheme==='modern'?1.5 : 1; }
-function relicTarget(){ return Math.round((1 + (1-eraGreen())*13)*relicMult()); }
+function relicTarget(){ return Math.round((1 + (1-eraGreen())*13)*relicMult()*wpMul('treasure')); }
 function spawnSalvage(){
  for(let t=0;t<40;t++){
   const[x,y]=randOpenTile();
@@ -1790,8 +1865,8 @@ function unearthRock(x,y,agent){
   if(agent.p)agent.p.inv.stone++;
   if(agent.v)agent.v.stock.stone+=stone;
  }
- // buried treasure — the hard black highland hides far more of it
- if(chance(hard?0.24:0.05+elev*0.08)){
+ // buried treasure — the hard black highland hides far more of it (× the treasure dial)
+ if(chance((hard?0.24:0.05+elev*0.08)*wpMul('treasure'))){
   spawnSalvageAt(x,y); spawnSparkle(px,py);
   if(agent&&agent.hero)toast('You struck something buried in the rock — salvage glints in the rubble.');
   else if(agent&&agent.p&&chance(.5))tale([agent.p],agent.p.name+' pried something strange out of the deep rock near '+((agent.v&&agent.v.name)||'the diggings')+'.');
@@ -2636,7 +2711,7 @@ function processExpeditions(){
 }
 
 /* ================= monsters (mostly peaceful surface — occasional risers) ================= */
-function monsterCap(){return Math.min(16,3+((people.length/3)|0))}   // the dark presses harder now
+function monsterCap(){return Math.max(0,Math.round(Math.min(16,3+((people.length/3)|0))*wpMul('monsters')))}   // the dark presses harder now
 function spawnMonster(d,at){
  if(monsters.length>=monsterCap()||peaceful||(d&&d.cleansed))return;
  const r=R();
@@ -2941,7 +3016,7 @@ function monsterSocial(m,dt){
 
 /* ================= fauna (the Animal Forge) ================= */
 // there is more life in a green age than a grey one
-function animalTarget(){ return Math.round(2 + eraGreen()*12); }
+function animalTarget(){ return Math.round((2 + eraGreen()*12)*wpMul('fauna')); }
 function spawnAnimal(key,made){
  let spot=null;
  for(let t=0;t<40&&!spot;t++){
@@ -3085,7 +3160,7 @@ function updateAnimals(dt){
 }
 
 /* ================= flyers: birds & insects, some in flocks ================= */
-function flyerTarget(){ return Math.round(6 + eraGreen()*20); }   // skies busier in green ages
+function flyerTarget(){ return Math.round((6 + eraGreen()*20)*wpMul('fauna')); }   // skies busier in green ages
 function spawnFlyer(key,made,flockId,x,y){
  made=made||AF.makeFlyer(key||null, seed+'-fly-'+nextId+'-'+((R()*1e9)|0));
  if(x===undefined){const s=randOpenTile();x=s[0]*TILE+TILE/2;y=s[1]*TILE+TILE/2}
@@ -3793,8 +3868,10 @@ function hsl2hex(h,s,l){ const c=CF.hsl(((h%360)+360)%360, clamp(s,0,100), clamp
 function lerpHueDeg(a,b,t){ let d=((b-a+540)%360)-180; return a+d*t; }
 function makeBiome(){
  const rng=U.mulberry32((seed>>>0)^0xB10E5);
- const hue=Math.round(rng()*360);
- biome={ hue, hue2:Math.round((hue+130+rng()*130)%360), sat:34+rng()*24,
+ // the randomizer can pin the palette hue & saturation; -1 leaves it to the seed
+ const hue=(worldParams&&worldParams.hue>=0)?Math.round(worldParams.hue*360):Math.round(rng()*360);
+ const sat=(worldParams&&worldParams.sat>=0)?(14+worldParams.sat*62):(34+rng()*24);
+ biome={ hue, hue2:Math.round((hue+130+rng()*130)%360), sat,
    plantRot:Math.round(rng()*360), faunaShift:Math.round(rng()*360), relicRot:Math.round(rng()*360) };
  return biome;
 }
@@ -5956,9 +6033,10 @@ $('newBtn').onclick=()=>{
   toast('Tap ↻ again to let this garden go');
  }
 };
-function reseed(newSeed,theme){
+function reseed(newSeed,theme,params){
  seed=(newSeed===undefined)?((Math.random()*2**31)|0):newSeed;
  if(theme)worldTheme=theme;
+ if(params)worldParams=Object.assign({buildup:0,flora:.5,fertility:.5,fauna:.5,monsters:.5,treasure:.5,hue:-1,sat:-1},params);
  rng=U.mulberry32(seed);
  eraOffset=startEraOffset();      // each world opens in a theme-appropriate age, not always verdant
  genWorld();
