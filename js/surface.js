@@ -6874,12 +6874,16 @@ const VILLAINS={
  modern:[['the Blight','a creeping wrongness worked up through the soil'],['the Hoarder-Lord','a pack-rat king of the dead mill'],['the Quiet Man','a rumour that learned to bite'],['the Undertow','something patient in the grey water']],
 };
 function villainFor(){ const bag=VILLAINS[worldTheme]||VILLAINS.fantasy; return pick(bag); }
+function roman(n){ const M=['','I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV']; return M[n]||('#'+n); }
+// grander epithets as the acts climb, so a reused villain still reads as escalation
+const VILLAIN_RANK=['','Greater ','Elder ','Dread ','World-Ending '];
 function homeVillage(){ return (campaign&&campaign.home)?villages.find(v=>v.id===campaign.home):villages[0]; }
 function startCampaign(){
  const home=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length)[0];
  const[vName,vDesc]=villainFor();
  campaign={ title:(Lore.active?('The '+Lore.name(4,10)+' Saga'):'A Wandering Saga'),
-   villain:vName, villainDesc:vDesc, home:home?home.id:null, idx:0, chapters:[], done:false, boss:null, history:captureHistory() };
+   villain:vName, villainDesc:vDesc, home:home?home.id:null, idx:0, chapters:[], done:false, boss:null,
+   act:1, tier:0, cleared:0, history:captureHistory() };
  buildChapters();
  const ev=campaign.history.events.length?(' In the old tales it is written: “'+campaign.history.events[0]+'”'):'';
  tale([], '📖 '+campaign.title+' begins. A shadow gathers over '+((home&&home.name)||'the land')+' — folk name it '+vName+', '+vDesc+' — and only a wanderer can stand against it.'+ev,true);
@@ -7105,7 +7109,7 @@ function spawnChampion(name,c){
  const M=MONSTERS.lurker;
  const m={id:nextId++,type:'lurker',champion:true,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,fx:1,dirIdx:0,animClock:R()*4,
   hp:0,maxhp:0,dmg:M.dmg+2,spd:M.spd*1.05,col:'#b06adf',g:'⚔',name,home:null,target:null,path:null,pi:0,atkCd:0,roamT:0,em:null,born:simMin,atkAnim:0,camp:null,socialCd:1e9,raid:null,raidUntil:0};
- m.maxhp=m.hp=Math.round(90+Hero.level*28);
+ m.maxhp=m.hp=Math.round(90+Hero.level*28+(campaign&&campaign.tier||0)*22);
  monsters.push(m); emote2(m,'⚔');
  tale([],name+' strides out of the tree-line, and the air goes cold around it.',true);
  return m;
@@ -7116,7 +7120,7 @@ function spawnBeast(name,spot){
  const s=nearOpen(spot[0],spot[1])||spot;
  a.x=s[0]*TILE+TILE/2; a.y=s[1]*TILE+TILE/2;
  a.temper='predator'; a.name=name; a.questBeast=true;
- a.hp=a.maxhp=Math.round(a.maxhp*2.4+30); a.dmg=Math.round(a.dmg*1.4+2);
+ a.hp=a.maxhp=Math.round(a.maxhp*2.4+30+(campaign&&campaign.tier||0)*14); a.dmg=Math.round(a.dmg*1.4+2);
  if(a.spec){a.spec.aggro=Math.max(a.spec.aggro||6,10); a.spec.bold=true;}
  return a;
 }
@@ -7143,15 +7147,19 @@ function buildChapters(){
  const gens=[genNpc,genHunt,genDungeon,genGather,genFeud,genBloom,genGuard,
    genEscort,genBeast,genTame,genRelic,genTribute,genVigil,genTrade,genRite,genPilgrimage,genChampion];
  shuffle(gens);
- let lastK=chs[0].k, added=0, want=ri(4,6);
+ // sagas grow longer as the acts climb (more mid-chapters, capped)
+ let lastK=chs[0].k, added=0, want=Math.min(9, ri(4,6)+Math.min(4,(campaign.act||1)-1));
  for(const g of gens){ if(added>=want)break; const c=g(H); if(!c||c.k===lastK)continue; chs.push(c); lastK=c.k; added++; }
+ // later acts field a rival champion before the finale
+ if((campaign.act||1)>=2 && !chs.some(c=>c.k==='champion')){ const ch=genChampion(H); if(ch)chs.splice(chs.length,0,ch); }
  // guarantee some combat features before the finale
  if(!chs.some(c=>['hunt','guard','beast','champion','vigil'].includes(c.k))){ const h=genHunt(H); if(h){chs.splice(Math.max(1,chs.length-1),0,h);} }
  chs.push(genBoss(H));
  campaign.chapters=chs;
 }
-// scale a chapter's demands by how deep into the saga it sits
-function chapterDifficulty(){ return campaign.idx; }
+// difficulty climbs endlessly with total chapters cleared, not just position —
+// so each new act opens harder than the last ended
+function chapterDifficulty(){ return (campaign.tier||0); }
 function activateChapter(){
  const ch=campaign.chapters[campaign.idx]; if(!ch){finishCampaign();return}
  ch.prog=0; ch.done=false;
@@ -7160,15 +7168,15 @@ function activateChapter(){
  else if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(!t||t.dead){const g=genNpc(campaign.history);if(g)Object.assign(ch,g);} const t2=allById.get(ch.targetId); if(t2){ch.mark=[(t2.x/TILE)|0,(t2.y/TILE)|0];emote(t2,'❔');} }
  else if(ch.k==='feud'){ ch.stage=0; const a=allById.get(ch.aId); if(!a||a.dead){const g=genFeud(campaign.history);if(g)Object.assign(ch,g);} const A=allById.get(ch.aId); if(A){ch.mark=[(A.x/TILE)|0,(A.y/TILE)|0];emote(A,'💢');} else { advanceChapter(); return; } }
  else if(ch.k==='bloom'){ ch.mark=[ch.spot[0],ch.spot[1]]; }
- else if(ch.k==='hunt'||ch.k==='guard'){ ch.packN=2+diff; ch._pack=spawnHuntPack(ch.spot[0],ch.spot[1],ch.packN); if(!ch._pack.length){ ch.k='reach'; ch.place={x:ch.spot[0],y:ch.spot[1],name:ch.loc||ch.bName||'the place'}; ch.mark=[ch.spot[0],ch.spot[1]]; } else ch.mark=[ch.spot[0],ch.spot[1]]; }
+ else if(ch.k==='hunt'||ch.k==='guard'){ ch.packN=Math.min(10,2+diff); ch._pack=spawnHuntPack(ch.spot[0],ch.spot[1],ch.packN); if(!ch._pack.length){ ch.k='reach'; ch.place={x:ch.spot[0],y:ch.spot[1],name:ch.loc||ch.bName||'the place'}; ch.mark=[ch.spot[0],ch.spot[1]]; } else ch.mark=[ch.spot[0],ch.spot[1]]; }
  else if(ch.k==='dungeon'){ let d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed); if(!d)d=pickStoryDungeon(); if(d){ch.dungeonId=d.id;ch.dunName=d.name;ch.mark=[d.x,d.y];ch._descended=false;} else { advanceChapter(); return; } }
- else if(ch.k==='gather'){ ch.need=6+diff*4; ch.slayBase=heroStone; }
+ else if(ch.k==='gather'){ ch.need=Math.min(48,6+diff*3); ch.slayBase=heroStone; }
  else if(ch.k==='escort'){ ch.stage=0; const p=allById.get(ch.targetId); if(!p||p.dead){const g=genEscort(campaign.history);if(g)Object.assign(ch,g);} const P=allById.get(ch.targetId); if(P){ch.mark=[(P.x/TILE)|0,(P.y/TILE)|0];emote(P,'🆘');} else { advanceChapter(); return; } }
  else if(ch.k==='beast'){ ch._beast=spawnBeast(ch.beastName,ch.spot); if(!ch._beast){ advanceChapter(); return; } ch.mark=[(ch._beast.x/TILE)|0,(ch._beast.y/TILE)|0]; }
  else if(ch.k==='tame'){ ch.mark=null; }
  else if(ch.k==='relic'){ ch.base=Hero.relics.length; const s=nearOpen(ch.spot[0],ch.spot[1])||ch.spot; spawnFind(s[0],s[1],'relic',0,pick(RELICS)); ch.mark=[s[0],s[1]]; }
- else if(ch.k==='tribute'){ ch.need=20+diff*15; ch.base=heroGold; }
- else if(ch.k==='vigil'){ ch.mark=[ch.spot[0],ch.spot[1]]; ch.dur=13+diff*3; ch.vigilT=0; ch.spawnT=1; }
+ else if(ch.k==='tribute'){ ch.need=Math.min(180,20+diff*12); ch.base=heroGold; }
+ else if(ch.k==='vigil'){ ch.mark=[ch.spot[0],ch.spot[1]]; ch.dur=Math.min(40,12+diff*1.3); ch.vigilT=0; ch.spawnT=1; }
  else if(ch.k==='trade'){ if(!merchant)spawnMerchant(); if(merchant){merchant.state='stalled';ch.mark=[merchant.tx,merchant.ty];} else { advanceChapter(); return; } }
  else if(ch.k==='rite'){ const v=villages.find(x=>x.id===ch.festVid)||homeVillage(); if(v){ch.festVid=v.id;v.lastFest=0;v.festival={id:nextId++,endDay:cday()+2,cx:v.cx,cy:v.cy};if(typeof gatherFestival==='function')gatherFestival(v,.85);ch.mark=[Math.round(v.cx),Math.round(v.cy)];} else { advanceChapter(); return; } }
  else if(ch.k==='pilgrimage'){ ch.si=0; ch.mark=[ch.stops[0][0],ch.stops[0][1]]; }
@@ -7276,21 +7284,36 @@ function campaignTick(dt){
 function advanceChapter(){
  const ch=campaign.chapters[campaign.idx]; if(!ch)return;
  ch.done=true;
- const ups=heroGainXp(6+campaign.idx*3); if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
- Hero.renown=(Hero.renown||0)+2; heroGold+=10+campaign.idx*8;
+ const tier=campaign.tier||0;
+ const ups=heroGainXp(6+tier*2); if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
+ Hero.renown=(Hero.renown||0)+2; heroGold+=10+tier*6;
+ campaign.tier=tier+1; campaign.cleared=(campaign.cleared||0)+1;
  toast('📖 Chapter complete — '+fillTokens(ch.title,ch),'card');
  tale([],'✔ '+(ch._desc||fillTokens(ch.desc,ch))+' The tale turns a page.',true);
  campaign.idx++;
- if(campaign.idx>=campaign.chapters.length){ finishCampaign(); return; }
+ if(campaign.idx>=campaign.chapters.length){ nextAct(); return; }
  activateChapter();
 }
-function finishCampaign(){
- campaign.done=true; campaign.boss=null;
- storyCard('🏆 The Saga is Ended','With '+campaign.villain+' undone, the world lets out a breath it had held for an age. Your name will outrun you now, Sage. The land is at peace — and yours to wander, until the next tale takes root.');
- tale([],'🏆 '+campaign.villain+' is undone, and the '+campaign.title+' is complete. The world is saved — and every seed holds a new story.',true);
- toast('🏆 The Saga is complete!','card');
- updateStoryBanner();
+// the saga never truly ends: each toppled tyrant reveals a deeper, hungrier one,
+// and the trials begin anew — longer, and harder every time
+function nextAct(){
+ const beaten=campaign.villain;
+ campaign.act=(campaign.act||1)+1; campaign.boss=null; campaign.idx=0;
+ // a fresh adversary (avoid an immediate repeat), with a grander epithet as acts climb
+ let v,tries=0; do{ v=villainFor(); }while(v[0]===beaten&&tries++<8);
+ const rank=VILLAIN_RANK[Math.min(VILLAIN_RANK.length-1,campaign.act-1)]||'';
+ campaign.villain=rank?(v[0].replace(/^the /i,'the '+rank)):v[0];
+ campaign.villainDesc=v[1];
+ campaign.history=captureHistory();     // re-read the world as it now stands
+ buildChapters();
+ storyCard('🏆 Act '+roman(campaign.act-1)+' — '+beaten+' Undone',
+  'The Sage casts down '+beaten+' — but as it falls, a colder shadow rises behind it. '+campaign.villain+' stirs, '+campaign.villainDesc+', and the trials begin anew, harder than before. There is no ending. Only the next.');
+ tale([],'🏆 '+beaten+' is undone — but Act '+roman(campaign.act)+' dawns: '+campaign.villain+' rises, and the road grows steeper.',true);
+ toast('📖 Act '+roman(campaign.act)+' — '+campaign.villain+' rises','card');
+ activateChapter();
 }
+// kept as an alias in case anything still calls it — the saga is endless now
+function finishCampaign(){ nextAct(); }
 // the campaign's current waypoint, in world pixels (for the guide arrow)
 function campaignObjectivePx(){
  if(!campaign||campaign.done)return null;
@@ -7319,7 +7342,9 @@ function spawnBoss(){
  const b={id:nextId++,type:'horror',boss:true,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,fx:1,dirIdx:0,animClock:R()*4,
   hp:0,maxhp:0,dmg:M.dmg+6,spd:M.spd*1.06,col:'#c23a6a',g:'👑',name:campaign?campaign.villain:'the Boss',
   home:null,target:null,path:null,pi:0,atkCd:0,roamT:0,em:null,born:simMin,atkAnim:0,camp:null,socialCd:1e9,raid:null,raidUntil:0};
- b.maxhp=b.hp=Math.round(200+Hero.level*55+Hero.maxHp*20);
+ const actMul=1+((campaign&&campaign.act||1)-1)*0.4;
+ b.maxhp=b.hp=Math.round((200+Hero.level*55+Hero.maxHp*20)*actMul+(campaign&&campaign.tier||0)*35);
+ b.dmg=Math.round(b.dmg*(1+((campaign&&campaign.act||1)-1)*0.15));
  monsters.push(b); emote2(b,'👑');
  tale([],'The ground splits before '+((home&&home.name)||'the town')+', and '+b.name+' drags itself up into the light — vast, and very awake.',true);
  return b;
@@ -7342,7 +7367,8 @@ function updateStoryBanner(){
  else if(ch.k==='boss'&&campaign.boss)prog=' · ⚔ boss';
  const desc=(ch._desc||fillTokens(ch.desc,ch).replace(/{need}/g,ch.need||1));
  el.classList.remove('hidden');
- el.innerHTML='<span class="stChap">📖 Ch '+(campaign.idx+1)+'/'+campaign.chapters.length+'</span><span class="stTitle">'+fillTokens(ch.title,ch)+'</span><span class="stDesc">'+desc+prog+'</span>';
+ const actLbl=(campaign.act>1?'Act '+roman(campaign.act)+' · ':'')+'Ch '+(campaign.idx+1)+'/'+campaign.chapters.length;
+ el.innerHTML='<span class="stChap">📖 '+actLbl+'</span><span class="stTitle">'+fillTokens(ch.title,ch)+'</span><span class="stDesc">'+desc+prog+'</span>';
 }
 // a cinematic chapter card that fades in over the world, then out (tap to dismiss)
 let storyCardT=null;
@@ -7481,6 +7507,7 @@ return {
   startCampaign:()=>{startCampaign();return campaign?campaign.title:null},
   campaign:()=>{ if(!campaign)return null; const ch=campaign.chapters[campaign.idx];
    return {title:campaign.title,villain:campaign.villain,idx:campaign.idx,chapters:campaign.chapters.length,done:campaign.done,
+    act:campaign.act,tier:campaign.tier,cleared:campaign.cleared,
     kinds:campaign.chapters.map(c=>c.k),
     chapter:ch?{k:ch.k,title:fillTokens(ch.title,ch),desc:ch._desc||fillTokens(ch.desc,ch),prog:ch.prog||0,need:ch.need||ch.packN||null,stage:ch.stage,si:ch.si,
      packAlive:(ch.k==='hunt'||ch.k==='guard')?(ch._pack||[]).filter(m=>monsters.indexOf(m)>=0).length:null,
