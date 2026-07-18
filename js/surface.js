@@ -2933,6 +2933,14 @@ function heroKillMonster(m){
  for(const p of people)if(p.task&&p.task.k==='fight'&&p.task.m===m)p.task=null;
  Hero.kills++;
  if(quests.length)creditSlay();
+ if(m.boss){
+  const ups=heroGainXp(30); if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
+  Hero.renown=(Hero.renown||0)+5; heroGold+=60; heroGems+=ri(2,4); Hero.maxHp++; Hero.hp=Hero.maxHp;
+  grantHeroRelic(pick(RELICS));
+  toast('👑 '+m.name+' is slain!','card');
+  tale([],'The Sage struck down '+m.name+'. The sky seemed to lift. Somewhere, a held breath let go.',true);
+  return;
+ }
  const xp={grub:2,lurker:4,horror:8}[m.type]||2;
  const ups=heroGainXp(xp);
  if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
@@ -3024,7 +3032,7 @@ function spawnAtCamp(camp){const d=nearestDungeonTile(camp.tx,camp.ty)||dungeons
 function campTick(dt){
  // free, surface-bound risers gravitate together
  for(const m of monsters){
-  if(m.camp||m.target||simMin-m.born<0.4*DAY)continue;
+  if(m.boss||m.camp||m.target||simMin-m.born<0.4*DAY)continue;
   let joined=false;
   for(const camp of camps){if(dist2(m.x,m.y,camp.x,camp.y)<(7*TILE)**2){joinCamp(m,camp);joined=true;break}}
   if(joined)continue;
@@ -4898,10 +4906,21 @@ function drawCamp(c,camp,t){
 }
 function drawMonster(c,m,t){
  const px=m.x,py=m.y;
+ const boss=m.boss, bs=boss?1.9:1;
  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
- c.drawImage(GLOW_RED,px-18,py-18,36,36);c.globalCompositeOperation=go;
+ if(boss){const pul=1+0.12*Math.sin(t*0.006);c.globalAlpha=0.8;c.drawImage(GLOW_RED,px-30*pul,py-30*pul,60*pul,60*pul);c.globalAlpha=1;}
+ else c.drawImage(GLOW_RED,px-18,py-18,36,36);
+ c.globalCompositeOperation=go;
  const spr=surfMon[m.type];
- if(spr){
+ if(spr&&boss){
+  c.save();c.translate(px,py);c.scale(bs,bs);
+  c.fillStyle='rgba(0,0,0,0.45)';c.beginPath();c.ellipse(0,2,8,3,0,0,7);c.fill();
+  const anim=(m.atkAnim>0&&spr.FRAMES.attack)?'attack':'walk';
+  CFHelp.drawCreatureSprite(c,spr,0,4,m.dirIdx||0,anim,m.animClock);
+  c.restore();
+  // a crown to mark the tyrant
+  c.font='13px system-ui';c.textAlign='center';c.fillText('👑',px,py-22*bs+6);
+ }else if(spr){
   c.fillStyle='rgba(0,0,0,0.4)';c.beginPath();c.ellipse(px,py+2,8,3,0,0,7);c.fill();
   const anim=(m.atkAnim>0&&spr.FRAMES.attack)?'attack':'walk';
   CFHelp.drawCreatureSprite(c,spr,px,py+4,m.dirIdx||0,anim,m.animClock);
@@ -4914,11 +4933,16 @@ function drawMonster(c,m,t){
   c.fillStyle='#ffe14a';c.fillRect(-3,-6,2,2);c.fillRect(1,-6,2,2);
   c.restore();
  }
- if(m.hp<m.maxhp){
+ if(m.boss){
+  const w=26,yy=py-34;
+  c.fillStyle='rgba(10,6,12,0.7)';c.fillRect(px-w/2-1,yy-1,w+2,4);
+  c.fillStyle='#e05a7a';c.fillRect(px-w/2,yy,w*clamp(m.hp/m.maxhp,0,1),3);
+  c.font='6.5px Georgia';c.textAlign='center';c.fillStyle='#ffd0da';c.fillText(m.name,px,yy-3);
+ }else if(m.hp<m.maxhp){
   c.fillStyle='#1b1626';c.fillRect(px-8,py-19,16,2);
   c.fillStyle='#d24a5a';c.fillRect(px-8,py-19,16*clamp(m.hp/m.maxhp,0,1),2);
  }
- if(m.em&&m.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(m.em.g,px,py-21)}
+ if(m.em&&m.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(m.em.g,px,py-(m.boss?40:21))}
 }
 function drawSprite(c,p,t){
  // fallback painted sprite, used until the Creature Forge bake lands
@@ -5428,7 +5452,8 @@ function draw(t){
  // quest guide (screen space): a bold dotted trail + arrow steering the Sage to
  // the tracked objective — with an edge arrow when the goal is off-screen
  if(!interior){
-  const tq=trackedQuestObj(),obj=tq?questObjective(tq):null;
+  let obj=campaignObjectivePx();
+  if(!obj){const tq=trackedQuestObj();obj=tq?questObjective(tq):null;}
   if(obj){
    ctx.setTransform(dpr,0,0,dpr,0,0);
    const ox=(obj[0]-cam.x)*z+cw/2, oy=(obj[1]-cam.y)*z+ch/2;
@@ -5465,6 +5490,19 @@ function draw(t){
     ctx.restore();
    }
   }
+ }
+ // boss health bar (screen space) — the campaign's tyrant, front and centre
+ if(campaign&&!campaign.done&&campaign.boss&&monsters.indexOf(campaign.boss)>=0){
+  const b=campaign.boss;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const bw=Math.min(360,cw-48), bx=(cw-bw)/2, by=Math.round(ch*0.055);
+  ctx.fillStyle='rgba(10,6,12,0.72)';rr(ctx,bx-3,by-3,bw+6,16,5);ctx.fill();
+  ctx.fillStyle='rgba(40,10,20,0.9)';ctx.fillRect(bx,by,bw,10);
+  const frac=clamp(b.hp/b.maxhp,0,1);
+  const g=ctx.createLinearGradient(bx,0,bx+bw,0);g.addColorStop(0,'#e05a7a');g.addColorStop(1,'#ff8a5a');
+  ctx.fillStyle=g;ctx.fillRect(bx,by,bw*frac,10);
+  ctx.fillStyle='#ffd7e0';ctx.font='bold 11px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('👑 '+b.name,cw/2,by+5);ctx.textBaseline='alphabetic';
  }
  // hurt vignette (screen space)
  if(hero.hurtFlash>0){
@@ -6250,6 +6288,7 @@ cv.addEventListener('wheel',e=>{e.preventDefault();cam.z=clamp(cam.z*(e.deltaY<0
  const zi=$('sZoomIn'), zo=$('sZoomOut');
  if(zi)zi.addEventListener('pointerdown',e=>{e.preventDefault();zoomBy(1.25);});
  if(zo)zo.addEventListener('pointerdown',e=>{e.preventDefault();zoomBy(0.8);});
+ const sc=$('storyCard'); if(sc)sc.addEventListener('pointerdown',e=>{e.preventDefault();closeStoryCard();});
 }
 /* ---- Sage action controls: dash button/key + charged-spin button/key ---- */
 function currentMoveAng(){ if(stick){const dx=stick.x-stick.ox,dy=stick.y-stick.oy;if(Math.hypot(dx,dy)>6)return Math.atan2(dy,dx);} return hero.face||0; }
@@ -6635,7 +6674,7 @@ function setSpeed(idx2){
 document.querySelectorAll('#sui .sp button,#sui .cspd button').forEach(b=>{b.onclick=()=>setSpeed(+b.dataset.s)});
 $('sTalkBtn').onclick=()=>startTalk(talkTarget);
 $('sEnterBtn').onclick=()=>{if(interior)exitInterior();else if(enterTarget)enterInterior(enterTarget)};
-$('sDescendBtn').onclick=()=>{if(descendTarget&&onEnterDungeon)onEnterDungeon(descendTarget)};
+$('sDescendBtn').onclick=()=>{if(descendTarget&&onEnterDungeon){campaignNoteDescend(descendTarget);onEnterDungeon(descendTarget)}};
 $('sDialog').onclick=advanceTalk;
 
 /* ---- cinematic mode ---- */
@@ -6708,6 +6747,7 @@ $('newBtn').onclick=()=>{
 };
 function reseed(newSeed,theme,params){
  warming=false; const wov=$('warm'); if(wov)wov.classList.add('hidden');
+ campaign=null; closeStoryCard(); {const sb=$('story');if(sb)sb.classList.add('hidden');}
  seed=(newSeed===undefined)?((Math.random()*2**31)|0):newSeed;
  if(theme)worldTheme=theme;
  if(params)worldParams=Object.assign({buildup:0,flora:.5,fertility:.5,fauna:.5,monsters:.5,treasure:.5,hue:-1,sat:-1},params);
@@ -6794,8 +6834,172 @@ function endWarmup(){
  toast('⌛ '+yrs+' years have passed. You arrive in '+((v&&v.name)||'a weathered land')+'.','card');
  tale([],'And so, after '+yrs+' years of seasons, births, feuds and quiet triumphs, a wandering Sage crests the hills and walks down into the living world.',true);
  refreshChron();
+ startCampaign();
  if(warmDone)warmDone();
 }
+
+/* ================= the Story: a procedural, escalating RPG campaign =================
+   On arriving in the aged world, an intelligent director reads its living state —
+   its towns, its troubled folk, its buried Understories — and threads a linear main
+   quest of escalating chapters (a sign, a soul, a hunt, a descent) that climbs to a
+   named boss and a saved world. Fresh setting, villain and lore every world. */
+let campaign=null;
+const VILLAINS={
+ fantasy:[['the Barrow-King','a crowned dead thing risen from the old graves'],['the Thornwitch','a hedge-sovereign who trades in stolen names'],['the Ashen Wyrm','a slow furnace wearing scales'],['the Pale Shepherd','who herds the drowned and the forgotten']],
+ cyberpunk:[['the Chrome Warden','a security mind that grew a body and a grudge'],['the Hollow Broker','a data-ghost in a stolen face'],['the Rust Sovereign','a landfill god of cast-off machines'],['the Signal','a hunger loose in the wires']],
+ modern:[['the Blight','a creeping wrongness worked up through the soil'],['the Hoarder-Lord','a pack-rat king of the dead mill'],['the Quiet Man','a rumour that learned to bite'],['the Undertow','something patient in the grey water']],
+};
+function villainFor(){ const bag=VILLAINS[worldTheme]||VILLAINS.fantasy; return pick(bag); }
+function homeVillage(){ return (campaign&&campaign.home)?villages.find(v=>v.id===campaign.home):villages[0]; }
+function startCampaign(){
+ const home=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length)[0];
+ const[vName,vDesc]=villainFor();
+ campaign={ title:(Lore.active?('The '+Lore.name(4,10)+' Saga'):'A Wandering Saga'),
+   villain:vName, villainDesc:vDesc, home:home?home.id:null, idx:0, chapters:[], done:false, boss:null };
+ buildChapters();
+ tale([], '📖 '+campaign.title+' begins. A shadow gathers over '+((home&&home.name)||'the land')+' — folk name it '+vName+', '+vDesc+' — and the old songs say only a wanderer can stand against it.',true);
+ activateChapter();
+}
+function buildChapters(){
+ campaign.chapters=[
+  {k:'reach',title:'A Sign in the Green',
+   intro:'The elders of {home} speak of a wrongness at the world\'s edge — a place where the birds have gone silent. Go and see it with your own eyes, Sage.',
+   desc:'Seek out the troubled place at the edge of the world.'},
+  {k:'npc',title:'A Heart to Steady',
+   intro:'The dread is fraying {home}. {who} has fallen to quarrelling and despair. Go to them, and remind them what they are fighting for.',
+   desc:'Reach {who} and steady their heart.'},
+  {k:'slay',need:3,title:'The Dark Presses In',
+   intro:'Drawn by {villain}, the things of the Understory grow bold and harry {home}. Cull {need} of them before the town is overrun.',
+   desc:'Slay {need} monsters menacing {home}.'},
+  {k:'dungeon',title:'Into the Understory',
+   intro:'Only one thing can wound {villain}, and it lies buried deep in {dun}. Descend, and carry it back into the light.',
+   desc:'Descend into {dun} and take what sleeps there.'},
+  {k:'boss',title:'{villain}',
+   intro:'{villain} has risen at last — {villainDesc} — and turns toward {home}. Stand between it and the town, Sage. End this, and the world is saved.',
+   desc:'Defeat {villain}.'},
+ ];
+}
+function fillTokens(s,ch){
+ const home=homeVillage();
+ return String(s).replace(/{home}/g,(home&&home.name)||'the town')
+  .replace(/{villain}/g,campaign.villain).replace(/{villainDesc}/g,campaign.villainDesc)
+  .replace(/{need}/g,(ch&&ch.need)||1).replace(/{who}/g,(ch&&ch._whoName)||'someone')
+  .replace(/{dun}/g,(ch&&ch._dunName)||'the deep');
+}
+function pickStoryNpc(){
+ const home=homeVillage();
+ const pool=people.filter(p=>!p.dead&&!p.inDungeon&&p.age>=16);
+ if(!pool.length)return null;
+ const vv=home?pool.filter(p=>p.vid===home.id):[];
+ return pick(vv.length?vv:pool);
+}
+function pickStoryDungeon(){
+ const live=dungeons.filter(d=>!d.cleansed);
+ if(live.length)return live.slice().sort((a,b)=>(b.danger+b.depth*0.1)-(a.danger+a.depth*0.1))[0];
+ return dungeons[0]||null;
+}
+function activateChapter(){
+ const ch=campaign.chapters[campaign.idx]; if(!ch){finishCampaign();return}
+ ch.prog=0; ch.done=false; ch.mark=null;
+ const home=homeVillage();
+ if(ch.k==='reach'){ ch.mark=farCornerTile(hero)||[W>>1,H>>1]; }
+ else if(ch.k==='npc'){ const who=pickStoryNpc(); if(who){ch.targetId=who.id;ch._whoName=who.name;ch.mark=[(who.x/TILE)|0,(who.y/TILE)|0];emote(who,'❔');} }
+ else if(ch.k==='slay'){ ch.slayBase=Hero.kills; if(home)ch.mark=[Math.round(home.cx),Math.round(home.cy)]; }
+ else if(ch.k==='dungeon'){ const d=pickStoryDungeon(); if(d){ch.dungeonId=d.id;ch._dunName=d.name;ch.mark=[d.x,d.y];} else { advanceChapter(); return; } }
+ else if(ch.k==='boss'){ const b=spawnBoss(); campaign.boss=b; if(b)ch.mark=[(b.x/TILE)|0,(b.y/TILE)|0]; }
+ ch._desc=fillTokens(ch.desc,ch);
+ storyCard('Chapter '+(campaign.idx+1)+' · '+fillTokens(ch.title,ch), fillTokens(ch.intro,ch));
+ tale([], '📖 '+fillTokens(ch.intro,ch), true);
+ updateStoryBanner();
+}
+function campaignNoteDescend(d){
+ if(!campaign||campaign.done)return;
+ const ch=campaign.chapters[campaign.idx];
+ if(ch&&ch.k==='dungeon')ch._descended=true;   // any descent answers the call
+}
+function campaignTick(dt){
+ if(!campaign||campaign.done)return;
+ const ch=campaign.chapters[campaign.idx]; if(!ch)return;
+ let done=false;
+ if(ch.k==='reach'){ if(ch.mark&&dist2(hero.x,hero.y,ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2)<(2.8*TILE)**2)done=true; }
+ else if(ch.k==='npc'){
+  const t=allById.get(ch.targetId);
+  if(!t||t.dead){ const w=pickStoryNpc(); if(w){ch.targetId=w.id;ch._whoName=w.name;} }
+  else { ch.mark=[(t.x/TILE)|0,(t.y/TILE)|0];
+   if(dist2(hero.x,hero.y,t.x,t.y)<(2.6*TILE)**2){ done=true; emote(t,'🙏'); buff(t,'social',.3,12,'sage'); buff(t,'luck',.2,12,'sage'); } }
+ }
+ else if(ch.k==='slay'){ ch.prog=Math.max(0,Hero.kills-ch.slayBase); if(ch.prog>=ch.need)done=true; }
+ else if(ch.k==='dungeon'){ if(ch._descended)done=true; }
+ else if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)<0)done=true; }
+ if(done)advanceChapter();
+}
+function advanceChapter(){
+ const ch=campaign.chapters[campaign.idx]; if(!ch)return;
+ ch.done=true;
+ const ups=heroGainXp(6+campaign.idx*3); if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
+ Hero.renown=(Hero.renown||0)+2; heroGold+=10+campaign.idx*8;
+ toast('📖 Chapter complete — '+fillTokens(ch.title,ch),'card');
+ tale([],'✔ '+fillTokens(ch.desc,ch)+' The tale turns a page.',true);
+ campaign.idx++;
+ if(campaign.idx>=campaign.chapters.length){ finishCampaign(); return; }
+ activateChapter();
+}
+function finishCampaign(){
+ campaign.done=true; campaign.boss=null;
+ storyCard('🏆 The Saga is Ended','With '+campaign.villain+' undone, the world lets out a breath it had held for an age. Your name will outrun you now, Sage. The land is at peace — and yours to wander, until the next tale takes root.');
+ tale([],'🏆 '+campaign.villain+' is undone, and the '+campaign.title+' is complete. The world is saved — and every seed holds a new story.',true);
+ toast('🏆 The Saga is complete!','card');
+ updateStoryBanner();
+}
+// the campaign's current waypoint, in world pixels (for the guide arrow)
+function campaignObjectivePx(){
+ if(!campaign||campaign.done)return null;
+ const ch=campaign.chapters[campaign.idx]; if(!ch)return null;
+ if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)>=0)return[campaign.boss.x,campaign.boss.y]; return null; }
+ if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(t&&!t.dead)return[t.x,t.y]; }
+ if(ch.k==='slay'&&monsters.length){ let m=monsters[0],bd=1e18; for(const mm of monsters){const dd=dist2(mm.x,mm.y,hero.x,hero.y);if(dd<bd){bd=dd;m=mm;}} return[m.x,m.y]; }
+ if(ch.mark)return[ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2];
+ return null;
+}
+/* a named boss: an empowered horror that rises to threaten the home town */
+function spawnBoss(){
+ const home=homeVillage();
+ const c=home?[Math.round(home.cx),Math.round(home.cy)]:[(hero.x/TILE)|0,(hero.y/TILE)|0];
+ let s=null;
+ for(let r=7;r<=18&&!s;r++){ const cand=nearOpen(clamp(c[0]+ri(-r,r),2,W-2),clamp(c[1]+ri(-r,r),2,H-2)); if(cand&&dist2(cand[0]*TILE,cand[1]*TILE,hero.x,hero.y)>(7*TILE)**2)s=cand; }
+ if(!s)s=nearOpen(c[0],c[1])||[W>>1,H>>1];
+ const M=MONSTERS.horror;
+ const b={id:nextId++,type:'horror',boss:true,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,fx:1,dirIdx:0,animClock:R()*4,
+  hp:0,maxhp:0,dmg:M.dmg+6,spd:M.spd*1.06,col:'#c23a6a',g:'👑',name:campaign?campaign.villain:'the Boss',
+  home:null,target:null,path:null,pi:0,atkCd:0,roamT:0,em:null,born:simMin,atkAnim:0,camp:null,socialCd:1e9,raid:null,raidUntil:0};
+ b.maxhp=b.hp=Math.round(200+Hero.level*55+Hero.maxHp*20);
+ monsters.push(b); emote2(b,'👑');
+ tale([],'The ground splits before '+((home&&home.name)||'the town')+', and '+b.name+' drags itself up into the light — vast, and very awake.',true);
+ return b;
+}
+function updateStoryBanner(){
+ const el=$('story'); if(!el)return;
+ if(!campaign){el.classList.add('hidden');return}
+ if(campaign.done){ el.classList.remove('hidden'); el.innerHTML='<span class="stChap">🏆 Saga complete</span><span class="stTitle">'+campaign.title+'</span>'; return; }
+ const ch=campaign.chapters[campaign.idx]; if(!ch){el.classList.add('hidden');return}
+ let prog='';
+ if(ch.k==='slay')prog=' · '+Math.min(ch.prog||0,ch.need)+'/'+ch.need;
+ else if(ch.k==='boss'&&campaign.boss)prog=' · ⚔';
+ el.classList.remove('hidden');
+ el.innerHTML='<span class="stChap">📖 Ch '+(campaign.idx+1)+'/'+campaign.chapters.length+'</span><span class="stTitle">'+fillTokens(ch.title,ch)+'</span><span class="stDesc">'+fillTokens(ch.desc,ch)+prog+'</span>';
+}
+// a cinematic chapter card that fades in over the world, then out (tap to dismiss)
+let storyCardT=null;
+function storyCard(title,body){
+ const el=$('storyCard'); if(!el)return;
+ $('storyCardTitle').textContent=title;
+ $('storyCardBody').textContent=body;
+ el.classList.remove('hidden');
+ requestAnimationFrame(()=>el.classList.add('show'));
+ if(storyCardT)clearTimeout(storyCardT);
+ storyCardT=setTimeout(closeStoryCard,7000);
+}
+function closeStoryCard(){ const el=$('storyCard'); if(!el)return; el.classList.remove('show'); setTimeout(()=>el.classList.add('hidden'),450); if(storyCardT){clearTimeout(storyCardT);storyCardT=null;} }
 
 /* ================= main loop (driven by main.js) ================= */
 let last=performance.now(),acc=0,uiT=0;
@@ -6827,6 +7031,7 @@ function frame(t){
  befriendTick(rdt);
  updateMerchant(rdt);
  renownFrameTick(rdt);
+ campaignTick(rdt);
  if(cine){
   cam.z+=(cineZoomTarget-cam.z)*0.09;
  }
@@ -6917,6 +7122,15 @@ return {
   beginWarmup:(days,cb)=>beginWarmup(days,cb),
   warming:()=>warming,
   warmupInfo:()=>({warming,day:cday(),targetDay:Math.round(warmTargetMin/DAY),years:warmYears}),
+  startCampaign:()=>{startCampaign();return campaign?campaign.title:null},
+  campaign:()=>{ if(!campaign)return null; const ch=campaign.chapters[campaign.idx];
+   return {title:campaign.title,villain:campaign.villain,idx:campaign.idx,chapters:campaign.chapters.length,done:campaign.done,
+    chapter:ch?{k:ch.k,title:fillTokens(ch.title,ch),desc:fillTokens(ch.desc,ch),prog:ch.prog||0,need:ch.need||null}:null,
+    bossHp:campaign.boss?campaign.boss.hp:null}; },
+  campaignObjective:()=>{const o=campaignObjectivePx();return o?{tx:(o[0]/TILE)|0,ty:(o[1]/TILE)|0}:null},
+  advanceChapter:()=>{advanceChapter();return campaign?{idx:campaign.idx,done:campaign.done}:null},
+  bossInfo:()=>campaign&&campaign.boss?{name:campaign.boss.name,hp:campaign.boss.hp,maxhp:campaign.boss.maxhp,alive:monsters.indexOf(campaign.boss)>=0}:null,
+  killBoss:()=>{if(campaign&&campaign.boss){heroKillMonster(campaign.boss);return true}return false},
   get peaceful(){return peaceful},
   set peaceful(v){peaceful=v;if(v){for(let i=monsters.length-1;i>=0;i--)killMonster(monsters[i],null,true);toast('The garden holds its breath. Peace.')}else toast('The Understories may stir again.')},
   get lastInspect(){return lastInspect},
