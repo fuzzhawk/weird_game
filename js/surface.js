@@ -106,7 +106,7 @@ let heroDash=null, dashCd=0;                  // active dodge-roll + its cooldow
 let charging=false, chargeT=0;                // holding the spin button to charge
 // mining: per-tile accumulated damage on bramble-rock, debris particles, and the
 // stone the Sage has hauled out of the terrain
-let rockDmg=null, particles=[], heroStone=0;
+let rockDmg=null, particles=[], heroStone=0, heroGold=0, heroGems=0;
 const HERO_SPEED=132, HERO_RANGE=56, HERO_ARC=Math.PI*0.85;
 
 /* ================= terrain editing ================= */
@@ -806,7 +806,7 @@ function processBakeQueue(){
 function genWorld(){
  map=new Uint8Array(W*H);bld=new Int16Array(W*H).fill(-1);
  struct=new Uint8Array(W*H);farmGrid=new Uint8Array(W*H);farmTimer=new Float32Array(W*H);farmTiles=new Set();farmSp=new Int16Array(W*H).fill(-1);
- rockDmg=new Float32Array(W*H);particles=[];heroStone=0;
+ rockDmg=new Float32Array(W*H);particles=[];heroStone=0;heroGold=0;heroGems=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
  people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
@@ -1003,12 +1003,22 @@ function seedCity(bu){
 // waste — and the built themes (modern, cyberpunk) are strewn with far more.
 function relicMult(){ return worldTheme==='cyberpunk'?2.1 : worldTheme==='modern'?1.5 : 1; }
 function relicTarget(){ return Math.round((1 + (1-eraGreen())*13)*relicMult()*wpMul('treasure')); }
+// a ground find the Sage can collect: gold & gems are common spendable treasure;
+// a relic is rare and special (it installs a lasting tech-skill)
+function spawnFind(x,y,kind,amt,relic){ salvage.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,t:R()*6.28,kind,amt:amt||0,relic:relic||null}); }
+// a surfaced cache: mostly coin, some gems, and only rarely an old-world relic
+function spawnSalvageAt(x,y){
+ const r=R();
+ if(r<0.06)      spawnFind(x,y,'relic',0,pick(RELICS));
+ else if(r<0.34) spawnFind(x,y,'gem', ri(1,3));
+ else            spawnFind(x,y,'gold',ri(3,9));
+}
 function spawnSalvage(){
  for(let t=0;t<40;t++){
   const[x,y]=randOpenTile();
   if(bld[idx(x,y)]>=0||nodeAt.has(idx(x,y))||dungeonAt(x,y))continue;
   if(dist2(x*TILE,y*TILE,hero.x,hero.y)<12*TILE*12*TILE)continue;
-  salvage.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,t:R()*6.28,relic:pick(RELICS)});
+  spawnSalvageAt(x,y);
   return;
  }
 }
@@ -1887,18 +1897,32 @@ function unearthRock(x,y,agent){
   if(agent.p)agent.p.inv.stone++;
   if(agent.v)agent.v.stock.stone+=stone;
  }
- // buried treasure — the hard black highland hides far more of it (× the treasure dial)
- if(chance((hard?0.24:0.05+elev*0.08)*wpMul('treasure'))){
-  spawnSalvageAt(x,y); spawnSparkle(px,py);
-  if(agent&&agent.hero)toast('You struck something buried in the rock — salvage glints in the rubble.');
-  else if(agent&&agent.p&&chance(.5))tale([agent.p],agent.p.name+' pried something strange out of the deep rock near '+((agent.v&&agent.v.name)||'the diggings')+'.');
+ // buried treasure — gold is common, gems rarer, relics rare & special. The hard
+ // black highland is far richer, and the treasure dial scales the whole yield.
+ const findChance=(hard?0.34:0.12+elev*0.10)*wpMul('treasure');
+ if(chance(findChance)){
+  const r=R();
+  const pRelic=hard?0.05:0.02, pGem=hard?0.26:0.13;
+  let kind,amt=0,relic=null;
+  if(r<pRelic){ kind='relic'; relic=pick(RELICS); }
+  else if(r<pRelic+pGem){ kind='gem'; amt=1+(hard?ri(0,2):0); }
+  else { kind='gold'; amt=ri(2,6)+(hard?ri(2,5):0); }
+  spawnSparkle(px,py);
+  if(agent&&agent.hero){
+   spawnFind(x,y,kind,amt,relic);
+   if(kind==='relic')toast('You struck something buried in the rock — a relic glints in the rubble!');
+  }else if(agent&&agent.p){
+   // NPCs cash small finds into the town's stone stores; relics still surface as caches
+   if(kind==='relic')spawnFind(x,y,kind,amt,relic);
+   else if(agent.v)agent.v.stock.stone+=(kind==='gem'?4:1);
+   if(chance(.4))tale([agent.p],agent.p.name+' turned up a glint of '+(kind==='gem'?'gemstone':kind==='relic'?'old tech':'gold')+' in the diggings near '+((agent.v&&agent.v.name)||'the workings')+'.');
+  }else spawnFind(x,y,kind,amt,relic);
  } else if(chance(0.14)){
-  spawnSparkle(px,py);                                   // a vein of ore/quartz
+  spawnSparkle(px,py);                                   // a thin vein of ore
   if(agent&&agent.hero)heroStone+=1;
  }
  return stone;
 }
-function spawnSalvageAt(x,y){ salvage.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,t:R()*6.28,relic:pick(RELICS)}); }
 // ---- debris particles ----
 function spawnDebris(px,py,n,col,scale){
  if(particles.length>460)return;
@@ -2555,6 +2579,12 @@ function heroStatApply(rel){
  else if(s==='range')Hero.rangeMul*=1.15;
  else if(s==='arc')Hero.arcMul*=1.15;
  else if(s==='hp'){Hero.maxHp++;Hero.hp=Math.min(Hero.maxHp,Hero.hp+1)}
+}
+// pocket a ground find: gold & gems bank into the Sage's purse; a rare relic installs
+function collectFind(sv){
+ if(sv.kind==='relic'||(!sv.kind&&sv.relic)){ grantHeroRelic(sv.relic||pick(RELICS)); return; }
+ if(sv.kind==='gem'){ const n=sv.amt||1; heroGems+=n; emote2Hero('💎'); spawnSparkle(hero.x,hero.y); toast('💎 '+n+' gem'+(n>1?'s':'')+'  ·  '+heroGems+' held'); }
+ else { const n=sv.amt||1; heroGold+=n; emote2Hero('🪙'); toast('🪙 '+n+' gold  ·  '+heroGold+' held'); }
 }
 function grantHeroRelic(rel){
  if(!rel)return;
@@ -3237,7 +3267,8 @@ function companionAI(a,dt){
   a.anim='idle';
   a.sniffCd=(a.sniffCd==null?rf(25,55):a.sniffCd)-dt;
   if(a.sniffCd<=0){a.sniffCd=rf(30,70);
-   if(chance(.5)){depositResource(pick(['stone','food']),ri(1,2),a.x,a.y);emoteA(a,'✨');}
+   if(chance(.4)){spawnFind((a.x/TILE)|0,(a.y/TILE)|0,'gold',ri(1,3));emoteA(a,'🪙');}
+   else if(chance(.4)){depositResource(pick(['stone','food']),ri(1,2),a.x,a.y);emoteA(a,'✨');}
    else emoteA(a,'👃');
   }
  }
@@ -3367,7 +3398,7 @@ function drawMerchant(c,m,t){
   c.fillStyle='#5a4a3a';c.fillRect(px+8,py-2,6,5);
   // the current deal, floating
   if(cam.z>0.85){c.font='8px system-ui';c.textAlign='center';c.fillText(m.ware.glyph,px,py-16+bob);
-   c.font='6px Georgia';c.fillStyle='rgba(240,225,200,0.92)';c.fillText(m.ware.cost+'🪨',px,py+11);}
+   c.font='6px Georgia';c.fillStyle='rgba(240,225,200,0.92)';c.fillText(m.ware.cost+'🪙'+(m.ware.gems?'+'+m.ware.gems+'💎':''),px,py+11);}
  }else{
   // the covered cart on the move
   c.fillStyle='#e8e0d0';c.beginPath();c.ellipse(px,py-4,8,6,0,Math.PI,0);c.fill();
@@ -4233,11 +4264,12 @@ function eventFrameTick(rdt){
 // a pedlar rolls in from the far roads every few days, parks a stall by a town,
 // and trades the Sage's mined stone for healing, renown, relics or a heart-flask.
 let nextMerchantDay=2;
+// the pedlar deals in gold; the rarest ware (a relic) also wants a gem or two
 const MERCH_WARES=[
- {kind:'heal',cost:4,glyph:'❤️',label:'mend two hearts'},
- {kind:'renown',cost:6,glyph:'✦',label:'spread your name'},
- {kind:'relic',cost:14,glyph:'🔩',label:'a salvaged relic'},
- {kind:'heart',cost:22,glyph:'💗',label:'a heart-flask (+1 max ♥)'},
+ {kind:'heal',cost:10,glyph:'❤️',label:'mend two hearts'},
+ {kind:'renown',cost:16,glyph:'✦',label:'spread your name'},
+ {kind:'relic',cost:40,gems:1,glyph:'🔩',label:'a salvaged relic'},
+ {kind:'heart',cost:55,glyph:'💗',label:'a heart-flask (+1 max ♥)'},
 ];
 function merchantName(){return (Lore.active&&Lore.name(4,10))||pick(['Pell','Quill','Marrow','Tansy','Bram','Odo','Wren']);}
 function newWare(){return MERCH_WARES[(Math.random()*MERCH_WARES.length)|0];}
@@ -4277,9 +4309,13 @@ function merchantDailyTick(){
 }
 function merchantBuy(){
  const m=merchant; if(!m||m.state!=='stalled')return null;
- const w=m.ware;
- if(heroStone<w.cost){m.em={g:'🪨?',until:performance.now()+1500};toast('The pedlar taps the sign — '+w.cost+' 🪨 for '+w.label+'. You are short.');return {ok:false,need:w.cost,have:heroStone};}
- heroStone-=w.cost;
+ const w=m.ware, gems=w.gems||0;
+ if(heroGold<w.cost||heroGems<gems){
+  m.em={g:'🪙?',until:performance.now()+1500};
+  toast('The pedlar taps the sign — '+w.cost+'🪙'+(gems?' + '+gems+'💎':'')+' for '+w.label+'. You are short.');
+  return {ok:false,need:w.cost,needGems:gems,have:heroGold,haveGems:heroGems};
+ }
+ heroGold-=w.cost; heroGems-=gems;
  if(w.kind==='heal'){Hero.hp=Math.min(Hero.maxHp,Hero.hp+2);toast('❤️ Patched up — two hearts mended.');}
  else if(w.kind==='renown'){Hero.renown=(Hero.renown||0)+2;toast('✦ The pedlar carries your name down the road. (renown '+Hero.renown+')');}
  else if(w.kind==='relic'){grantHeroRelic(pick(RELICS));}
@@ -4325,9 +4361,12 @@ function maybeShrine(v){
 }
 function shrineDailyTick(){
  for(const v of villages)maybeShrine(v);
- // each standing shrine leaves an offering out in the world
+ // each standing shrine leaves an offering out in the world — sometimes coin
  for(const sh of shrines){
-  if(chance(.5)){const res=pick(['stone','stone','food']);depositResource(res,ri(1,3),sh.x,sh.y);}
+  if(chance(.5)){
+   if(chance(.45))spawnFind((sh.x/TILE)|0,(sh.y/TILE)|0,'gold',ri(2,5));
+   else depositResource(pick(['stone','stone','food']),ri(1,3),sh.x,sh.y);
+  }
  }
 }
 
@@ -4674,18 +4713,34 @@ function mkGlow(col){
 const GLOW_WARM=mkGlow('rgba(255,190,90,0.55)'),GLOW_CYAN=mkGlow('rgba(150,230,150,0.35)');
 const GLOW_RED=mkGlow('rgba(210,60,70,0.5)'),GLOW_GREEN=mkGlow('rgba(90,220,140,0.45)');
 const GLOW_PINK=mkGlow('rgba(255,70,200,0.5)'),GLOW_BLUE=mkGlow('rgba(70,150,255,0.5)');
+const GLOW_GOLD=mkGlow('rgba(255,205,70,0.5)');
 function drawSalvage(c,sv,t){
  const px=sv.x,py=sv.y,bob=Math.sin(sv.t)*1.6;
- // ground shadow + neon halo, then the actual generated relic sprite at plant-level detail
- c.fillStyle='rgba(0,0,0,0.30)';c.beginPath();c.ellipse(px,py+2,7,2.6,0,0,7);c.fill();
+ const kind=sv.kind||(sv.relic?'relic':'gold');
+ c.fillStyle='rgba(0,0,0,0.30)';c.beginPath();c.ellipse(px,py+2,6,2.4,0,0,7);c.fill();
  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
- c.drawImage(GLOW_BLUE,px-17,py-20,34,34);c.globalCompositeOperation=go;
- const base=(sv.relic&&sv.relic._iconBase)||relicBase(sv.relic&&sv.relic.id);
- const S=28;
- if(base)c.drawImage(base,px-S/2,py+bob-S+5,S,S);
- // a blinking beacon pip above it
- if(t%900<450){c.fillStyle='#7df9ff';c.fillRect(px-1,py+bob-S+3,2,2)}
- if(cam.z>1.05){c.font='6px system-ui';c.textAlign='center';c.fillStyle='rgba(150,220,255,0.85)';c.fillText(sv.relic?sv.relic.n:'salvage',px,py+11)}
+ if(kind==='relic'){
+  c.drawImage(GLOW_BLUE,px-17,py-20,34,34);c.globalCompositeOperation=go;
+  const base=(sv.relic&&sv.relic._iconBase)||relicBase(sv.relic&&sv.relic.id);
+  const S=28; if(base)c.drawImage(base,px-S/2,py+bob-S+5,S,S);
+  if(t%700<350){c.fillStyle='#7df9ff';c.fillRect(px-1,py+bob-S+3,2,2)}
+  if(cam.z>1.05){c.font='6px system-ui';c.textAlign='center';c.fillStyle='rgba(150,220,255,0.9)';c.fillText(sv.relic?sv.relic.n:'relic',px,py+11)}
+  return;
+ }
+ if(kind==='gem'){
+  c.globalAlpha=0.55+0.25*Math.sin(t*0.006+sv.t);c.drawImage(GLOW_BLUE,px-12,py-14+bob,24,24);c.globalAlpha=1;c.globalCompositeOperation=go;
+  // a faceted gem
+  const gy=py-4+bob, col=['#5ad0ff','#ff6ac0','#8affa0','#c79aff'][((sv.x+sv.y)|0)%4];
+  c.fillStyle=col;c.beginPath();c.moveTo(px,gy-4);c.lineTo(px+3.5,gy);c.lineTo(px,gy+4);c.lineTo(px-3.5,gy);c.closePath();c.fill();
+  c.fillStyle='rgba(255,255,255,0.75)';c.beginPath();c.moveTo(px,gy-4);c.lineTo(px+3.5,gy);c.lineTo(px,gy);c.closePath();c.fill();
+  return;
+ }
+ // gold coins
+ c.globalAlpha=0.5+0.2*Math.sin(t*0.005+sv.t);c.drawImage(GLOW_GOLD,px-12,py-12+bob,24,24);c.globalAlpha=1;c.globalCompositeOperation=go;
+ const gy=py-2+bob;
+ c.fillStyle='#b8860b';c.beginPath();c.ellipse(px-2,gy+1,3,1.6,0,0,7);c.fill();c.beginPath();c.ellipse(px+2,gy+1,3,1.6,0,0,7);c.fill();
+ c.fillStyle='#ffd24a';c.beginPath();c.ellipse(px,gy-2,3.2,1.8,0,0,7);c.fill();
+ c.fillStyle='rgba(255,255,220,0.8)';c.beginPath();c.ellipse(px-0.6,gy-2.4,1.1,0.6,0,0,7);c.fill();
 }
 function nodeStage(n){return n.amt<=0?0:clamp(Math.ceil(n.amt/n.max*3)-1,0,2)}
 function drawNode(c,n,t){
@@ -6000,13 +6055,13 @@ function updateHero(rdt){
   }
  }
  heroSlashes=heroSlashes.filter(s=>s.t<0.25);
- // salvage caches: walk over to install a tech relic
+ // ground finds: walk over to pocket gold/gems — or install a rare relic
  for(const sv of salvage){
   sv.t+=rdt*1.5;
   if(!sv.got&&!hero.down&&dist2(sv.x,sv.y,hero.x,hero.y)<(TILE*0.9)**2){
    sv.got=true;
-   grantHeroRelic(sv.relic);
-   if(navigator.vibrate)navigator.vibrate(20);
+   collectFind(sv);
+   if(navigator.vibrate)navigator.vibrate(sv.kind==='relic'||(!sv.kind&&sv.relic)?24:12);
   }
  }
  salvage=salvage.filter(s=>!s.got);
@@ -6691,7 +6746,7 @@ function frame(t){
   uiT=t;
   {const sn=seasonNow();$('clock').textContent=sn.glyph+' Day '+cday();}
   $('era').textContent=(surfEra?surfEra.name:phase());
-  $('pop').textContent='👥 '+people.length+(animals.length?' · 🐾'+animals.length:'')+(monsters.length?' · 👹'+monsters.length:'')+(heroStone?' · 🪨'+heroStone:'');
+  $('pop').textContent='👥 '+people.length+(animals.length?' · 🐾'+animals.length:'')+(monsters.length?' · 👹'+monsters.length:'')+(heroGold?' · 🪙'+heroGold:'')+(heroGems?' · 💎'+heroGems:'')+(heroStone?' · 🪨'+heroStone:'');
   $('hearts').textContent=speedIdx>=2?'🧘 the Sage meditates':heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
   // stamina bar + action buttons only in surface real-time play
   {const show=!interior&&!cine&&speedIdx<=1&&!hero.down;
@@ -6824,6 +6879,17 @@ return {
   summonMerchant:()=>{if(!merchant)spawnMerchant();if(merchant){merchant.x=hero.x+TILE;merchant.y=hero.y;merchant.tx=(hero.x/TILE)|0;merchant.ty=(hero.y/TILE)|0;merchant.state='stalled';}return merchant?merchant.name:null},
   merchantBuy:()=>merchantBuy(),
   giveStone:(n)=>{heroStone+=(n||10);return heroStone},
+  giveGold:(n)=>{heroGold+=(n||20);return heroGold},
+  giveGems:(n)=>{heroGems+=(n||3);return heroGems},
+  treasure:()=>({gold:heroGold,gems:heroGems,stone:heroStone,finds:salvage.length,relics:Hero.relics.length}),
+  collectNearestFind:()=>{if(!salvage.length)return null;let best=salvage[0],bd=1e18;for(const s of salvage){const d=dist2(s.x,s.y,hero.x,hero.y);if(d<bd){bd=d;best=s}}const kind=best.kind||(best.relic?'relic':'gold');collectFind(best);best.got=true;salvage=salvage.filter(s=>!s.got);return kind;},
+  mineTreasureSample:(tiles)=>{ // shatter N mineable tiles and tally what pops out
+   let n=tiles||60,out={gold:0,gem:0,relic:0,none:0,mined:0};
+   const b4=salvage.slice();
+   for(let y=1;y<H-1&&n>0;y++)for(let x=1;x<W-1&&n>0;x++){ if(!mineable(x,y))continue; unearthRock(x,y,{hero:true}); n--; out.mined++; }
+   for(const s of salvage){ if(b4.indexOf(s)>=0)continue; const k=s.kind||(s.relic?'relic':'gold'); out[k]=(out[k]||0)+1; }
+   return out;
+  },
   shrines:()=>shrines.map(s=>({name:s.name,x:(s.x/TILE)|0,y:(s.y/TILE)|0})),
   raiseShrine:()=>{const v=villages[0];if(!v)return null;shrines.push({vid:v.id,x:hero.x,y:hero.y,t:0,name:v.name});Hero.renown=Math.max(Hero.renown,6);tale([],'🗿 A shrine rises to the Sage.',true);return v.name},
   worldEvent:()=>worldEvent?{kind:worldEvent.kind,name:worldEvent.name}:null,
