@@ -107,6 +107,26 @@ button:active{transform:translateY(1px)}
 #sActs button:active{transform:scale(.93)}
 #sActs button:disabled{opacity:.4}
 #sSpinBtn.charging{border-color:#ffd24a;box-shadow:0 0 12px 3px rgba(255,210,74,.6)}
+/* cinematic warmup overlay */
+#warm{position:fixed;inset:0;z-index:120;background:radial-gradient(130% 100% at 50% 0%,#101c14,#05080a 72%);
+  color:#e8e2d5;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;
+  transition:opacity .6s ease}
+#warm.hidden{opacity:0;pointer-events:none;display:none}
+#warmInner{max-width:520px;width:100%}
+#warmTitle{font-family:Georgia,serif;font-size:30px;letter-spacing:.1em;color:#cfe37a;margin-bottom:6px}
+#warmSub{font-size:13px;color:#8fa885;font-style:italic;letter-spacing:.04em;margin-bottom:34px}
+#warmYear{font-family:Georgia,serif;font-size:19px;color:#e8d9a8;margin-bottom:20px;min-height:1.3em}
+#warmLine{font-family:Georgia,serif;font-style:italic;font-size:14px;line-height:1.6;color:#b9c7ac;
+  min-height:4.2em;margin:0 auto 30px;max-width:440px;transition:opacity .4s ease}
+#warmBarWrap{width:min(340px,80%);height:5px;margin:0 auto 14px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden}
+#warmBar{height:100%;width:0%;background:linear-gradient(90deg,#3fae54,#cfe37a);border-radius:99px;transition:width .18s linear}
+#warmHint{font-size:11px;color:#5f7358;letter-spacing:.12em;text-transform:uppercase}
+/* zoom in/out buttons (so pinch isn't needed, freeing swipe for attacks) */
+#sZoom{position:fixed;right:16px;top:calc(env(safe-area-inset-top,0px) + 96px);z-index:6;display:flex;flex-direction:column;gap:7px;align-items:center}
+#sZoom button{width:42px;height:42px;border-radius:50%;font-size:22px;font-weight:700;line-height:1;
+  background:rgba(20,28,20,.82);border:2px solid #4a6a44;color:#dfeccf;cursor:pointer;
+  -webkit-user-select:none;user-select:none;touch-action:none;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+#sZoom button:active{transform:scale(.92)}
 #staminaWrap{position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);width:120px;height:6px;
   background:rgba(10,16,10,.7);border-radius:4px;z-index:6;overflow:hidden;display:none}
 #staminaBar{height:100%;width:100%;background:linear-gradient(90deg,#3fae54,#9ae06a);transition:width .08s linear}
@@ -268,6 +288,18 @@ button:active{transform:translateY(1px)}
   </div>
 </div>
 
+<!-- ================= CINEMATIC WARMUP (the world ages before you arrive) ================= -->
+<div id="warm" class="hidden">
+  <div id="warmInner">
+    <div id="warmTitle">The World</div>
+    <div id="warmSub"></div>
+    <div id="warmYear">the ages turn…</div>
+    <div id="warmLine"></div>
+    <div id="warmBarWrap"><div id="warmBar"></div></div>
+    <div id="warmHint">a living history is being written…</div>
+  </div>
+</div>
+
 <!-- ================= SURFACE ================= -->
 <div id="sui">
   <canvas id="cvS"></canvas>
@@ -336,6 +368,10 @@ button:active{transform:translateY(1px)}
   <button id="sTalkBtn">💬 TALK</button>
   <button id="sEnterBtn">🚪 ENTER</button>
   <button id="sDescendBtn">🕳 DESCEND</button>
+  <div id="sZoom">
+    <button id="sZoomIn" title="Zoom in">＋</button>
+    <button id="sZoomOut" title="Zoom out">－</button>
+  </div>
   <div id="sActs">
     <button id="sSpinBtn" title="Hold to charge a spin strike">🌀</button>
     <button id="sDashBtn" title="Dash / dodge roll">💨</button>

@@ -42,6 +42,9 @@ function loop(t){
 function enterWorld(cfg){
   Surface.api.reseed(cfg?cfg.seed:undefined, cfg?cfg.theme:undefined, cfg?cfg.params:undefined);
   showSurface();
+  // age the world through a long history before handing the player the reins,
+  // unless a caller explicitly opts out (e.g. automated tests: {warmup:false})
+  if(!cfg||cfg.warmup!==false)Surface.api.beginWarmup();
   if(!running){ running=true; requestAnimationFrame(loop); }
 }
 

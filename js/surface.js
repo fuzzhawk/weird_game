@@ -99,7 +99,7 @@ const hero={x:0,y:0,face:0,dir:0,anim:'walk',animClock:0,atkClock:0,atkT:0,movin
   ifr:0,down:false,downT:0,sprite:null,spawnX:0,spawnY:0,hurtFlash:0,get relics(){return Hero.relics}};
 let salvage=[];   // surface tech-salvage caches the Sage can pick up for a relic
 const HERO_T={isHero:true,get x(){return hero.x},get y(){return hero.y},get dead(){return hero.down}};
-function heroTargetable(){return !hero.down&&speedIdx<=1}
+function heroTargetable(){return !hero.down&&speedIdx<=1&&!warming}
 let heroSlashes=[],heroSlashCd=0;
 let heroStam=100; const HERO_STAM_MAX=100;   // dash & spin draw on stamina
 let heroDash=null, dashCd=0;                  // active dodge-roll + its cooldown
@@ -6223,10 +6223,12 @@ cv.addEventListener('pointermove',e=>{
  }else if(ptrs.size===2){
   const a=[...ptrs.values()];
   const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
-  if(pinchD>0)cam.z=clamp(cam.z*(d/pinchD),0.6,3.2);
-  pinchD=d;
+  // small deadzone so a two-finger tap/rest doesn't fight a swipe-attack
+  if(pinchD>0&&Math.abs(d-pinchD)>6){cam.z=clamp(cam.z*(d/pinchD),0.6,3.2);pinchD=d;}
+  else if(pinchD===0)pinchD=d;
  }
 });
+function zoomBy(mult){ cam.z=clamp(cam.z*mult,0.6,3.2); }
 function endPtr(e){
  ptrs.delete(e.pointerId);
  if(ptrs.size<2)pinchD=0;
@@ -6243,6 +6245,12 @@ function endPtr(e){
 cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('wheel',e=>{e.preventDefault();cam.z=clamp(cam.z*(e.deltaY<0?1.1:0.9),0.6,3.2)},{passive:false});
+/* ---- zoom buttons: explicit +/- so pinch isn't needed (frees swipe-to-attack) ---- */
+{
+ const zi=$('sZoomIn'), zo=$('sZoomOut');
+ if(zi)zi.addEventListener('pointerdown',e=>{e.preventDefault();zoomBy(1.25);});
+ if(zo)zo.addEventListener('pointerdown',e=>{e.preventDefault();zoomBy(0.8);});
+}
 /* ---- Sage action controls: dash button/key + charged-spin button/key ---- */
 function currentMoveAng(){ if(stick){const dx=stick.x-stick.ox,dy=stick.y-stick.oy;if(Math.hypot(dx,dy)>6)return Math.atan2(dy,dx);} return hero.face||0; }
 function beginCharge(){ if(hero.down||interior||inDialog)return; charging=true; chargeT=0; const s=$('sSpinBtn');if(s)s.classList.add('charging'); }
@@ -6699,6 +6707,7 @@ $('newBtn').onclick=()=>{
  }
 };
 function reseed(newSeed,theme,params){
+ warming=false; const wov=$('warm'); if(wov)wov.classList.add('hidden');
  seed=(newSeed===undefined)?((Math.random()*2**31)|0):newSeed;
  if(theme)worldTheme=theme;
  if(params)worldParams=Object.assign({buildup:0,flora:.5,fertility:.5,fauna:.5,monsters:.5,treasure:.5,hue:-1,sat:-1},params);
@@ -6709,9 +6718,89 @@ function reseed(newSeed,theme,params){
  toast('A new garden dreams itself up… (seed '+seed+')');
 }
 
+/* ================= cinematic warmup: age the world before you arrive =================
+   The player is dropped into a world that has already lived a long history — villages
+   risen (and some fallen to ruin), the age turned, the folk grown into their stories.
+   We fast-forward the sim across a loading overlay with a lore crawl, then reveal it. */
+let warming=false, warmTargetMin=0, warmStartMin=0, warmYears=0, warmLineNext=0, warmLineIdx=0, warmDone=null, warmWallStart=0, warmLastFloorDay=0;
+const WARM_DAYS=120;                 // simulated days; narrated as a long age
+const WARM_MS_CAP=5500;              // hard wall-clock cap so the load never drags
+// give the warmup a populous, built-up world to age — so the player lands in a
+// living town, not a dwindling handful of wanderers
+function seedHistory(){
+ for(let i=people.length;i<26;i++)arrive(ri(18,44));
+ if(typeof seedCity==='function')seedCity(Math.max(0.55,worldParams.buildup||0));
+ detectVillages();
+}
+function beginWarmup(days,onDone){
+ days=days||WARM_DAYS;
+ warmDone=onDone||null;
+ seedHistory();
+ // jump the age forward so the world opens already weathered by time
+ eraOffset+=ERA_SEG_DAYS*rf(0.6,1.6); surfEra=eraState();
+ warming=true; warmStartMin=simMin; warmTargetMin=simMin+days*DAY; warmYears=ri(600,1400);
+ warmLineNext=0; warmLineIdx=0; warmWallStart=performance.now(); warmLastFloorDay=cday();
+ const th={fantasy:'an age of sword, oath and green',cyberpunk:'a neon waste that still dreams of rain',modern:'an ordinary place, quietly extraordinary'}[worldTheme]||'';
+ const nm=(Lore.active&&('The Age of '+Lore.name(4,10)))||'A Living World';
+ if($('warmTitle'))$('warmTitle').textContent=nm;
+ if($('warmSub'))$('warmSub').textContent=th;
+ if($('warmLine'))$('warmLine').textContent='';
+ if($('warmBar'))$('warmBar').style.width='0%';
+ const ov=$('warm'); if(ov)ov.classList.remove('hidden');
+}
+function warmupStep(t){
+ const deadline=performance.now()+13;
+ while(simMin<warmTargetMin&&performance.now()<deadline){ stepSim(2); }
+ // population floor: never let a harsh world dwindle to nothing during the age —
+ // fresh folk keep coming over the hills so the player arrives to a living town
+ {const d=cday();
+  if(d!==warmLastFloorDay){ warmLastFloorDay=d;
+   let alive=0;for(const p of people)if(!p.dead)alive++;
+   let guard=0;
+   while(alive<16&&guard++<8){ arrive(ri(18,42)); alive++; }
+  }}
+ const dayProg=clamp((simMin-warmStartMin)/((warmTargetMin-warmStartMin)||1),0,1);
+ const timeProg=clamp((performance.now()-warmWallStart)/WARM_MS_CAP,0,1);
+ const prog=Math.max(dayProg,timeProg);
+ if($('warmBar'))$('warmBar').style.width=(prog*100).toFixed(1)+'%';
+ if($('warmYear'))$('warmYear').textContent=Math.round(prog*warmYears)+' years pass…';
+ if(performance.now()-warmWallStart>WARM_MS_CAP){endWarmup();return;}
+ if(performance.now()>=warmLineNext){
+  warmLineNext=performance.now()+1500; warmLineIdx++;
+  let line='';
+  if(chron.length)line=chron[chron.length-1-(warmLineIdx%Math.min(chron.length,10))].text;
+  if(!line&&Lore.active)line=Lore.line(6,16);
+  if($('warmLine')&&line){const el=$('warmLine');el.style.opacity=0;setTimeout(()=>{el.textContent=line;el.style.opacity=1;},120);}
+ }
+ if(simMin>=warmTargetMin)endWarmup();
+}
+function endWarmup(){
+ warming=false;
+ // guarantee a living town to arrive in: if the age left no real village, raise one now
+ let live=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length);
+ if(!live.length||villageMembers(live[0]).length<5){
+  seedHistory();
+  live=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length);
+ }
+ const v=live[0];
+ if(v){
+  const s=nearOpen(Math.round(v.cx),Math.round(v.cy));
+  if(s){hero.x=hero.spawnX=s[0]*TILE+TILE/2;hero.y=hero.spawnY=s[1]*TILE+TILE/2;hero.down=false;hero.ifr=2;Hero.hp=Hero.maxHp;}
+  cam.x=hero.x;cam.y=hero.y;cam.z=1.8;
+ }
+ dayMark=cday();
+ const ov=$('warm'); if(ov){ov.classList.add('hidden');}
+ const yrs=warmYears;
+ toast('⌛ '+yrs+' years have passed. You arrive in '+((v&&v.name)||'a weathered land')+'.','card');
+ tale([],'And so, after '+yrs+' years of seasons, births, feuds and quiet triumphs, a wandering Sage crests the hills and walks down into the living world.',true);
+ refreshChron();
+ if(warmDone)warmDone();
+}
+
 /* ================= main loop (driven by main.js) ================= */
 let last=performance.now(),acc=0,uiT=0;
 function frame(t){
+ if(warming){ warmupStep(t); last=t; return; }
  const f0=performance.now();
  const rdt=Math.min(0.1,(t-last)/1000);last=t;
  const sp=SPEEDS[speedIdx];
@@ -6753,6 +6842,7 @@ function frame(t){
    const sw=$('staminaWrap'),sb=$('staminaBar'),acts=$('sActs');
    if(sw){sw.style.display=show?'block':'none';sb.style.width=(heroStam/HERO_STAM_MAX*100).toFixed(0)+'%';sb.style.background=heroStam<28?'#d2694a':'linear-gradient(90deg,#3fae54,#9ae06a)';}
    if(acts)acts.style.display=show?'flex':'none';
+   {const zoom=$('sZoom');if(zoom)zoom.style.display=(!interior&&!cine)?'flex':'none';}
    if($('sDashBtn'))$('sDashBtn').disabled=heroStam<28||dashCd>0;
   }
   if(cine&&selected)updateCine();
@@ -6822,6 +6912,11 @@ return {
  api:{
   reseed,
   get seed(){return seed},
+  zoom:()=>+cam.z.toFixed(3),
+  zoomBy:(m)=>{zoomBy(m);return +cam.z.toFixed(3)},
+  beginWarmup:(days,cb)=>beginWarmup(days,cb),
+  warming:()=>warming,
+  warmupInfo:()=>({warming,day:cday(),targetDay:Math.round(warmTargetMin/DAY),years:warmYears}),
   get peaceful(){return peaceful},
   set peaceful(v){peaceful=v;if(v){for(let i=monsters.length-1;i>=0;i--)killMonster(monsters[i],null,true);toast('The garden holds its breath. Peace.')}else toast('The Understories may stir again.')},
   get lastInspect(){return lastInspect},
