@@ -3032,7 +3032,7 @@ function spawnAtCamp(camp){const d=nearestDungeonTile(camp.tx,camp.ty)||dungeons
 function campTick(dt){
  // free, surface-bound risers gravitate together
  for(const m of monsters){
-  if(m.boss||m.camp||m.target||simMin-m.born<0.4*DAY)continue;
+  if(m.boss||m.hunt||m.camp||m.target||simMin-m.born<0.4*DAY)continue;
   let joined=false;
   for(const camp of camps){if(dist2(m.x,m.y,camp.x,camp.y)<(7*TILE)**2){joinCamp(m,camp);joined=true;break}}
   if(joined)continue;
@@ -6232,16 +6232,14 @@ function advanceTalk(){
 
 /* ================= input ================= */
 const ptrs=new Map();
-let pinchD=0,downInfo=null;
+let downInfo=null;
 cv.addEventListener('pointerdown',e=>{
  cv.setPointerCapture(e.pointerId);
  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
  if(ptrs.size===1)downInfo={id:e.pointerId,x:e.clientX,y:e.clientY,t:performance.now(),moved:0};
- if(ptrs.size===2){
-  const a=[...ptrs.values()];
-  pinchD=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
-  stick=null;downInfo=null;
- }
+ // a second finger no longer pinch-zooms (it fought the swipe-attack) — the
+ // +/- buttons handle zoom now; just cancel any in-progress stick/press
+ if(ptrs.size===2){ stick=null;downInfo=null; }
 });
 cv.addEventListener('pointermove',e=>{
  const pr=ptrs.get(e.pointerId);
@@ -6258,18 +6256,12 @@ cv.addEventListener('pointermove',e=>{
     stick={id:e.pointerId,ox:downInfo.x,oy:downInfo.y,x:e.clientX,y:e.clientY};
    }
   }
- }else if(ptrs.size===2){
-  const a=[...ptrs.values()];
-  const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
-  // small deadzone so a two-finger tap/rest doesn't fight a swipe-attack
-  if(pinchD>0&&Math.abs(d-pinchD)>6){cam.z=clamp(cam.z*(d/pinchD),0.6,3.2);pinchD=d;}
-  else if(pinchD===0)pinchD=d;
  }
+ // (two-finger pinch-zoom removed; use the on-screen +/- buttons instead)
 });
 function zoomBy(mult){ cam.z=clamp(cam.z*mult,0.6,3.2); }
 function endPtr(e){
  ptrs.delete(e.pointerId);
- if(ptrs.size<2)pinchD=0;
  if(stick&&stick.id===e.pointerId){stick=null;downInfo=null;return}
  if(downInfo&&downInfo.id===e.pointerId){
   const dt=performance.now()-downInfo.t;
@@ -6772,6 +6764,29 @@ function seedHistory(){
  if(typeof seedCity==='function')seedCity(Math.max(0.55,worldParams.buildup||0));
  detectVillages();
 }
+// scatter the bones of towns that fell in the ages before — ruin-sites (with a
+// raidable dungeon and a scatter of rubble) that the campaign can hang lore on
+function seedAncientRuins(n){
+ for(let k=0;k<n;k++){
+  let s=null;
+  for(let t=0;t<36&&!s;t++){ const[x,y]=randOpenTile(); if(x<8||y<8||x>W-8||y>H-8)continue; if(dungeonAt(x,y)||nodeAt.has(idx(x,y)))continue;
+   let nearV=false; for(const v of villages)if(dist2(x,y,v.cx,v.cy)<(15*15)){nearV=true;break;} if(nearV)continue; s=[x,y]; }
+  if(!s)continue;
+  const d=makeDungeon(s[0],s[1]);
+  usedDun.delete(d.name); d.name='the Ruins of '+((Lore.active&&Lore.name(4,10))||pick(VIL_ADJ));
+  d.ruin=true; d.danger=rf(.35,.6); d.depth=ri(2,4); d.loot=rf(.9,1.3);
+  // the tumbled bones of the old town around the ruin-mouth
+  for(let i=0;i<ri(3,6);i++){
+   const tp=pick(['home','home','biz','apartment']); const[w,h]=SZ[tp];
+   const spot=findSpot(clamp(s[0]+ri(-4,4),2,W-3),clamp(s[1]+ri(-4,4),2,H-3),w,h,null); if(!spot)continue;
+   const b={i:buildings.length,id:nextId++,tp,x:spot[0],y:spot[1],w,h,prog:NEED[tp],need:NEED[tp],done:true,gone:false,
+    owners:[],builder:null,forId:null,stock:{food:0,wood:0,stone:0},prosperity:0,sub:null,name:null,ref:null,emptySince:simMin,ruined:false,vid:null};
+   buildings.push(b); for(let yy=b.y;yy<b.y+h;yy++)for(let xx=b.x;xx<b.x+w;xx++)bld[idx(xx,yy)]=b.i;
+   makeAncientRuin(b);
+  }
+  if(chance(.6)){ for(let i=0;i<ri(1,2);i++)spawnMonster(d,[s[0],s[1]]); }   // things have moved in
+ }
+}
 function beginWarmup(days,onDone){
  days=days||WARM_DAYS;
  warmDone=onDone||null;
@@ -6834,6 +6849,7 @@ function endWarmup(){
  toast('⌛ '+yrs+' years have passed. You arrive in '+((v&&v.name)||'a weathered land')+'.','card');
  tale([],'And so, after '+yrs+' years of seasons, births, feuds and quiet triumphs, a wandering Sage crests the hills and walks down into the living world.',true);
  refreshChron();
+ seedAncientRuins(ri(2,3));   // the world remembers towns that fell before you came
  startCampaign();
  if(warmDone)warmDone();
 }
@@ -6855,62 +6871,145 @@ function startCampaign(){
  const home=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length)[0];
  const[vName,vDesc]=villainFor();
  campaign={ title:(Lore.active?('The '+Lore.name(4,10)+' Saga'):'A Wandering Saga'),
-   villain:vName, villainDesc:vDesc, home:home?home.id:null, idx:0, chapters:[], done:false, boss:null };
+   villain:vName, villainDesc:vDesc, home:home?home.id:null, idx:0, chapters:[], done:false, boss:null, history:captureHistory() };
  buildChapters();
- tale([], '📖 '+campaign.title+' begins. A shadow gathers over '+((home&&home.name)||'the land')+' — folk name it '+vName+', '+vDesc+' — and the old songs say only a wanderer can stand against it.',true);
+ const ev=campaign.history.events.length?(' In the old tales it is written: “'+campaign.history.events[0]+'”'):'';
+ tale([], '📖 '+campaign.title+' begins. A shadow gathers over '+((home&&home.name)||'the land')+' — folk name it '+vName+', '+vDesc+' — and only a wanderer can stand against it.'+ev,true);
  activateChapter();
 }
-function buildChapters(){
- campaign.chapters=[
-  {k:'reach',title:'A Sign in the Green',
-   intro:'The elders of {home} speak of a wrongness at the world\'s edge — a place where the birds have gone silent. Go and see it with your own eyes, Sage.',
-   desc:'Seek out the troubled place at the edge of the world.'},
-  {k:'npc',title:'A Heart to Steady',
-   intro:'The dread is fraying {home}. {who} has fallen to quarrelling and despair. Go to them, and remind them what they are fighting for.',
-   desc:'Reach {who} and steady their heart.'},
-  {k:'slay',need:3,title:'The Dark Presses In',
-   intro:'Drawn by {villain}, the things of the Understory grow bold and harry {home}. Cull {need} of them before the town is overrun.',
-   desc:'Slay {need} monsters menacing {home}.'},
-  {k:'dungeon',title:'Into the Understory',
-   intro:'Only one thing can wound {villain}, and it lies buried deep in {dun}. Descend, and carry it back into the light.',
-   desc:'Descend into {dun} and take what sleeps there.'},
-  {k:'boss',title:'{villain}',
-   intro:'{villain} has risen at last — {villainDesc} — and turns toward {home}. Stand between it and the town, Sage. End this, and the world is saved.',
-   desc:'Defeat {villain}.'},
- ];
+// read the aged world's living state into a body of "history" the quests draw on
+function captureHistory(){
+ const H={ruins:[],dungeons:[],camps:[],villages:[],figures:[],events:[]};
+ for(const d of dungeons){
+  if(d.cleansed)continue;
+  const o={id:d.id,name:d.name,x:d.x,y:d.y,danger:d.danger||0.4};
+  if(d.ruin)H.ruins.push(o); else H.dungeons.push(o);
+ }
+ for(const c of camps)H.camps.push({id:c.id,name:c.name,x:c.tx,y:c.ty});
+ for(const v of villages)H.villages.push({id:v.id,name:v.name,cx:v.cx,cy:v.cy,members:villageMembers(v).length});
+ const adults=people.filter(p=>!p.dead&&!p.inDungeon&&p.age>=16);
+ const seen=new Set();
+ for(const v of villages){const l=allById.get(v.leader);if(l&&!l.dead&&!seen.has(l.id)){seen.add(l.id);H.figures.push({id:l.id,name:l.name,role:'who leads '+v.name});}}
+ const eldest=adults.slice().sort((a,b)=>b.age-a.age)[0];
+ if(eldest&&!seen.has(eldest.id)){seen.add(eldest.id);H.figures.push({id:eldest.id,name:eldest.name,role:'the eldest soul in the land'});}
+ for(const p of adults){ if(H.figures.length>=6)break; if(!seen.has(p.id)&&knownRels(p).length>=4){seen.add(p.id);H.figures.push({id:p.id,name:p.name,role:'a well-loved soul of '+((villages.find(v=>v.id===p.vid)||{}).name||'the town')});} }
+ for(const e of chron){ if(e.major&&e.text&&e.text.length<150)H.events.push(e.text); }
+ shuffle(H.events); H.events=H.events.slice(0,12);
+ return H;
 }
 function fillTokens(s,ch){
  const home=homeVillage();
  return String(s).replace(/{home}/g,(home&&home.name)||'the town')
-  .replace(/{villain}/g,campaign.villain).replace(/{villainDesc}/g,campaign.villainDesc)
-  .replace(/{need}/g,(ch&&ch.need)||1).replace(/{who}/g,(ch&&ch._whoName)||'someone')
-  .replace(/{dun}/g,(ch&&ch._dunName)||'the deep');
+  .replace(/{villain}/g,campaign.villain).replace(/{villainDesc}/g,campaign.villainDesc);
 }
-function pickStoryNpc(){
- const home=homeVillage();
- const pool=people.filter(p=>!p.dead&&!p.inDungeon&&p.age>=16);
- if(!pool.length)return null;
- const vv=home?pool.filter(p=>p.vid===home.id):[];
- return pick(vv.length?vv:pool);
+// ---- chapter generators: each reads the world's history for a unique quest ----
+function genReach(H){
+ if(H.ruins.length){ const r=pick(H.ruins);
+  return {k:'reach',place:{x:r.x,y:r.y,name:r.name},
+   title:'Omens at '+capFirst(r.name), intro:'The old folk speak of '+r.name+' — a town that fell in the ages before — and lately a wrongness has stirred among its stones again. Go and read the omens for yourself.',
+   desc:'Investigate '+r.name+'.'}; }
+ const s=farCornerTile(hero)||[W>>1,H>>1];
+ return {k:'reach',place:{x:s[0],y:s[1],name:'the silent place'},
+  title:'A Sign in the Green', intro:'There is a place at the edge of the world where the birds have gone quiet and the air hangs wrong. See it with your own eyes, and bring word back to {home}.',
+  desc:'Seek out the silent place at the edge of the world.'};
+}
+function capFirst(s){ s=String(s); return s.charAt(0).toUpperCase()+s.slice(1); }
+function genNpc(H){
+ let fig=H.figures.length?pick(H.figures):null;
+ if(fig&&(!allById.get(fig.id)||allById.get(fig.id).dead))fig=null;
+ if(!fig){ const pool=people.filter(p=>!p.dead&&!p.inDungeon&&p.age>=16); if(!pool.length)return null; const p=pick(pool); fig={id:p.id,name:p.name,role:'a soul of {home}'}; }
+ return {k:'npc',targetId:fig.id,figName:fig.name,figRole:fig.role,
+  title:'The Heart of '+fig.name, intro:fig.name+', '+fillTokens(fig.role)+', has fallen to despair as the dread deepens — and where they falter, others follow. Go to them, and steady their heart.',
+  desc:'Reach '+fig.name+' and steady their heart.'};
+}
+function genHunt(H){
+ let spot=null,loc=null,shortName=null;
+ if(H.ruins.length&&chance(.6)){const r=pick(H.ruins);spot=[r.x,r.y];loc=r.name;shortName=r.name.replace(/^the [Rr]uins of /,'');}
+ else if(H.dungeons.length){const d=pick(H.dungeons);spot=[d.x,d.y];loc='the mouth of '+d.name;shortName=d.name.replace(/^[Tt]he /,'');}
+ else if(H.camps.length){const c=pick(H.camps);spot=[c.x,c.y];loc=c.name;shortName=c.name;}
+ else { const hv=homeVillage(); if(hv){spot=[clamp(Math.round(hv.cx)+ri(-14,14),3,W-3),clamp(Math.round(hv.cy)+ri(-14,14),3,H-3)];loc='the outskirts of '+hv.name;shortName=hv.name;} }
+ if(!spot)return null;
+ return {k:'hunt',spot,loc,
+  title:'The Nest at '+(shortName||'the Wilds'),
+  intro:'Since '+loc+' fell to shadow, things out of the Understory have nested there — and they hunt the folk of {home} by night. Go and clear them out, root and branch.',
+  desc:'Clear the monsters infesting '+loc+'.'};
+}
+function genDungeon(H){
+ const live=H.dungeons.length?H.dungeons:H.ruins;
+ if(!live.length)return null;
+ const d=live.slice().sort((a,b)=>(b.danger||0)-(a.danger||0))[0];
+ return {k:'dungeon',dungeonId:d.id,dunName:d.name,mark:[d.x,d.y],
+  title:'Descent into '+d.name, intro:'Only one thing can wound {villain}, and it lies in the deep dark of '+d.name+'. Descend, and carry it back into the light.',
+  desc:'Descend into '+d.name+'.'};
+}
+function genGather(H){
+ const v=homeVillage(); const rebuild=H.ruins.length?pick(H.ruins):null;
+ return {k:'gather',need:0,
+  title:rebuild?('Stones for '+rebuild.name):'Stones for the Wall',
+  intro:rebuild? ('If '+((v&&v.name)||'the town')+' is to outlast '+campaign.villain+', it must be fortified as '+rebuild.name+' never was. Chip {need} stone from the living rock and haul it back.')
+   : 'If {home} is to weather what comes, its walls must be raised higher. Chip {need} stone from the living rock and haul it back to the town.',
+  desc:'Mine {need} stone for {home}.'};
+}
+function genBoss(H){
+ return {k:'boss',title:'{villain}',
+  intro:'{villain} has risen at last — {villainDesc} — and turns toward {home}. Stand between it and the town, Sage. End this, and the world is saved.',
+  desc:'Defeat {villain}.'};
+}
+function buildChapters(){
+ const H=campaign.history;
+ const chs=[];
+ chs.push(genReach(H)||genGather(H));
+ const gens=[genNpc,genHunt,genDungeon,genGather,genHunt,genNpc];
+ shuffle(gens);
+ let lastK=chs[0].k, added=0, want=ri(3,4);
+ for(const g of gens){ if(added>=want)break; const c=g(H); if(!c||c.k===lastK)continue; chs.push(c); lastK=c.k; added++; }
+ // guarantee at least one hunt so combat features in every saga
+ if(!chs.some(c=>c.k==='hunt')){ const h=genHunt(H); if(h){chs.splice(Math.max(1,chs.length-1),0,h);} }
+ chs.push(genBoss(H));
+ campaign.chapters=chs;
+}
+// scale a chapter's demands by how deep into the saga it sits
+function chapterDifficulty(){ return campaign.idx; }
+function activateChapter(){
+ const ch=campaign.chapters[campaign.idx]; if(!ch){finishCampaign();return}
+ ch.prog=0; ch.done=false;
+ const diff=chapterDifficulty();
+ if(ch.k==='reach'){ ch.mark=[ch.place.x,ch.place.y]; }
+ else if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(!t||t.dead){const g=genNpc(campaign.history);if(g)Object.assign(ch,g);} const t2=allById.get(ch.targetId); if(t2){ch.mark=[(t2.x/TILE)|0,(t2.y/TILE)|0];emote(t2,'❔');} }
+ else if(ch.k==='hunt'){ ch.packN=2+diff; ch._pack=spawnHuntPack(ch.spot[0],ch.spot[1],ch.packN); if(!ch._pack.length){ ch.k='reach'; ch.place={x:ch.spot[0],y:ch.spot[1],name:ch.loc}; ch.mark=[ch.spot[0],ch.spot[1]]; } else ch.mark=[ch.spot[0],ch.spot[1]]; }
+ else if(ch.k==='dungeon'){ let d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed); if(!d)d=pickStoryDungeon(); if(d){ch.dungeonId=d.id;ch.dunName=d.name;ch.mark=[d.x,d.y];ch._descended=false;} else { advanceChapter(); return; } }
+ else if(ch.k==='gather'){ ch.need=6+diff*4; ch.slayBase=heroStone; }
+ else if(ch.k==='boss'){ const b=spawnBoss(); campaign.boss=b; if(b)ch.mark=[(b.x/TILE)|0,(b.y/TILE)|0]; }
+ ch._desc=fillTokens(ch.desc,ch).replace(/{need}/g,ch.need||1);
+ const introTxt=fillTokens(ch.intro,ch).replace(/{need}/g,ch.need||1);
+ storyCard('Chapter '+(campaign.idx+1)+' · '+fillTokens(ch.title,ch), introTxt);
+ tale([], '📖 '+introTxt, true);
+ updateStoryBanner();
 }
 function pickStoryDungeon(){
  const live=dungeons.filter(d=>!d.cleansed);
  if(live.length)return live.slice().sort((a,b)=>(b.danger+b.depth*0.1)-(a.danger+a.depth*0.1))[0];
  return dungeons[0]||null;
 }
-function activateChapter(){
- const ch=campaign.chapters[campaign.idx]; if(!ch){finishCampaign();return}
- ch.prog=0; ch.done=false; ch.mark=null;
- const home=homeVillage();
- if(ch.k==='reach'){ ch.mark=farCornerTile(hero)||[W>>1,H>>1]; }
- else if(ch.k==='npc'){ const who=pickStoryNpc(); if(who){ch.targetId=who.id;ch._whoName=who.name;ch.mark=[(who.x/TILE)|0,(who.y/TILE)|0];emote(who,'❔');} }
- else if(ch.k==='slay'){ ch.slayBase=Hero.kills; if(home)ch.mark=[Math.round(home.cx),Math.round(home.cy)]; }
- else if(ch.k==='dungeon'){ const d=pickStoryDungeon(); if(d){ch.dungeonId=d.id;ch._dunName=d.name;ch.mark=[d.x,d.y];} else { advanceChapter(); return; } }
- else if(ch.k==='boss'){ const b=spawnBoss(); campaign.boss=b; if(b)ch.mark=[(b.x/TILE)|0,(b.y/TILE)|0]; }
- ch._desc=fillTokens(ch.desc,ch);
- storyCard('Chapter '+(campaign.idx+1)+' · '+fillTokens(ch.title,ch), fillTokens(ch.intro,ch));
- tale([], '📖 '+fillTokens(ch.intro,ch), true);
- updateStoryBanner();
+// spawn a scripted pack of monsters at a location for a hunt chapter (bypasses the
+// ambient monster cap; tagged so they stay put and don't wander into camps)
+function spawnHuntPack(tx,ty,n){
+ const d=nearestDungeonTile(tx,ty)||dungeons[0]||{danger:0.5,x:tx,y:ty,name:'the dark',depth:2};
+ const pack=[];
+ for(let i=0;i<n;i++){
+  const s=nearOpen(clamp(tx+ri(-3,3),2,W-2),clamp(ty+ri(-3,3),2,H-2));
+  if(!s)continue;
+  const r=R(); let type='grub';
+  if(r<0.55)type='lurker'; if(r<0.22)type='horror';
+  const M=MONSTERS[type];
+  const m={id:nextId++,type,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,fx:1,dirIdx:0,animClock:R()*4,
+   hp:M.hp,maxhp:M.hp,dmg:M.dmg,spd:M.spd,col:M.col,g:M.g,name:M.n,
+   home:d,target:null,path:null,pi:0,atkCd:0,roamT:0,em:null,born:simMin,atkAnim:0,
+   camp:null,socialCd:1e9,raid:null,raidUntil:0,hunt:true};
+  monsters.push(m); pack.push(m);
+ }
+ if(pack.length)emote2(pack[0],'❗');
+ return pack;
 }
 function campaignNoteDescend(d){
  if(!campaign||campaign.done)return;
@@ -6924,11 +7023,12 @@ function campaignTick(dt){
  if(ch.k==='reach'){ if(ch.mark&&dist2(hero.x,hero.y,ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2)<(2.8*TILE)**2)done=true; }
  else if(ch.k==='npc'){
   const t=allById.get(ch.targetId);
-  if(!t||t.dead){ const w=pickStoryNpc(); if(w){ch.targetId=w.id;ch._whoName=w.name;} }
+  if(!t||t.dead){ const g=genNpc(campaign.history); if(g)Object.assign(ch,g); }
   else { ch.mark=[(t.x/TILE)|0,(t.y/TILE)|0];
    if(dist2(hero.x,hero.y,t.x,t.y)<(2.6*TILE)**2){ done=true; emote(t,'🙏'); buff(t,'social',.3,12,'sage'); buff(t,'luck',.2,12,'sage'); } }
  }
- else if(ch.k==='slay'){ ch.prog=Math.max(0,Hero.kills-ch.slayBase); if(ch.prog>=ch.need)done=true; }
+ else if(ch.k==='hunt'){ let alive=0; for(const m of ch._pack)if(monsters.indexOf(m)>=0)alive++; ch.prog=ch.packN-alive; if(alive===0)done=true; }
+ else if(ch.k==='gather'){ ch.prog=Math.max(0,heroStone-ch.slayBase); if(ch.prog>=ch.need)done=true; }
  else if(ch.k==='dungeon'){ if(ch._descended)done=true; }
  else if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)<0)done=true; }
  if(done)advanceChapter();
@@ -6939,7 +7039,7 @@ function advanceChapter(){
  const ups=heroGainXp(6+campaign.idx*3); if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
  Hero.renown=(Hero.renown||0)+2; heroGold+=10+campaign.idx*8;
  toast('📖 Chapter complete — '+fillTokens(ch.title,ch),'card');
- tale([],'✔ '+fillTokens(ch.desc,ch)+' The tale turns a page.',true);
+ tale([],'✔ '+(ch._desc||fillTokens(ch.desc,ch))+' The tale turns a page.',true);
  campaign.idx++;
  if(campaign.idx>=campaign.chapters.length){ finishCampaign(); return; }
  activateChapter();
@@ -6957,7 +7057,8 @@ function campaignObjectivePx(){
  const ch=campaign.chapters[campaign.idx]; if(!ch)return null;
  if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)>=0)return[campaign.boss.x,campaign.boss.y]; return null; }
  if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(t&&!t.dead)return[t.x,t.y]; }
- if(ch.k==='slay'&&monsters.length){ let m=monsters[0],bd=1e18; for(const mm of monsters){const dd=dist2(mm.x,mm.y,hero.x,hero.y);if(dd<bd){bd=dd;m=mm;}} return[m.x,m.y]; }
+ if(ch.k==='hunt'){ let m=null,bd=1e18; for(const mm of ch._pack||[]){if(monsters.indexOf(mm)<0)continue;const dd=dist2(mm.x,mm.y,hero.x,hero.y);if(dd<bd){bd=dd;m=mm;}} if(m)return[m.x,m.y]; }
+ if(ch.k==='gather'){ const r=nearestRockPx(hero.x,hero.y); if(r)return r; }
  if(ch.mark)return[ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2];
  return null;
 }
@@ -6983,10 +7084,12 @@ function updateStoryBanner(){
  if(campaign.done){ el.classList.remove('hidden'); el.innerHTML='<span class="stChap">🏆 Saga complete</span><span class="stTitle">'+campaign.title+'</span>'; return; }
  const ch=campaign.chapters[campaign.idx]; if(!ch){el.classList.add('hidden');return}
  let prog='';
- if(ch.k==='slay')prog=' · '+Math.min(ch.prog||0,ch.need)+'/'+ch.need;
- else if(ch.k==='boss'&&campaign.boss)prog=' · ⚔';
+ if(ch.k==='hunt')prog=' · '+Math.min(ch.prog||0,ch.packN||0)+'/'+(ch.packN||0)+' cleared';
+ else if(ch.k==='gather')prog=' · '+Math.min(ch.prog||0,ch.need)+'/'+ch.need+' stone';
+ else if(ch.k==='boss'&&campaign.boss)prog=' · ⚔ boss';
+ const desc=(ch._desc||fillTokens(ch.desc,ch).replace(/{need}/g,ch.need||1));
  el.classList.remove('hidden');
- el.innerHTML='<span class="stChap">📖 Ch '+(campaign.idx+1)+'/'+campaign.chapters.length+'</span><span class="stTitle">'+fillTokens(ch.title,ch)+'</span><span class="stDesc">'+fillTokens(ch.desc,ch)+prog+'</span>';
+ el.innerHTML='<span class="stChap">📖 Ch '+(campaign.idx+1)+'/'+campaign.chapters.length+'</span><span class="stTitle">'+fillTokens(ch.title,ch)+'</span><span class="stDesc">'+desc+prog+'</span>';
 }
 // a cinematic chapter card that fades in over the world, then out (tap to dismiss)
 let storyCardT=null;
@@ -7125,7 +7228,9 @@ return {
   startCampaign:()=>{startCampaign();return campaign?campaign.title:null},
   campaign:()=>{ if(!campaign)return null; const ch=campaign.chapters[campaign.idx];
    return {title:campaign.title,villain:campaign.villain,idx:campaign.idx,chapters:campaign.chapters.length,done:campaign.done,
-    chapter:ch?{k:ch.k,title:fillTokens(ch.title,ch),desc:fillTokens(ch.desc,ch),prog:ch.prog||0,need:ch.need||null}:null,
+    kinds:campaign.chapters.map(c=>c.k),
+    chapter:ch?{k:ch.k,title:fillTokens(ch.title,ch),desc:ch._desc||fillTokens(ch.desc,ch),prog:ch.prog||0,need:ch.need||ch.packN||null,packAlive:ch.k==='hunt'?(ch._pack||[]).filter(m=>monsters.indexOf(m)>=0).length:null}:null,
+    history:campaign.history?{ruins:campaign.history.ruins.length,dungeons:campaign.history.dungeons.length,camps:campaign.history.camps.length,figures:campaign.history.figures.length,events:campaign.history.events.length}:null,
     bossHp:campaign.boss?campaign.boss.hp:null}; },
   campaignObjective:()=>{const o=campaignObjectivePx();return o?{tx:(o[0]/TILE)|0,ty:(o[1]/TILE)|0}:null},
   advanceChapter:()=>{advanceChapter();return campaign?{idx:campaign.idx,done:campaign.done}:null},
