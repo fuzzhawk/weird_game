@@ -5881,6 +5881,13 @@ function heroKillMonster(m){
   tale([],'The Sage struck down '+m.name+'. The sky seemed to lift. Somewhere, a held breath let go.',true);
   return;
  }
+ if(m.champion){
+  const ups=heroGainXp(14); if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
+  Hero.renown=(Hero.renown||0)+3; heroGold+=30; heroGems+=1;
+  toast('⚔ '+m.name+' is defeated!','card');
+  tale([],'The Sage cast down '+m.name+', {villain}\'s herald. The town takes heart.'.replace('{villain}',campaign?campaign.villain:'the enemy'),true);
+  return;
+ }
  const xp={grub:2,lurker:4,horror:8}[m.type]||2;
  const ups=heroGainXp(xp);
  if(ups>0)toast('🌟 The Sage reaches level '+Hero.level);
@@ -5972,7 +5979,7 @@ function spawnAtCamp(camp){const d=nearestDungeonTile(camp.tx,camp.ty)||dungeons
 function campTick(dt){
  // free, surface-bound risers gravitate together
  for(const m of monsters){
-  if(m.boss||m.hunt||m.camp||m.target||simMin-m.born<0.4*DAY)continue;
+  if(m.boss||m.champion||m.hunt||m.camp||m.target||simMin-m.born<0.4*DAY)continue;
   let joined=false;
   for(const camp of camps){if(dist2(m.x,m.y,camp.x,camp.y)<(7*TILE)**2){joinCamp(m,camp);joined=true;break}}
   if(joined)continue;
@@ -6379,6 +6386,7 @@ function drawAnimal(c,a,t){
   c.fillStyle='#8a7a5a';c.beginPath();c.ellipse(px,py-3,5*s,4*s,0,0,7);c.fill();
  }
  if(a.hp<a.maxhp){c.fillStyle='#1b1626';c.fillRect(px-7,py-16,14,2);c.fillStyle=a.temper==='predator'?'#d24a5a':'#6fa04f';c.fillRect(px-7,py-16,14*clamp(a.hp/a.maxhp,0,1),2)}
+ if(a.questBeast){ const w=20,yy=py-20; c.fillStyle='rgba(10,6,12,0.7)';c.fillRect(px-w/2-1,yy-1,w+2,4); c.fillStyle='#d24a5a';c.fillRect(px-w/2,yy,w*clamp(a.hp/a.maxhp,0,1),3); c.font='6.5px Georgia';c.textAlign='center';c.fillStyle='#ffd0c0';c.fillText(a.name,px,yy-3); }
  if(a.em&&a.em.until>performance.now()){c.font='8px system-ui';c.textAlign='center';c.fillText(a.em.g,px,py-18)}
  else if(a.tame&&t%2600<1300){c.font='7px system-ui';c.textAlign='center';c.fillText('💚',px,py-16)}
 }
@@ -7846,20 +7854,20 @@ function drawCamp(c,camp,t){
 }
 function drawMonster(c,m,t){
  const px=m.x,py=m.y;
- const boss=m.boss, bs=boss?1.9:1;
+ const boss=m.boss, champ=m.champion, big=boss||champ, bs=boss?1.9:champ?1.4:1;
  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
  if(boss){const pul=1+0.12*Math.sin(t*0.006);c.globalAlpha=0.8;c.drawImage(GLOW_RED,px-30*pul,py-30*pul,60*pul,60*pul);c.globalAlpha=1;}
+ else if(champ){const pul=1+0.1*Math.sin(t*0.006);c.globalAlpha=0.7;c.drawImage(GLOW_PINK,px-24*pul,py-24*pul,48*pul,48*pul);c.globalAlpha=1;}
  else c.drawImage(GLOW_RED,px-18,py-18,36,36);
  c.globalCompositeOperation=go;
  const spr=surfMon[m.type];
- if(spr&&boss){
+ if(spr&&big){
   c.save();c.translate(px,py);c.scale(bs,bs);
   c.fillStyle='rgba(0,0,0,0.45)';c.beginPath();c.ellipse(0,2,8,3,0,0,7);c.fill();
   const anim=(m.atkAnim>0&&spr.FRAMES.attack)?'attack':'walk';
   CFHelp.drawCreatureSprite(c,spr,0,4,m.dirIdx||0,anim,m.animClock);
   c.restore();
-  // a crown to mark the tyrant
-  c.font='13px system-ui';c.textAlign='center';c.fillText('👑',px,py-22*bs+6);
+  c.font=(boss?'13px':'10px')+' system-ui';c.textAlign='center';c.fillText(boss?'👑':'⚔',px,py-22*bs+6);
  }else if(spr){
   c.fillStyle='rgba(0,0,0,0.4)';c.beginPath();c.ellipse(px,py+2,8,3,0,0,7);c.fill();
   const anim=(m.atkAnim>0&&spr.FRAMES.attack)?'attack':'walk';
@@ -7873,16 +7881,16 @@ function drawMonster(c,m,t){
   c.fillStyle='#ffe14a';c.fillRect(-3,-6,2,2);c.fillRect(1,-6,2,2);
   c.restore();
  }
- if(m.boss){
-  const w=26,yy=py-34;
+ if(m.boss||m.champion){
+  const w=m.boss?26:20,yy=py-(m.boss?34:28);
   c.fillStyle='rgba(10,6,12,0.7)';c.fillRect(px-w/2-1,yy-1,w+2,4);
-  c.fillStyle='#e05a7a';c.fillRect(px-w/2,yy,w*clamp(m.hp/m.maxhp,0,1),3);
-  c.font='6.5px Georgia';c.textAlign='center';c.fillStyle='#ffd0da';c.fillText(m.name,px,yy-3);
+  c.fillStyle=m.boss?'#e05a7a':'#c07adf';c.fillRect(px-w/2,yy,w*clamp(m.hp/m.maxhp,0,1),3);
+  c.font='6.5px Georgia';c.textAlign='center';c.fillStyle=m.boss?'#ffd0da':'#e6d0ff';c.fillText(m.name,px,yy-3);
  }else if(m.hp<m.maxhp){
   c.fillStyle='#1b1626';c.fillRect(px-8,py-19,16,2);
   c.fillStyle='#d24a5a';c.fillRect(px-8,py-19,16*clamp(m.hp/m.maxhp,0,1),2);
  }
- if(m.em&&m.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(m.em.g,px,py-(m.boss?40:21))}
+ if(m.em&&m.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(m.em.g,px,py-((m.boss||m.champion)?40:21))}
 }
 function drawSprite(c,p,t){
  // fallback painted sprite, used until the Creature Forge bake lands
@@ -9938,6 +9946,131 @@ function bloomGroveAt(tx,ty){
  for(let s=0;s<18;s++){const a=Math.random()*6.28;particles.push({x:tx*TILE+TILE/2,y:ty*TILE+TILE/2,vx:Math.cos(a)*46,vy:Math.sin(a)*46-30,life:0,max:0.5+Math.random()*0.4,size:1.6+Math.random()*1.6,col:Math.random()<.5?'#9ae86a':'#cfe37a',g:60,spark:true});}
  terrainDirty=true;
 }
+/* ---- ten more quest kinds, each keyed to a different living system ---- */
+const BEAST_N=['Stalker','Fang','Prowler','Gloom-Cat','Fen-Hound','Shrike','Maw','Howler'];
+function beastName(){ return 'the '+((Lore.active&&Lore.name(3,7))||pick(['Grey','Pale','Old','Black','Hollow','Red']))+' '+pick(BEAST_N); }
+const CHAMPIONS={
+ fantasy:['the Iron Revenant','the Oathbreaker','the Bone Herald','the Ash Knight'],
+ cyberpunk:['the Deadhand Proxy','the Null Warden','the Scrap Tyrant','the Grey Envoy'],
+ modern:['the Pale Foreman','the Hollow Sheriff','the Rust Preacher','the Silent Marshal'],
+};
+function championName(){ return pick(CHAMPIONS[worldTheme]||CHAMPIONS.fantasy); }
+// escort a stranded soul home
+function genEscort(H){
+ const home=homeVillage(); if(!home)return null;
+ const pool=people.filter(p=>!p.dead&&!p.inDungeon&&p.age>=16&&p.vid!==home.id);
+ const p=pool.length?pick(pool):null; if(!p)return null;
+ return {k:'escort',targetId:p.id,figName:p.name,dest:[Math.round(home.cx),Math.round(home.cy)],stage:0,
+  title:'The Long Road Home', intro:p.name+' was caught out in the wild when the shadow fell, and dares not cross the dark alone. Find them, and see them safe back to {home}.',
+  desc:'Escort '+p.name+' safely home to {home}.'};
+}
+// hunt a great wild beast
+function genBeast(H){
+ const nm=beastName(); let spot=null;
+ if(H.ruins.length)spot=[pick(H.ruins).x,pick(H.ruins).y]; if(!spot)spot=farCornerTile(hero);
+ if(!spot)return null;
+ return {k:'beast',beastName:nm,spot,
+  title:'The Hunt for '+nm, intro:'A great beast the folk name '+nm+' has come down from the wild places, emboldened by {villain}, and takes livestock and stragglers alike. Track it down and put it to rest.',
+  desc:'Hunt down '+nm+'.'};
+}
+// befriend a companion
+function genTame(H){
+ return {k:'tame',
+  title:'An Omen on Four Legs', intro:'The old belief holds that a wild thing befriended in an age of dread is a sign the land has not given up. Win a creature\'s trust, Sage — give {home} an omen to rally behind. (Loiter beside a calm animal until it trusts you.)',
+  desc:'Befriend a wild animal companion.'};
+}
+// recover a lost relic
+function genRelic(H){
+ let spot=null,loc='the wastes';
+ if(H.ruins.length){const r=pick(H.ruins);spot=[r.x,r.y];loc=r.name;}
+ else if(H.dungeons.length){const d=pick(H.dungeons);spot=[d.x,d.y];loc='the ground near '+d.name;}
+ else {const s=farCornerTile(hero);if(s)spot=s;}
+ if(!spot)return null;
+ return {k:'relic',spot,loc,
+  title:'The Lost Relic', intro:'A relic of the old machine-world lies half-buried at '+loc+' — the kind of thing that might turn a hopeless fight. Recover it before {villain}\'s creatures do.',
+  desc:'Recover the lost relic from '+loc+'.'};
+}
+// raise gold to fund the town's defence
+function genTribute(H){
+ return {k:'tribute',need:0,
+  title:'A King\'s Ransom', intro:'The free-companies will fight for {home} — but only for coin. Dig {need} gold from the hills and the rubble, and buy the town its swords.',
+  desc:'Raise {need} gold for {home}\'s defence.'};
+}
+// hold a night-vigil against waves
+function genVigil(H){
+ const home=homeVillage(); if(!home)return null;
+ const spot=[clamp(Math.round(home.cx)+ri(-6,6),3,W-3),clamp(Math.round(home.cy)+ri(-6,6),3,H-3)];
+ return {k:'vigil',spot,
+  title:'The Long Night', intro:'Tonight the Understory empties itself against {home}. Take the watch at the town\'s edge and hold your ground until the assault breaks — no matter how many come.',
+  desc:'Hold the watch at {home} until the assault breaks.'};
+}
+// find the travelling merchant
+function genTrade(H){
+ return {k:'trade',
+  title:'The Pedlar\'s Bargain', intro:'A travelling pedlar with a cart of oddments and older news has been seen on the roads. Find them — they may carry something the town sorely needs.',
+  desc:'Seek out the travelling merchant.'};
+}
+// rekindle a festival
+function genRite(H){
+ const home=homeVillage(); if(!home)return null;
+ return {k:'rite',festVid:home.id,
+  title:'Rekindle the Feast', intro:'Fear has smothered the joy out of {home}. Rekindle it — call the lanterns up over the plaza, and stand among the folk as they remember how to sing.',
+  desc:'Hold a festival in {home} and join it.'};
+}
+// walk the old road of landmarks
+function genPilgrimage(H){
+ const stops=[];
+ for(const s of shrines)stops.push([(s.x/TILE)|0,(s.y/TILE)|0,'the Sage-shrine']);
+ for(const r of H.ruins)stops.push([r.x,r.y,r.name]);
+ for(const d of H.dungeons)stops.push([d.x,d.y,'the mouth of '+d.name]);
+ for(const v of H.villages)stops.push([Math.round(v.cx),Math.round(v.cy),v.name]);
+ if(stops.length<3)return null;
+ shuffle(stops); const chosen=stops.slice(0,3);
+ return {k:'pilgrimage',stops:chosen,si:0,
+  title:'The Old Road', intro:'The elders say the land\'s strength sleeps in its old places and must be woken in turn. Walk the old road — '+chosen.map(s=>s[2]).join(', then ')+' — and wake it.',
+  desc:'Walk the old road: visit three sacred places.'};
+}
+// defeat a rival champion (a mini-boss ahead of the finale)
+function genChampion(H){
+ const nm=championName(), home=homeVillage();
+ const c=home?[Math.round(home.cx),Math.round(home.cy)]:[(hero.x/TILE)|0,(hero.y/TILE)|0];
+ return {k:'champion',champName:nm,spot:c,
+  title:'The Champion '+nm, intro:nm+', a herald sent ahead by {villain}, has come to break {home}\'s will before its master arrives. Meet it in the open and cast it down.',
+  desc:'Defeat '+nm+'.'};
+}
+function spawnChampion(name,c){
+ let s=null;
+ for(let r=6;r<=16&&!s;r++){ const cand=nearOpen(clamp(c[0]+ri(-r,r),2,W-2),clamp(c[1]+ri(-r,r),2,H-2)); if(cand&&dist2(cand[0]*TILE,cand[1]*TILE,hero.x,hero.y)>(6*TILE)**2)s=cand; }
+ if(!s)s=nearOpen(c[0],c[1])||[W>>1,H>>1];
+ const M=MONSTERS.lurker;
+ const m={id:nextId++,type:'lurker',champion:true,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,fx:1,dirIdx:0,animClock:R()*4,
+  hp:0,maxhp:0,dmg:M.dmg+2,spd:M.spd*1.05,col:'#b06adf',g:'⚔',name,home:null,target:null,path:null,pi:0,atkCd:0,roamT:0,em:null,born:simMin,atkAnim:0,camp:null,socialCd:1e9,raid:null,raidUntil:0};
+ m.maxhp=m.hp=Math.round(90+Hero.level*28);
+ monsters.push(m); emote2(m,'⚔');
+ tale([],name+' strides out of the tree-line, and the air goes cold around it.',true);
+ return m;
+}
+// spawn a great wild beast (a boosted predator) for a hunt-the-beast chapter
+function spawnBeast(name,spot){
+ const a=spawnAnimal('wolf'); if(!a)return null;
+ const s=nearOpen(spot[0],spot[1])||spot;
+ a.x=s[0]*TILE+TILE/2; a.y=s[1]*TILE+TILE/2;
+ a.temper='predator'; a.name=name; a.questBeast=true;
+ a.hp=a.maxhp=Math.round(a.maxhp*2.4+30); a.dmg=Math.round(a.dmg*1.4+2);
+ if(a.spec){a.spec.aggro=Math.max(a.spec.aggro||6,10); a.spec.bold=true;}
+ return a;
+}
+// gently pull an escorted villager along behind the Sage
+function escortStep(p,dt){
+ p.thinkT=simMin+120; if(p.task&&p.task.k!=='fight')p.task=null; p.sleeping=false;
+ const dx=hero.x-p.x,dy=hero.y-p.y,d=Math.hypot(dx,dy)||1;
+ if(d>1.6*TILE){ const spd=Math.min(d,90*dt);
+  const nx=p.x+dx/d*spd, ny=p.y+dy/d*spd;
+  if(walkable((nx/TILE)|0,(p.y/TILE)|0))p.x=nx;
+  if(walkable((p.x/TILE)|0,(ny/TILE)|0))p.y=ny;
+  p.moving=true; p.fx=dx>0?1:-1; }
+ else p.moving=false;
+}
 function genBoss(H){
  return {k:'boss',title:'{villain}',
   intro:'{villain} has risen at last — {villainDesc} — and turns toward {home}. Stand between it and the town, Sage. End this, and the world is saved.',
@@ -9947,12 +10080,13 @@ function buildChapters(){
  const H=campaign.history;
  const chs=[];
  chs.push(genReach(H)||genGather(H));
- const gens=[genNpc,genHunt,genDungeon,genGather,genFeud,genBloom,genGuard,genHunt];
+ const gens=[genNpc,genHunt,genDungeon,genGather,genFeud,genBloom,genGuard,
+   genEscort,genBeast,genTame,genRelic,genTribute,genVigil,genTrade,genRite,genPilgrimage,genChampion];
  shuffle(gens);
- let lastK=chs[0].k, added=0, want=ri(3,4);
+ let lastK=chs[0].k, added=0, want=ri(4,6);
  for(const g of gens){ if(added>=want)break; const c=g(H); if(!c||c.k===lastK)continue; chs.push(c); lastK=c.k; added++; }
- // guarantee at least one hunt so combat features in every saga
- if(!chs.some(c=>c.k==='hunt')){ const h=genHunt(H); if(h){chs.splice(Math.max(1,chs.length-1),0,h);} }
+ // guarantee some combat features before the finale
+ if(!chs.some(c=>['hunt','guard','beast','champion','vigil'].includes(c.k))){ const h=genHunt(H); if(h){chs.splice(Math.max(1,chs.length-1),0,h);} }
  chs.push(genBoss(H));
  campaign.chapters=chs;
 }
@@ -9969,6 +10103,16 @@ function activateChapter(){
  else if(ch.k==='hunt'||ch.k==='guard'){ ch.packN=2+diff; ch._pack=spawnHuntPack(ch.spot[0],ch.spot[1],ch.packN); if(!ch._pack.length){ ch.k='reach'; ch.place={x:ch.spot[0],y:ch.spot[1],name:ch.loc||ch.bName||'the place'}; ch.mark=[ch.spot[0],ch.spot[1]]; } else ch.mark=[ch.spot[0],ch.spot[1]]; }
  else if(ch.k==='dungeon'){ let d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed); if(!d)d=pickStoryDungeon(); if(d){ch.dungeonId=d.id;ch.dunName=d.name;ch.mark=[d.x,d.y];ch._descended=false;} else { advanceChapter(); return; } }
  else if(ch.k==='gather'){ ch.need=6+diff*4; ch.slayBase=heroStone; }
+ else if(ch.k==='escort'){ ch.stage=0; const p=allById.get(ch.targetId); if(!p||p.dead){const g=genEscort(campaign.history);if(g)Object.assign(ch,g);} const P=allById.get(ch.targetId); if(P){ch.mark=[(P.x/TILE)|0,(P.y/TILE)|0];emote(P,'🆘');} else { advanceChapter(); return; } }
+ else if(ch.k==='beast'){ ch._beast=spawnBeast(ch.beastName,ch.spot); if(!ch._beast){ advanceChapter(); return; } ch.mark=[(ch._beast.x/TILE)|0,(ch._beast.y/TILE)|0]; }
+ else if(ch.k==='tame'){ ch.mark=null; }
+ else if(ch.k==='relic'){ ch.base=Hero.relics.length; const s=nearOpen(ch.spot[0],ch.spot[1])||ch.spot; spawnFind(s[0],s[1],'relic',0,pick(RELICS)); ch.mark=[s[0],s[1]]; }
+ else if(ch.k==='tribute'){ ch.need=20+diff*15; ch.base=heroGold; }
+ else if(ch.k==='vigil'){ ch.mark=[ch.spot[0],ch.spot[1]]; ch.dur=13+diff*3; ch.vigilT=0; ch.spawnT=1; }
+ else if(ch.k==='trade'){ if(!merchant)spawnMerchant(); if(merchant){merchant.state='stalled';ch.mark=[merchant.tx,merchant.ty];} else { advanceChapter(); return; } }
+ else if(ch.k==='rite'){ const v=villages.find(x=>x.id===ch.festVid)||homeVillage(); if(v){ch.festVid=v.id;v.lastFest=0;v.festival={id:nextId++,endDay:cday()+2,cx:v.cx,cy:v.cy};if(typeof gatherFestival==='function')gatherFestival(v,.85);ch.mark=[Math.round(v.cx),Math.round(v.cy)];} else { advanceChapter(); return; } }
+ else if(ch.k==='pilgrimage'){ ch.si=0; ch.mark=[ch.stops[0][0],ch.stops[0][1]]; }
+ else if(ch.k==='champion'){ ch._champ=spawnChampion(ch.champName,ch.spot); if(!ch._champ){ advanceChapter(); return; } ch.mark=[(ch._champ.x/TILE)|0,(ch._champ.y/TILE)|0]; }
  else if(ch.k==='boss'){ const b=spawnBoss(); campaign.boss=b; if(b)ch.mark=[(b.x/TILE)|0,(b.y/TILE)|0]; }
  ch._desc=fillTokens(ch.desc,ch).replace(/{need}/g,ch.need||1);
  const introTxt=fillTokens(ch.intro,ch).replace(/{need}/g,ch.need||1);
@@ -10028,6 +10172,44 @@ function campaignTick(dt){
  else if(ch.k==='hunt'||ch.k==='guard'){ let alive=0; for(const m of ch._pack)if(monsters.indexOf(m)>=0)alive++; ch.prog=ch.packN-alive; if(alive===0)done=true; }
  else if(ch.k==='gather'){ ch.prog=Math.max(0,heroStone-ch.slayBase); if(ch.prog>=ch.need)done=true; }
  else if(ch.k==='dungeon'){ if(ch._descended)done=true; }
+ else if(ch.k==='escort'){
+  const p=allById.get(ch.targetId);
+  if(!p||p.dead){ toast('You lost the one you meant to guide.'); done=true; }
+  else if(ch.stage===0){ ch.mark=[(p.x/TILE)|0,(p.y/TILE)|0]; if(dist2(hero.x,hero.y,p.x,p.y)<(2.6*TILE)**2){ ch.stage=1; p.escort=true; emote(p,'🙏'); toast('Lead '+p.name+' home. Stay close.'); updateStoryBanner(); } }
+  else { escortStep(p,dt); ch.mark=ch.dest;
+   const atDest=dist2(p.x,p.y,ch.dest[0]*TILE+TILE/2,ch.dest[1]*TILE+TILE/2)<(3.2*TILE)**2;
+   const led=dist2(hero.x,hero.y,ch.dest[0]*TILE+TILE/2,ch.dest[1]*TILE+TILE/2)<(3.2*TILE)**2&&dist2(p.x,p.y,hero.x,hero.y)<(5*TILE)**2;
+   if(atDest||led){ p.escort=false; emote(p,'🏠'); done=true; } }
+ }
+ else if(ch.k==='beast'){ if(!ch._beast||animals.indexOf(ch._beast)<0)done=true; else ch.mark=[(ch._beast.x/TILE)|0,(ch._beast.y/TILE)|0]; }
+ else if(ch.k==='tame'){ if(companion)done=true; }
+ else if(ch.k==='relic'){ if(Hero.relics.length>ch.base)done=true; }
+ else if(ch.k==='tribute'){ ch.prog=Math.max(0,heroGold-ch.base); if(ch.prog>=ch.need)done=true; }
+ else if(ch.k==='vigil'){
+  const near=dist2(hero.x,hero.y,ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2)<(7*TILE)**2;
+  if(near){ ch.vigilT=(ch.vigilT||0)+dt; ch.spawnT-=dt;
+   // only send the next wave once the current one is thinning, so it never snowballs
+   const abroad=monsters.reduce((a,m)=>a+(m.hunt&&dist2(m.x,m.y,ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2)<(10*TILE)**2?1:0),0);
+   if(ch.spawnT<=0&&abroad<3){ ch.spawnT=rf(4,6); spawnHuntPack(ch.mark[0]+ri(-5,5),ch.mark[1]+ri(-5,5),1+(ch.vigilT>(ch.dur||12)*0.5?1:0)); } }
+  ch.prog=Math.min(1,(ch.vigilT||0)/(ch.dur||12));
+  if((ch.vigilT||0)>=(ch.dur||12))done=true;
+ }
+ else if(ch.k==='trade'){
+  if(!merchant){ if(!spawnMerchant()&&!merchant){done=true;} if(merchant)merchant.state='stalled'; }
+  if(merchant){ ch.mark=[merchant.tx,merchant.ty];
+   if(dist2(hero.x,hero.y,merchant.x,merchant.y)<(3*TILE)**2){ done=true; heroGold+=20; emote2Hero('🤝'); toast('🛒 The pedlar shares news and a little coin.'); } }
+ }
+ else if(ch.k==='rite'){
+  const v=villages.find(x=>x.id===ch.festVid);
+  if(!v){ done=true; }
+  else { ch.mark=[Math.round(v.cx),Math.round(v.cy)];
+   if(dist2(hero.x,hero.y,v.cx*TILE,v.cy*TILE)<(4.5*TILE)**2){ done=true; hero.festiveUntil=simMin+120; toast('🎉 You rekindle the feast, and '+v.name+' remembers how to hope.'); } }
+ }
+ else if(ch.k==='pilgrimage'){
+  const st=ch.stops[ch.si]; if(st){ ch.mark=[st[0],st[1]];
+   if(dist2(hero.x,hero.y,st[0]*TILE+TILE/2,st[1]*TILE+TILE/2)<(2.8*TILE)**2){ ch.si++; if(ch.si>=ch.stops.length)done=true; else { toast('✦ '+ch.stops[ch.si-1][2]+' woken. On to '+ch.stops[ch.si][2]+'.'); updateStoryBanner(); } } } else done=true;
+ }
+ else if(ch.k==='champion'){ if(!ch._champ||monsters.indexOf(ch._champ)<0)done=true; else ch.mark=[(ch._champ.x/TILE)|0,(ch._champ.y/TILE)|0]; }
  else if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)<0)done=true; }
  if(done)advanceChapter();
 }
@@ -10057,7 +10239,12 @@ function campaignObjectivePx(){
  if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(t&&!t.dead)return[t.x,t.y]; }
  if(ch.k==='feud'){ const t=allById.get(ch.stage===0?ch.aId:ch.bId); if(t&&!t.dead)return[t.x,t.y]; }
  if(ch.k==='hunt'||ch.k==='guard'){ let m=null,bd=1e18; for(const mm of ch._pack||[]){if(monsters.indexOf(mm)<0)continue;const dd=dist2(mm.x,mm.y,hero.x,hero.y);if(dd<bd){bd=dd;m=mm;}} if(m)return[m.x,m.y]; }
- if(ch.k==='gather'){ const r=nearestRockPx(hero.x,hero.y); if(r)return r; }
+ if((ch.k==='gather'||ch.k==='tribute')){ const r=nearestRockPx(hero.x,hero.y); if(r)return r; }
+ if(ch.k==='beast'){ if(ch._beast&&animals.indexOf(ch._beast)>=0)return[ch._beast.x,ch._beast.y]; }
+ if(ch.k==='champion'){ if(ch._champ&&monsters.indexOf(ch._champ)>=0)return[ch._champ.x,ch._champ.y]; }
+ if(ch.k==='escort'&&ch.stage===0){ const p=allById.get(ch.targetId); if(p&&!p.dead)return[p.x,p.y]; }
+ if(ch.k==='trade'&&merchant)return[merchant.x,merchant.y];
+ if(ch.k==='tame'){ let a=null,bd=1e18; for(const aa of animals){if(aa.dead||aa.tame||aa.temper==='predator')continue;const dd=dist2(aa.x,aa.y,hero.x,hero.y);if(dd<bd){bd=dd;a=aa;}} if(a)return[a.x,a.y]; }
  if(ch.mark)return[ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2];
  return null;
 }
@@ -10085,7 +10272,13 @@ function updateStoryBanner(){
  let prog='';
  if(ch.k==='hunt'||ch.k==='guard')prog=' · '+Math.min(ch.prog||0,ch.packN||0)+'/'+(ch.packN||0)+' cleared';
  else if(ch.k==='gather')prog=' · '+Math.min(ch.prog||0,ch.need)+'/'+ch.need+' stone';
+ else if(ch.k==='tribute')prog=' · '+Math.min(ch.prog||0,ch.need)+'/'+ch.need+' gold';
  else if(ch.k==='feud')prog=' · '+(ch.stage===0?'find '+ch.aName:'now find '+ch.bName);
+ else if(ch.k==='escort')prog=' · '+(ch.stage===0?'find '+ch.figName:'lead '+ch.figName+' home');
+ else if(ch.k==='vigil')prog=' · '+Math.round((ch.prog||0)*100)+'% held';
+ else if(ch.k==='pilgrimage')prog=' · '+((ch.si||0))+'/'+(ch.stops?ch.stops.length:3);
+ else if(ch.k==='champion')prog=' · ⚔';
+ else if(ch.k==='beast')prog=' · 🐾';
  else if(ch.k==='boss'&&campaign.boss)prog=' · ⚔ boss';
  const desc=(ch._desc||fillTokens(ch.desc,ch).replace(/{need}/g,ch.need||1));
  el.classList.remove('hidden');
@@ -10229,12 +10422,17 @@ return {
   campaign:()=>{ if(!campaign)return null; const ch=campaign.chapters[campaign.idx];
    return {title:campaign.title,villain:campaign.villain,idx:campaign.idx,chapters:campaign.chapters.length,done:campaign.done,
     kinds:campaign.chapters.map(c=>c.k),
-    chapter:ch?{k:ch.k,title:fillTokens(ch.title,ch),desc:ch._desc||fillTokens(ch.desc,ch),prog:ch.prog||0,need:ch.need||ch.packN||null,packAlive:ch.k==='hunt'?(ch._pack||[]).filter(m=>monsters.indexOf(m)>=0).length:null}:null,
+    chapter:ch?{k:ch.k,title:fillTokens(ch.title,ch),desc:ch._desc||fillTokens(ch.desc,ch),prog:ch.prog||0,need:ch.need||ch.packN||null,stage:ch.stage,si:ch.si,
+     packAlive:(ch.k==='hunt'||ch.k==='guard')?(ch._pack||[]).filter(m=>monsters.indexOf(m)>=0).length:null,
+     beastAlive:ch.k==='beast'?(ch._beast&&animals.indexOf(ch._beast)>=0):null,
+     champAlive:ch.k==='champion'?(ch._champ&&monsters.indexOf(ch._champ)>=0):null}:null,
     history:campaign.history?{ruins:campaign.history.ruins.length,dungeons:campaign.history.dungeons.length,camps:campaign.history.camps.length,figures:campaign.history.figures.length,events:campaign.history.events.length}:null,
     bossHp:campaign.boss?campaign.boss.hp:null}; },
   campaignObjective:()=>{const o=campaignObjectivePx();return o?{tx:(o[0]/TILE)|0,ty:(o[1]/TILE)|0}:null},
   advanceChapter:()=>{advanceChapter();return campaign?{idx:campaign.idx,done:campaign.done}:null},
   warpHero:(tx,ty)=>{hero.x=tx*TILE+TILE/2;hero.y=ty*TILE+TILE/2;hero.down=false;return{x:(hero.x/TILE)|0,y:(hero.y/TILE)|0}},
+  forceChapterKind:(k)=>{ if(!campaign)return null; const gm={reach:genReach,npc:genNpc,feud:genFeud,bloom:genBloom,hunt:genHunt,guard:genGuard,gather:genGather,dungeon:genDungeon,escort:genEscort,beast:genBeast,tame:genTame,relic:genRelic,tribute:genTribute,vigil:genVigil,trade:genTrade,rite:genRite,pilgrimage:genPilgrimage,champion:genChampion}[k]; if(!gm)return null; const c=gm(campaign.history); if(!c)return null; campaign.chapters.splice(campaign.idx,0,c); activateChapter(); return campaign.chapters[campaign.idx].k; },
+  godMode:(on)=>{Hero.maxHp=on?99:5;Hero.hp=Hero.maxHp;return Hero.hp},
   bossInfo:()=>campaign&&campaign.boss?{name:campaign.boss.name,hp:campaign.boss.hp,maxhp:campaign.boss.maxhp,alive:monsters.indexOf(campaign.boss)>=0}:null,
   killBoss:()=>{if(campaign&&campaign.boss){heroKillMonster(campaign.boss);return true}return false},
   get peaceful(){return peaceful},
