@@ -6950,6 +6950,54 @@ function genGather(H){
    : 'If {home} is to weather what comes, its walls must be raised higher. Chip {need} stone from the living rock and haul it back to the town.',
   desc:'Mine {need} stone for {home}.'};
 }
+// reconcile two feuding souls — a two-stage errand between real villagers
+function genFeud(H){
+ const home=homeVillage();
+ const pool=people.filter(p=>!p.dead&&!p.inDungeon&&p.age>=16&&(home?p.vid===home.id:true));
+ if(pool.length<2)return null;
+ const A=pick(pool); let B=null,worst=1e9;
+ for(const o of pool){ if(o===A)continue; const r=relOf(A,o); const a=(r&&r.met)?r.a:0; if(a<worst){worst=a;B=o;} }
+ if(!B)return null;
+ return {k:'feud',aId:A.id,bId:B.id,aName:A.name,bName:B.name,stage:0,
+  title:'A Quarrel in {home}', intro:A.name+' and '+B.name+' of {home} have fallen out bitterly, and the town takes sides while the shadow deepens. Go to '+A.name+' first and hear them out, then carry peace to '+B.name+'.',
+  desc:'Reconcile '+A.name+' and '+B.name+'.'};
+}
+// restore a blighted grove — a plant/soil quest
+function genBloom(H){
+ const hv=homeVillage(); const hx=hv?hv.cx:W/2, hy=hv?hv.cy:H/2;
+ let spot=null,best=1;
+ for(let t=0;t<70;t++){ const[x,y]=randOpenTile(); if(map[idx(x,y)]!==0)continue; const f=fertAt(x,y);
+  if(f<best&&dist2(x,y,hx,hy)>(9*9)){best=f;spot=[x,y];} }
+ if(!spot)spot=farCornerTile(hero);
+ if(!spot)return null;
+ return {k:'bloom',spot,
+  title:'The Withered Grove', intro:'There is a stretch of ground gone grey and barren, where nothing will take root — a wound {villain} keeps open. Go and coax the green back into it, and deny the shadow one more dead place.',
+  desc:'Restore the withered grove to life.'};
+}
+// defend a named building from a warband — a building/settlement quest
+function genGuard(H){
+ const home=homeVillage();
+ const civ=buildings.filter(b=>!b.gone&&!b.ruined&&b.done&&b.vid&&(home?b.vid===home.id:true)&&['venue','warehouse','highrise','factory','biz','apartment'].includes(b.tp));
+ if(!civ.length)return null;
+ const t=pick(civ), nm=t.name||(BMETA[t.tp]&&BMETA[t.tp].label)||t.tp;
+ return {k:'guard',bId:t.id,bName:nm,spot:[t.x+((t.w/2)|0),t.y+t.h+1],
+  title:'The Siege of '+nm, intro:'A warband out of the Understory marches on '+nm+' in {home}. Stand at its door and break them, before they tear down what took an age to raise.',
+  desc:'Defend '+nm+' from the warband.'};
+}
+// raise the green in a radius: fertilise the soil and seed suited plants
+function bloomGroveAt(tx,ty){
+ const RR=5;
+ for(let dy=-RR;dy<=RR;dy++)for(let dx=-RR;dx<=RR;dx++){
+  const x=tx+dx,y=ty+dy; if(!inB(x,y)||dx*dx+dy*dy>RR*RR)continue;
+  const i=idx(x,y);
+  if(map[i]===0&&!(water&&water[i])){
+   fert[i]=clamp(fert[i]+0.45,0,1);
+   if(!nodeAt.has(i)&&bld[i]<0&&!dungeonAt(x,y)&&chance(.22)){ const sp=pickSpeciesFor(fertAt(x,y)); if(sp)plantNode(x,y,sp); }
+  }
+ }
+ for(let s=0;s<18;s++){const a=Math.random()*6.28;particles.push({x:tx*TILE+TILE/2,y:ty*TILE+TILE/2,vx:Math.cos(a)*46,vy:Math.sin(a)*46-30,life:0,max:0.5+Math.random()*0.4,size:1.6+Math.random()*1.6,col:Math.random()<.5?'#9ae86a':'#cfe37a',g:60,spark:true});}
+ terrainDirty=true;
+}
 function genBoss(H){
  return {k:'boss',title:'{villain}',
   intro:'{villain} has risen at last — {villainDesc} — and turns toward {home}. Stand between it and the town, Sage. End this, and the world is saved.',
@@ -6959,7 +7007,7 @@ function buildChapters(){
  const H=campaign.history;
  const chs=[];
  chs.push(genReach(H)||genGather(H));
- const gens=[genNpc,genHunt,genDungeon,genGather,genHunt,genNpc];
+ const gens=[genNpc,genHunt,genDungeon,genGather,genFeud,genBloom,genGuard,genHunt];
  shuffle(gens);
  let lastK=chs[0].k, added=0, want=ri(3,4);
  for(const g of gens){ if(added>=want)break; const c=g(H); if(!c||c.k===lastK)continue; chs.push(c); lastK=c.k; added++; }
@@ -6976,7 +7024,9 @@ function activateChapter(){
  const diff=chapterDifficulty();
  if(ch.k==='reach'){ ch.mark=[ch.place.x,ch.place.y]; }
  else if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(!t||t.dead){const g=genNpc(campaign.history);if(g)Object.assign(ch,g);} const t2=allById.get(ch.targetId); if(t2){ch.mark=[(t2.x/TILE)|0,(t2.y/TILE)|0];emote(t2,'❔');} }
- else if(ch.k==='hunt'){ ch.packN=2+diff; ch._pack=spawnHuntPack(ch.spot[0],ch.spot[1],ch.packN); if(!ch._pack.length){ ch.k='reach'; ch.place={x:ch.spot[0],y:ch.spot[1],name:ch.loc}; ch.mark=[ch.spot[0],ch.spot[1]]; } else ch.mark=[ch.spot[0],ch.spot[1]]; }
+ else if(ch.k==='feud'){ ch.stage=0; const a=allById.get(ch.aId); if(!a||a.dead){const g=genFeud(campaign.history);if(g)Object.assign(ch,g);} const A=allById.get(ch.aId); if(A){ch.mark=[(A.x/TILE)|0,(A.y/TILE)|0];emote(A,'💢');} else { advanceChapter(); return; } }
+ else if(ch.k==='bloom'){ ch.mark=[ch.spot[0],ch.spot[1]]; }
+ else if(ch.k==='hunt'||ch.k==='guard'){ ch.packN=2+diff; ch._pack=spawnHuntPack(ch.spot[0],ch.spot[1],ch.packN); if(!ch._pack.length){ ch.k='reach'; ch.place={x:ch.spot[0],y:ch.spot[1],name:ch.loc||ch.bName||'the place'}; ch.mark=[ch.spot[0],ch.spot[1]]; } else ch.mark=[ch.spot[0],ch.spot[1]]; }
  else if(ch.k==='dungeon'){ let d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed); if(!d)d=pickStoryDungeon(); if(d){ch.dungeonId=d.id;ch.dunName=d.name;ch.mark=[d.x,d.y];ch._descended=false;} else { advanceChapter(); return; } }
  else if(ch.k==='gather'){ ch.need=6+diff*4; ch.slayBase=heroStone; }
  else if(ch.k==='boss'){ const b=spawnBoss(); campaign.boss=b; if(b)ch.mark=[(b.x/TILE)|0,(b.y/TILE)|0]; }
@@ -7027,7 +7077,15 @@ function campaignTick(dt){
   else { ch.mark=[(t.x/TILE)|0,(t.y/TILE)|0];
    if(dist2(hero.x,hero.y,t.x,t.y)<(2.6*TILE)**2){ done=true; emote(t,'🙏'); buff(t,'social',.3,12,'sage'); buff(t,'luck',.2,12,'sage'); } }
  }
- else if(ch.k==='hunt'){ let alive=0; for(const m of ch._pack)if(monsters.indexOf(m)>=0)alive++; ch.prog=ch.packN-alive; if(alive===0)done=true; }
+ else if(ch.k==='feud'){
+  const A=allById.get(ch.aId), B=allById.get(ch.bId);
+  if(ch.stage===0){ if(!A||A.dead){const g=genFeud(campaign.history);if(g)Object.assign(ch,g);}
+   else { ch.mark=[(A.x/TILE)|0,(A.y/TILE)|0]; if(dist2(hero.x,hero.y,A.x,A.y)<(2.6*TILE)**2){ ch.stage=1; emote(A,'🗣'); toast('You hear '+ch.aName+' out. Now carry peace to '+ch.bName+'.'); updateStoryBanner(); } }
+  } else { if(!B||B.dead){ done=true; }
+   else { ch.mark=[(B.x/TILE)|0,(B.y/TILE)|0]; if(dist2(hero.x,hero.y,B.x,B.y)<(2.6*TILE)**2){ done=true; if(A&&!A.dead){healRel(A,B,50);emote(A,'🤝');} emote(B,'🤝'); } } }
+ }
+ else if(ch.k==='bloom'){ if(ch.mark&&dist2(hero.x,hero.y,ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2)<(2.8*TILE)**2){ bloomGroveAt(ch.mark[0],ch.mark[1]); toast('🌱 The green rushes back into the barren ground.'); done=true; } }
+ else if(ch.k==='hunt'||ch.k==='guard'){ let alive=0; for(const m of ch._pack)if(monsters.indexOf(m)>=0)alive++; ch.prog=ch.packN-alive; if(alive===0)done=true; }
  else if(ch.k==='gather'){ ch.prog=Math.max(0,heroStone-ch.slayBase); if(ch.prog>=ch.need)done=true; }
  else if(ch.k==='dungeon'){ if(ch._descended)done=true; }
  else if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)<0)done=true; }
@@ -7057,7 +7115,8 @@ function campaignObjectivePx(){
  const ch=campaign.chapters[campaign.idx]; if(!ch)return null;
  if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)>=0)return[campaign.boss.x,campaign.boss.y]; return null; }
  if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(t&&!t.dead)return[t.x,t.y]; }
- if(ch.k==='hunt'){ let m=null,bd=1e18; for(const mm of ch._pack||[]){if(monsters.indexOf(mm)<0)continue;const dd=dist2(mm.x,mm.y,hero.x,hero.y);if(dd<bd){bd=dd;m=mm;}} if(m)return[m.x,m.y]; }
+ if(ch.k==='feud'){ const t=allById.get(ch.stage===0?ch.aId:ch.bId); if(t&&!t.dead)return[t.x,t.y]; }
+ if(ch.k==='hunt'||ch.k==='guard'){ let m=null,bd=1e18; for(const mm of ch._pack||[]){if(monsters.indexOf(mm)<0)continue;const dd=dist2(mm.x,mm.y,hero.x,hero.y);if(dd<bd){bd=dd;m=mm;}} if(m)return[m.x,m.y]; }
  if(ch.k==='gather'){ const r=nearestRockPx(hero.x,hero.y); if(r)return r; }
  if(ch.mark)return[ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2];
  return null;
@@ -7084,8 +7143,9 @@ function updateStoryBanner(){
  if(campaign.done){ el.classList.remove('hidden'); el.innerHTML='<span class="stChap">🏆 Saga complete</span><span class="stTitle">'+campaign.title+'</span>'; return; }
  const ch=campaign.chapters[campaign.idx]; if(!ch){el.classList.add('hidden');return}
  let prog='';
- if(ch.k==='hunt')prog=' · '+Math.min(ch.prog||0,ch.packN||0)+'/'+(ch.packN||0)+' cleared';
+ if(ch.k==='hunt'||ch.k==='guard')prog=' · '+Math.min(ch.prog||0,ch.packN||0)+'/'+(ch.packN||0)+' cleared';
  else if(ch.k==='gather')prog=' · '+Math.min(ch.prog||0,ch.need)+'/'+ch.need+' stone';
+ else if(ch.k==='feud')prog=' · '+(ch.stage===0?'find '+ch.aName:'now find '+ch.bName);
  else if(ch.k==='boss'&&campaign.boss)prog=' · ⚔ boss';
  const desc=(ch._desc||fillTokens(ch.desc,ch).replace(/{need}/g,ch.need||1));
  el.classList.remove('hidden');
@@ -7234,6 +7294,7 @@ return {
     bossHp:campaign.boss?campaign.boss.hp:null}; },
   campaignObjective:()=>{const o=campaignObjectivePx();return o?{tx:(o[0]/TILE)|0,ty:(o[1]/TILE)|0}:null},
   advanceChapter:()=>{advanceChapter();return campaign?{idx:campaign.idx,done:campaign.done}:null},
+  warpHero:(tx,ty)=>{hero.x=tx*TILE+TILE/2;hero.y=ty*TILE+TILE/2;hero.down=false;return{x:(hero.x/TILE)|0,y:(hero.y/TILE)|0}},
   bossInfo:()=>campaign&&campaign.boss?{name:campaign.boss.name,hp:campaign.boss.hp,maxhp:campaign.boss.maxhp,alive:monsters.indexOf(campaign.boss)>=0}:null,
   killBoss:()=>{if(campaign&&campaign.boss){heroKillMonster(campaign.boss);return true}return false},
   get peaceful(){return peaceful},
