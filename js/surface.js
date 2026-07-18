@@ -46,6 +46,10 @@ const RUIN_DELAY=6*DAY,CRUMBLE_DELAY=10*DAY;
 // blooms take over, the tile is freed, and the turned earth is left richer.
 const GRAVE_LIFE=16*DAY, GRAVE_BLOOM_GROW=4*DAY, GRAVE_BLOOM_LIFE=30*DAY, GRAVE_BLOOM_FADE=6*DAY;
 let graveBlooms=[];
+let carrion=[];            // kills left on the ground for scavengers
+let companion=null;        // the Sage's befriended critter
+let merchant=null;         // the travelling caravan, when in town
+let shrines=[];            // shrines a grateful town raises to the Sage
 // world-generation knobs the loading-screen randomizer sets (each 0..1; -1 = auto).
 // 0.5 reproduces the classic feel; the multiplier maps 0.5 → 1× so mid = default.
 let worldParams={buildup:0,flora:.5,fertility:.5,fauna:.5,monsters:.5,treasure:.5,hue:-1,sat:-1};
@@ -97,6 +101,9 @@ let salvage=[];   // surface tech-salvage caches the Sage can pick up for a reli
 const HERO_T={isHero:true,get x(){return hero.x},get y(){return hero.y},get dead(){return hero.down}};
 function heroTargetable(){return !hero.down&&speedIdx<=1}
 let heroSlashes=[],heroSlashCd=0;
+let heroStam=100; const HERO_STAM_MAX=100;   // dash & spin draw on stamina
+let heroDash=null, dashCd=0;                  // active dodge-roll + its cooldown
+let charging=false, chargeT=0;                // holding the spin button to charge
 // mining: per-tile accumulated damage on bramble-rock, debris particles, and the
 // stone the Sage has hauled out of the terrain
 let rockDmg=null, particles=[], heroStone=0;
@@ -802,7 +809,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -1489,6 +1496,11 @@ function think(p){
   if(dist2(p.x,p.y,tx*TILE,ty*TILE)<(5*TILE)**2||!walkable(tx,ty)){ p.migrate=null; }
   else { setTask(p,'migrate',{}); if(!goTo(p,tx,ty)){ p.migrate=null; } p.thinkT=simMin+rf(6,16); return; }
  }
+ // a festival is on in their town: idle adults drift to the plaza to celebrate
+ if(p.age>=16&&p.vid&&!p.sleeping){
+  const fv=villages.find(v=>v.id===p.vid&&v.festival);
+  if(fv&&chance(.6)){setTask(p,'festival',{cx:fv.cx,cy:fv.cy,until:simMin+rf(30,90)});return}
+ }
  if(st==='child'){
   if(isNight()||p.energy<20){p.sleeping=true;return}
   if(p.hunger>55){
@@ -1576,6 +1588,16 @@ function doTask(p,dt){
  switch(t.k){
   case 'wander':{if(!p.path){p.task=null;break}if(moveAlong(p,dt))p.task=null;break}
   case 'migrate':{if(!p.path){p.task=null;break}if(moveAlong(p,dt))p.task=null;break}
+  case 'festival':{
+   if(!t.arr){
+    if(!p.path&&!t.pathed){t.pathed=true;const s=nearOpen(t.cx+ri(-1,1),t.cy+ri(-1,1))||[t.cx,t.cy];if(!goTo(p,s[0],s[1])){p.task=null;break}}
+    if(moveAlong(p,dt))t.arr=true;else break;
+   }
+   p.moving=false;
+   if(chance(dt*0.05))emote(p,pick(['🎵','💃','🕺','🎶','✨','🍶','🎉']));
+   if(simMin>=t.until)p.task=null;
+   break;
+  }
   case 'guard':{
    if(!t.arr){ if(!p.path){if(!goTo(p,t.gx,t.gy)){p.task=null;break}} if(moveAlong(p,dt)){t.arr=true;p.moving=false;p.fx=t.ox||1} break; }
    // held post: face outward; break to think (and fight) the moment a monster nears
@@ -2325,6 +2347,10 @@ function freeCorpseSprite(p){
 const MUSINGS=['{n} watched a snail cross the path and called it a pilgrimage.','{n} argued with a rosebush and, by all accounts, lost.','{n} buried a word in the seed-rows to see what it grows.','{n} counted the petals of a thoughtfruit blossom: odd again. Troubling.','{n} listened to a beehive and swears it was buffering.','{n} whispered a question to the moss and is still waiting for the reply packet.','{n} found a strand of dead cable in the loam and planted it, hopefully.','{n} practiced being a tree. Reviews were mixed.'];
 const AMBIENT=['A warm wind combed the meadow, and every stalk bent the same polite degree.','The philosophercaps pulsed in sync, as if the ground were refreshing.','Far under the hills something old hummed one clean note and went quiet.','All afternoon the garden smelled of green ink, ozone, and beginnings.','A migration of moths crossed the sky, spelling nothing, beautifully.','A dead streetlamp deep in the hedgerow flickered once, for no one, then slept again.'];
 function dailyTick(){
+ seasonTick();
+ eventDailyTick();
+ merchantDailyTick();
+ shrineDailyTick();
  if(chance(.3))tale([],(Lore.active&&Lore.line(6,16))||pick(AMBIENT));
  const snapshot=people.slice();
  let giftDone=false;
@@ -2396,7 +2422,7 @@ function dailyTick(){
  {
   const at=animalTarget();
   if(animals.length<at&&chance(.5))spawnAnimal();
-  else if(animals.length>at+2&&chance(.15)){const a=animals[ri(0,animals.length-1)];if(a)a.dead=true}
+  else if(animals.length>at+2&&chance(.15)){const a=animals[ri(0,animals.length-1)];if(a&&!a.tame)a.dead=true}
  }
  // flyers likewise — flocks arrive on the wing, thin out toward the waste
  {
@@ -2424,7 +2450,7 @@ function stepSim(dt){
    if(n.t==='rock'){ if(n.amt<n.max){n.rt-=dt;if(n.rt<=0){n.amt++;n.rt=n.reg}} continue; }
    // plants regrow faster in fertile, well-suited soil (and only in green ages)
    const sp=speciesOf(n), f=fertAt(n.x,n.y);
-   const rate=g*(0.35+f*1.1)*(sp?(0.5+plantSuit(sp,f)*0.9):1);
+   const rate=g*(0.35+f*1.1)*(sp?(0.5+plantSuit(sp,f)*0.9):1)*seasonFertMul();
    if(n.amt<n.max){ n.rt-=dt*rate; if(n.rt<=0){ n.amt++; n.rt=n.reg } }
    if(g<0.35 && n.amt>1 && chance(dt*0.02*(0.4-g))) n.amt--;
   }
@@ -2987,7 +3013,7 @@ function campTick(dt){
    camp.reinforceT=simMin+rf(1.4,2.4)*DAY;
    if(monsters.length<monsterCap()){const nb=spawnAtCamp(camp);if(nb){nb.camp=camp;camp.flare=6;tale([],'Something new clawed up into '+camp.name+' — the camp swells.',true)}}
   }
-  if(mem.length>=3&&simMin>=camp.raidT){
+  if(mem.length>=3&&simMin>=camp.raidT&&!eventActive('aurora')){
    camp.raidT=simMin+rf(1.2,2.2)*DAY;
    const v=nearestVillageTile(camp.tx,camp.ty);
    if(v){camp.flare=9;for(const m of mem){m.raid=[v.cx,v.cy];m.raidUntil=simMin+rf(220,360)}
@@ -3016,7 +3042,7 @@ function monsterSocial(m,dt){
 
 /* ================= fauna (the Animal Forge) ================= */
 // there is more life in a green age than a grey one
-function animalTarget(){ return Math.round((2 + eraGreen()*12)*wpMul('fauna')); }
+function animalTarget(){ return Math.round((2 + eraGreen()*12)*wpMul('fauna')*seasonFaunaMul()); }
 function spawnAnimal(key,made){
  let spot=null;
  for(let t=0;t<40&&!spot;t++){
@@ -3097,7 +3123,21 @@ function biteAnimalTarget(a,tgt){
 function killAnimal(a,slayer){
  if(a.dead)return; a.dead=true;
  const i=animals.indexOf(a);if(i>=0)animals.splice(i,1);
+ if(companion===a)companion=null;
  if(slayer&&slayer!==hero&&slayer.temper==='predator'){slayer.hp=Math.min(slayer.maxhp,slayer.hp+6);slayer.wgoal=null}
+ // a felled beast leaves carrion — meat on the ground that draws scavengers in
+ if(a.spec&&!a.spec.tiny)carrion.push({x:a.x,y:a.y,amt:2+((a.maxhp/12)|0),until:simMin+rf(2,4)*DAY,t:0});
+}
+function nearestCarrion(a,range){
+ let best=null,bd=(range*TILE)**2;
+ for(const c of carrion){if(c.amt<=0)continue;const d=dist2(a.x,a.y,c.x,c.y);if(d<bd){bd=d;best=c}}
+ return best;
+}
+function carrionTick(dt){
+ for(let i=carrion.length-1;i>=0;i--){
+  const c=carrion[i]; c.t=(c.t||0)+dt;
+  if(c.amt<=0||simMin>=c.until){carrion.splice(i,1);continue}
+ }
 }
 function heroKillAnimal(a){
  killAnimal(a,hero);
@@ -3116,6 +3156,7 @@ function nearestPredator(a,range){
  return best;
 }
 function updateAnimal(a,dt){
+ if(a.tame){companionAI(a,dt);return}
  if(a.atkCd>0)a.atkCd-=dt;
  a.animClock+=dt*0.12;
  a.anim='walk';
@@ -3140,6 +3181,15 @@ function updateAnimal(a,dt){
    }else steer(a,tgt.x,tgt.y,dt,1.2);
    return;
   }
+  // no live prey about — scavenge a carcass instead
+  const car=nearestCarrion(a,a.spec.aggro+2);
+  if(car){
+   if(dist2(a.x,a.y,car.x,car.y)<(TILE*1.1)**2){
+    a.anim='idle';a.feedCd=(a.feedCd||0)-dt;
+    if(a.feedCd<=0){a.feedCd=10;car.amt--;a.hp=Math.min(a.maxhp,a.hp+5);if(chance(.4))emoteA(a,'🍖')}
+   }else steer(a,car.x,car.y,dt,1.0);
+   return;
+  }
  }else{
   // prey / neutral: flee a nearby threat (neutral has a short fuse and holds ground more)
   const thr=nearestPredator(a,a.temper==='neutral'?4:a.spec.flee);
@@ -3152,15 +3202,70 @@ function updateAnimal(a,dt){
    }
    fleeCritter(a,thr.x,thr.y,dt);return;
   }
+  // prey herd loosely with their own kind — safety in numbers
+  if(a.temper==='prey'){
+   let hx=0,hy=0,n=0;
+   for(const o of animals){if(o===a||o.dead||o.temper!=='prey')continue;const d=dist2(a.x,a.y,o.x,o.y);if(d<(7*TILE)**2&&d>(2.2*TILE)**2){hx+=o.x;hy+=o.y;n++}}
+   if(n>=2&&chance(dt*0.14)){steer(a,hx/n,hy/n,dt,0.6);return}
+  }
  }
  wanderCritter(a,dt);
 }
 function updateAnimals(dt){
+ carrionTick(dt);
  for(let i=animals.length-1;i>=0;i--){const a=animals[i];if(a.dead){animals.splice(i,1);continue}updateAnimal(a,dt)}
+}
+/* ---- the Sage's companion: a befriended critter that heels, fights & forages ---- */
+let befriendCand=null, befriendT=0;
+function companionAI(a,dt){
+ if(a.atkCd>0)a.atkCd-=dt;
+ a.animClock+=dt*0.12; a.anim='walk';
+ // snap at a monster that comes near the Sage
+ let m=null,md=(4*TILE)**2;
+ for(const mm of monsters){const d=dist2(a.x,a.y,mm.x,mm.y);if(d<md){md=d;m=mm}}
+ if(m){
+  if(dist2(a.x,a.y,m.x,m.y)<(TILE*1.2)**2){
+   a.anim='attack';a.fx=m.x>a.x?1:-1;a.dirIdx=CFHelp.angToDir(Math.atan2(m.y-a.y,m.x-a.x));
+   if(a.atkCd<=0){a.atkCd=16;m.hp-=6+Hero.level*2;emote2(m,'💥');emoteA(a,'🐾');if(m.hp<=0)heroKillMonster(m);}
+  }else steer(a,m.x,m.y,dt,1.3);
+  return;
+ }
+ // otherwise heel — follow the Sage, keeping a small gap, and forage when settled
+ const d=dist2(a.x,a.y,hero.x,hero.y);
+ if(d>(2.2*TILE)**2)steer(a,hero.x,hero.y,dt,d>(6*TILE)**2?1.7:1.0);
+ else{
+  a.anim='idle';
+  a.sniffCd=(a.sniffCd==null?rf(25,55):a.sniffCd)-dt;
+  if(a.sniffCd<=0){a.sniffCd=rf(30,70);
+   if(chance(.5)){depositResource(pick(['stone','food']),ri(1,2),a.x,a.y);emoteA(a,'✨');}
+   else emoteA(a,'👃');
+  }
+ }
+}
+function tameAnimal(a){
+ if(!a||a.dead)return null;
+ if(companion){companion.tame=false;companion.sniffCd=null}
+ companion=a; a.tame=true; a.temper='prey'; a.fleeUntil=0; a.sniffCd=null;
+ befriendCand=null;befriendT=0;
+ emoteA(a,'💚');
+ toast('🐾 '+(a.spec.label||'A creature')+' befriends the Sage.');
+ tale([],'A '+(a.spec.label||'wild thing')+' fell into step beside the Sage and would not be shooed away — a companion, then.',true);
+ return a.name;
+}
+// loiter beside a calm critter and it comes to trust you
+function befriendTick(rdt){
+ if(companion||hero.down||interior||inDialog){befriendCand=null;befriendT=0;return}
+ let best=null,bd=(1.7*TILE)**2;
+ for(const a of animals){if(a.dead||a.tame||a.temper==='predator'||a.fleeUntil>simMin)continue;const d=dist2(a.x,a.y,hero.x,hero.y);if(d<bd){bd=d;best=a}}
+ if(!best){befriendCand=null;befriendT=0;return}
+ if(befriendCand!==best){befriendCand=best;befriendT=0}
+ befriendT+=rdt;
+ if(((performance.now()/280|0)%2)===0)emoteA(best,'❔');
+ if(befriendT>=3)tameAnimal(best);
 }
 
 /* ================= flyers: birds & insects, some in flocks ================= */
-function flyerTarget(){ return Math.round((6 + eraGreen()*20)*wpMul('fauna')); }   // skies busier in green ages
+function flyerTarget(){ return Math.round((6 + eraGreen()*20)*wpMul('fauna')*seasonFaunaMul()); }   // skies busier in green ages
 function spawnFlyer(key,made,flockId,x,y){
  made=made||AF.makeFlyer(key||null, seed+'-fly-'+nextId+'-'+((R()*1e9)|0));
  if(x===undefined){const s=randOpenTile();x=s[0]*TILE+TILE/2;y=s[1]*TILE+TILE/2}
@@ -3240,6 +3345,50 @@ function drawFlyer(c,fl,t){
   c.fillRect(fl.x-2,fl.y-fl.elev-bob-2,4,3);
  }
 }
+function drawCarrion(c,cn,t){
+ const px=cn.x,py=cn.y;
+ c.fillStyle='rgba(0,0,0,0.22)';c.beginPath();c.ellipse(px,py+1,5,2,0,0,7);c.fill();
+ c.fillStyle='#7a3a34';c.beginPath();c.ellipse(px,py,3.4,2.2,0,0,7);c.fill();
+ c.fillStyle='#552823';c.fillRect(px-3,py-1,6,1);
+ // a few flies bobbing over a fresh kill
+ if((cn.t||0)<1.4*DAY&&t%900<600){c.font='6px system-ui';c.textAlign='center';c.fillText('🪰',px+Math.sin(t*0.01)*3,py-5)}
+}
+function drawMerchant(c,m,t){
+ const px=m.x,py=m.y, bob=Math.sin(m.bob*2)*1.2;
+ c.fillStyle='rgba(0,0,0,0.28)';c.beginPath();c.ellipse(px,py+3,9,3,0,0,7);c.fill();
+ if(m.state==='stalled'){
+  // a striped canopy over a little counter
+  c.fillStyle='#6a4a30';c.fillRect(px-8,py-2,16,5);
+  c.fillStyle='#8a6a44';c.fillRect(px-8,py-2,16,1.5);
+  for(let i=0;i<4;i++){c.fillStyle=i%2?'#c9524a':'#e8e0d0';c.fillRect(px-8+i*4,py-12,4,5);}
+  c.fillStyle='#4a3020';c.fillRect(px-8,py-12,1.5,10);c.fillRect(px+7,py-12,1.5,10);
+  // the pedlar
+  c.fillStyle='#caa25a';c.beginPath();c.arc(px+11,py-4,3,0,7);c.fill();
+  c.fillStyle='#5a4a3a';c.fillRect(px+8,py-2,6,5);
+  // the current deal, floating
+  if(cam.z>0.85){c.font='8px system-ui';c.textAlign='center';c.fillText(m.ware.glyph,px,py-16+bob);
+   c.font='6px Georgia';c.fillStyle='rgba(240,225,200,0.92)';c.fillText(m.ware.cost+'🪨',px,py+11);}
+ }else{
+  // the covered cart on the move
+  c.fillStyle='#e8e0d0';c.beginPath();c.ellipse(px,py-4,8,6,0,Math.PI,0);c.fill();
+  c.fillStyle='#6a4a30';c.fillRect(px-8,py-1,16,4);
+  c.fillStyle='#3a2a1a';c.beginPath();c.arc(px-5,py+3,2.4,0,7);c.fill();c.beginPath();c.arc(px+5,py+3,2.4,0,7);c.fill();
+  if(cam.z>1.0){c.font='8px system-ui';c.textAlign='center';c.fillText('🛒',px,py-13)}
+ }
+ if(m.em&&m.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(m.em.g,px,py-20)}
+}
+function drawShrine(c,sh,t){
+ const px=sh.x,py=sh.y, fl=0.6+0.4*Math.sin(t*0.004+sh.x);
+ c.fillStyle='rgba(0,0,0,0.25)';c.beginPath();c.ellipse(px,py+2,6,2.4,0,0,7);c.fill();
+ const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+ c.globalAlpha=0.4+fl*0.3;c.drawImage(GLOW_WARM,px-16,py-20,32,32);c.globalAlpha=1;c.globalCompositeOperation=go;
+ // a small carved plinth + a green flame
+ c.fillStyle='#8a8478';c.fillRect(px-4,py-2,8,5);
+ c.fillStyle='#a8a294';c.fillRect(px-3,py-9,6,7);
+ c.fillStyle='#6a6458';c.fillRect(px-3,py-9,6,1.5);
+ c.fillStyle='rgba(150,240,180,'+(0.7+fl*0.3)+')';c.beginPath();c.arc(px,py-11,1.8+fl*0.8,0,7);c.fill();
+ if(cam.z>1.05){c.font='6.5px Georgia';c.textAlign='center';c.fillStyle='rgba(210,235,200,0.85)';c.fillText('Sage-shrine',px,py+13)}
+}
 function drawAnimal(c,a,t){
  const px=a.x,py=a.y,s=a.sizeScale;
  c.fillStyle='rgba(0,0,0,0.30)';c.beginPath();c.ellipse(px,py+2,6*s,2.4*s,0,0,7);c.fill();
@@ -3252,6 +3401,7 @@ function drawAnimal(c,a,t){
  }
  if(a.hp<a.maxhp){c.fillStyle='#1b1626';c.fillRect(px-7,py-16,14,2);c.fillStyle=a.temper==='predator'?'#d24a5a':'#6fa04f';c.fillRect(px-7,py-16,14*clamp(a.hp/a.maxhp,0,1),2)}
  if(a.em&&a.em.until>performance.now()){c.font='8px system-ui';c.textAlign='center';c.fillText(a.em.g,px,py-18)}
+ else if(a.tame&&t%2600<1300){c.font='7px system-ui';c.textAlign='center';c.fillText('💚',px,py-16)}
 }
 
 /* ================= villages (the collective mind) ================= */
@@ -3520,6 +3670,7 @@ function villageTick(){
   // a growing city changes its people — tech awakenings & new dreams; factories mill goods
   if(simMin-(v.lastCulture||0)>rf(2,3.5)*DAY){v.lastCulture=simMin;cityCulture(v)}
   if(simMin-(v.lastFactory||0)>rf(.8,1.4)*DAY){v.lastFactory=simMin;factoryTick(v)}
+  maybeFestival(v);
   if(v.stock.food>0){
    const pantries=v.homes.filter(b=>!b.gone&&!b.ruined&&b.stock);
    let guard=0;
@@ -3531,6 +3682,52 @@ function villageTick(){
 }
 // how developed a settlement is (0..4), driven by how many souls it holds
 function villageDev(v){ const m=villageMembers(v).length; return m>=15?4 : m>=11?3 : m>=8?2 : m>=5?1 : 0; }
+/* ---- village festivals: the town spills out to the plaza to celebrate ---- */
+// a prosperous town throws a festival — folk gather under strung lanterns and
+// dance; the harvest (autumn) all but guarantees one. The Sage who joins in earns
+// the town's goodwill (renown) and a warm, festive glow.
+// pull the town's folk out to the plaza to celebrate (skips only the truly busy)
+function gatherFestival(v,frac){
+ for(const p of villageMembers(v)){
+  if(p.age<16||p.sleeping)continue;
+  if(p.task&&['build','fight','guard','gohome'].includes(p.task.k))continue;
+  if(chance(frac))setTask(p,'festival',{cx:v.cx,cy:v.cy,until:simMin+rf(60,150)});
+ }
+}
+function maybeFestival(v){
+ if(v.festival){
+  if(cday()>=v.festival.endDay){ tale([],'The lanterns of '+v.name+' come down; the festival winds gently to its close.'); v.festival=null; return; }
+  gatherFestival(v,.6);
+  return;
+ }
+ const dev=villageDev(v); if(dev<2)return;
+ if(simMin-(v.lastFest||0) < rf(6,10)*DAY)return;
+ let surplus=(v.stock.food||0); for(const b of v.homes)if(b.stock)surplus+=(b.stock.food||0);
+ const harvest=seasonNow().name==='Autumn';
+ if(chance(harvest?0.5:0.16) && (surplus>8||harvest)){
+  v.lastFest=simMin;
+  v.festival={id:nextId++,endDay:cday()+1,cx:v.cx,cy:v.cy};
+  tale([], '🎉 '+v.name+' throws a '+(harvest?'harvest ':'')+'festival — lanterns strung across the plaza, and the whole town spilling out to it.',true);
+  toast('🎉 A festival begins in '+v.name);
+  gatherFestival(v,.8);
+ }
+}
+// the Sage joining a festival: a one-time renown gift + a lingering festive glow
+function heroFestivalTick(rdt){
+ if(hero.down||interior)return;
+ for(const v of villages){
+  if(!v.festival)continue;
+  if(dist2(hero.x,hero.y,v.cx*TILE,v.cy*TILE) < (5*TILE)**2){
+   hero.festiveUntil=simMin+120;
+   if(hero._festId!==v.festival.id){
+    hero._festId=v.festival.id;
+    Hero.renown=(Hero.renown||0)+1;
+    toast('🎉 You join the revels of '+v.name+' — the town warms to you. (renown '+Hero.renown+')','card');
+   }
+   if(Hero.hp<Hero.maxHp&&chance(rdt*0.03))Hero.hp++;
+  }
+ }
+}
 // the town's collective larder = its own stock plus each household's SURPLUS
 // (a reserve stays with every home so investing in the town never leaves a
 // family without the means to keep their own roof)
@@ -3917,6 +4114,221 @@ function eraState(){
  const a=E[i],b=E[Math.min(i+1,N-1)],near=frac<0.5?a:b;
  return {f,name:near.name,grass:lerpHex(a.grass,b.grass,frac),dirt:lerpHex(a.dirt,b.dirt,frac),
   style:near.style,edge:near.edge,green:a.green+(b.green-a.green)*frac,lines:near.lines};
+}
+
+/* ================= seasons: a turning year over the age ================= */
+// a short year (SEASON_DAYS each) rides on top of the slow era cycle: it recolours
+// the light, drifts season-apt motes on the wind, and swells or thins the living
+// world (fertility, animals, flyers) as spring gives way to the lean of winter.
+const SEASON_DAYS=4;
+const SEASONS=[
+ {name:'Spring',glyph:'🌸',fert:1.15,fauna:1.10,wash:[120,210,120],washA:0.05,mote:'petal',
+  lines:['Green fuse and first bud — the year leans awake.','Blossom on the wind; the loam remembers how to want things.']},
+ {name:'Summer',glyph:'☀️',fert:1.28,fauna:1.22,wash:[255,210,120],washA:0.06,mote:'pollen',
+  lines:['The long gold hours; everything grows fat and unhurried.','Heat-haze over the rows, and the bees keeping their loud green ledger.']},
+ {name:'Autumn',glyph:'🍂',fert:1.0,fauna:0.98,wash:[230,150,70],washA:0.07,mote:'leaf',
+  lines:['The turning — amber, then rust, then the long letting-go.','Harvest light, low and generous, gilding what it is about to take.']},
+ {name:'Winter',glyph:'❄️',fert:0.66,fauna:0.62,wash:[150,180,230],washA:0.09,mote:'snow',
+  lines:['The lean season; the world pulls its roots in close and waits.','Frost-quiet, blue and bare — even the crows keep their counsel.']},
+];
+function seasonFloat(){ let f=(simMin/DAY)/SEASON_DAYS; return f; }
+function seasonNow(){
+ const f=seasonFloat(), i=((Math.floor(f)%4)+4)%4, t=f-Math.floor(f);
+ const s=SEASONS[i]; return {i,t,name:s.name,glyph:s.glyph,fert:s.fert,fauna:s.fauna,wash:s.wash,washA:s.washA,mote:s.mote,lines:s.lines,def:s};
+}
+let curSeasonIdx=-1;
+function seasonFertMul(){ return seasonNow().fert; }
+function seasonFaunaMul(){ return seasonNow().fauna; }
+// note a season change in the chronicle when the year turns
+function seasonTick(){
+ const s=seasonNow();
+ if(s.i!==curSeasonIdx){
+  const first=curSeasonIdx<0; curSeasonIdx=s.i;
+  if(!first)tale([],s.glyph+' '+s.name+' comes on. '+pick(s.lines),true);
+ }
+}
+
+/* ================= world events: the sky's own dramas ================= */
+// every few days the world stages an event — a chrome-rain, a blight, a herd on
+// the move, an aurora, a fall of stars — each announced with fanfare, running for
+// a day or so, leaving a real mark, then passing on.
+let worldEvent=null, nextEventDay=3, eventFlash=0;
+const WEVENTS={
+ relicrain:{name:'Relic Rain',glyph:'🌠',days:1,ban:'rgba(120,200,240,',
+  begin:'The sky sheds old chrome — a rain of salvage falls glinting across the land.',
+  end:'The last of the relic-rain settles into the grass.'},
+ blight:{name:'Blight',glyph:'🥀',days:1,ban:'rgba(150,120,60,',
+  begin:'A sour wind rolls in. Leaves curl, and a blight creeps over the green.',
+  end:'The blight lifts, and the surviving green stands a little stubborner.'},
+ herd:{name:'Great Migration',glyph:'🦌',days:1,ban:'rgba(150,200,120,',
+  begin:'The ground drums — a great herd is on the move, crossing the wild in a living tide.',
+  end:'The herd passes over the far hills and is gone.'},
+ aurora:{name:'Aurora',glyph:'🌌',days:1,ban:'rgba(120,240,190,',
+  begin:'Ribbons of cold light unfurl overhead. The dark turns gentle; even the risers go still.',
+  end:'The aurora fades, and the ordinary night returns.'},
+ meteorfall:{name:'Starfall',glyph:'☄️',days:1,ban:'rgba(255,160,90,',
+  begin:'Stars come loose and fall — smoking caches of the old world punch into the loam.',
+  end:'The fallen stars cool, their treasure already working up through the soil.'},
+};
+function eventActive(k){ return worldEvent&&worldEvent.kind===k; }
+function startEvent(kind){
+ const e=WEVENTS[kind]; if(!e)return;
+ worldEvent={kind,name:e.name,glyph:e.glyph,ban:e.ban,endDay:cday()+e.days,started:cday()};
+ tale([],e.glyph+' '+e.begin,true); toast(e.glyph+' '+e.name);
+ if(kind==='relicrain'){ for(let i=0;i<ri(6,10);i++)spawnSalvage(); eventFlash=0.3; }
+ else if(kind==='herd'){ const key=pick(['deer','deer','boar','rabbit']); for(let i=0;i<ri(5,8);i++){const a=spawnAnimal(key);if(a){a.temper='prey';a.migrate=true;}} spawnFlock(); }
+ else if(kind==='meteorfall'){ eventFlash=0.6; meteorStrikes(); }
+ else if(kind==='aurora'){ eventFlash=0.2; }
+}
+// scatter a few smoking impact caches near the settled heart of the world
+function meteorStrikes(){
+ const c=townCentroid()||[Math.round(hero.x/TILE),Math.round(hero.y/TILE)];
+ for(let n=0;n<ri(3,5);n++){
+  for(let t=0;t<24;t++){
+   const x=clamp(c[0]+ri(-22,22),2,W-2), y=clamp(c[1]+ri(-22,22),2,H-2);
+   if(!walkable(x,y)||nodeAt.has(idx(x,y))||dungeonAt(x,y))continue;
+   spawnSalvageAt(x,y); if(chance(.5))depositResource('stone',ri(2,5),x*TILE,y*TILE);
+   const cx=x*TILE+TILE/2,cy=y*TILE+TILE/2;
+   for(let s=0;s<10;s++){const a=Math.random()*6.28,sp=30+Math.random()*70;
+    particles.push({x:cx,y:cy,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-40,life:0,max:0.4+Math.random()*0.5,size:1.4+Math.random()*2,col:Math.random()<.5?'#ffd070':'#ff9a4a',g:140,spark:true});}
+   break;
+  }
+ }
+}
+function endEvent(){
+ if(!worldEvent)return;
+ const e=WEVENTS[worldEvent.kind];
+ if(e)tale([],e.glyph+' '+e.end);
+ worldEvent=null;
+}
+function eventDailyTick(){
+ if(worldEvent){
+  // continuing effects
+  if(worldEvent.kind==='relicrain'&&chance(.7))spawnSalvage();
+  if(worldEvent.kind==='blight'){
+   let hit=0;
+   for(const n of nodes){ if((n.t==='tree'||n.t==='mush'||n.yield==='food')&&n.amt>0&&chance(.4)){n.amt=Math.max(0,n.amt-1);hit++;} }
+  }
+  if(cday()>=worldEvent.endDay)endEvent();
+ }else if(cday()>=nextEventDay&&chance(.55)){
+  // season nudges which drama is likeliest
+  const s=seasonNow(); let bag=['relicrain','herd','aurora','meteorfall'];
+  if(s.name==='Summer')bag=bag.concat(['blight','herd']);
+  else if(s.name==='Autumn')bag=bag.concat(['herd','herd','meteorfall']);
+  else if(s.name==='Winter')bag=bag.concat(['aurora','aurora','blight']);
+  else bag=bag.concat(['relicrain','herd']);
+  startEvent(pick(bag));
+  nextEventDay=cday()+ri(2,4);
+ }else if(cday()>=nextEventDay){ nextEventDay=cday()+ri(1,2); }
+}
+// aurora quiets the dark: monsters lose their raid drive and the Sage mends
+function eventFrameTick(rdt){
+ if(eventFlash>0)eventFlash=Math.max(0,eventFlash-rdt*1.6);
+ if(eventActive('aurora')&&isNight()){
+  if(Hero.hp<Hero.maxHp&&chance(rdt*0.02))Hero.hp++;
+ }
+}
+
+/* ================= the travelling merchant caravan ================= */
+// a pedlar rolls in from the far roads every few days, parks a stall by a town,
+// and trades the Sage's mined stone for healing, renown, relics or a heart-flask.
+let nextMerchantDay=2;
+const MERCH_WARES=[
+ {kind:'heal',cost:4,glyph:'❤️',label:'mend two hearts'},
+ {kind:'renown',cost:6,glyph:'✦',label:'spread your name'},
+ {kind:'relic',cost:14,glyph:'🔩',label:'a salvaged relic'},
+ {kind:'heart',cost:22,glyph:'💗',label:'a heart-flask (+1 max ♥)'},
+];
+function merchantName(){return (Lore.active&&Lore.name(4,10))||pick(['Pell','Quill','Marrow','Tansy','Bram','Odo','Wren']);}
+function newWare(){return MERCH_WARES[(Math.random()*MERCH_WARES.length)|0];}
+function spawnMerchant(){
+ if(merchant||!villages.length)return;
+ const v=pick(villages);
+ const edge=nearOpen(clamp(Math.round(v.cx)+ri(-24,24),3,W-3),clamp(Math.round(v.cy)+ri(-24,24),3,H-3))||[Math.round(v.cx),Math.round(v.cy)];
+ const stall=nearOpen(clamp(Math.round(v.cx)+ri(-3,3),2,W-2),clamp(Math.round(v.cy)+ri(-3,3),2,H-2))||[Math.round(v.cx),Math.round(v.cy)];
+ merchant={name:'the pedlar '+merchantName(),x:edge[0]*TILE+TILE/2,y:edge[1]*TILE+TILE/2,
+  tx:stall[0],ty:stall[1],state:'coming',vid:v.id,leaveDay:cday()+2,ware:newWare(),em:null,bob:0,gx:0,gy:0};
+ tale([],'🛒 A caravan creaks in from the far roads, bound for '+v.name+' — a pedlar, come to trade.',true);
+ toast('🛒 A merchant nears '+v.name);
+}
+function updateMerchant(rdt){
+ const m=merchant; if(!m)return;
+ m.bob+=rdt;
+ if(m.state==='coming'){
+  const tx=m.tx*TILE+TILE/2,ty=m.ty*TILE+TILE/2,dx=tx-m.x,dy=ty-m.y,d=Math.hypot(dx,dy);
+  if(d<TILE*0.8){m.state='stalled';toast('🛒 '+m.name+' has set up a stall.');}
+  else{const sp=52*rdt;m.x+=dx/d*sp;m.y+=dy/d*sp;}
+ }else if(m.state==='leaving'){
+  const dx=m.gx-m.x,dy=m.gy-m.y,d=Math.hypot(dx,dy)||1;
+  if(d<TILE){merchant=null;return;}
+  const sp=54*rdt;m.x+=dx/d*sp;m.y+=dy/d*sp;
+ }
+}
+function merchantDailyTick(){
+ if(merchant){
+  if(merchant.state==='stalled'&&cday()>=merchant.leaveDay){
+   const g=nearOpen(clamp(merchant.tx+ri(-26,26),3,W-3),clamp(merchant.ty+ri(-26,26),3,H-3))||[3,3];
+   merchant.gx=g[0]*TILE+TILE/2;merchant.gy=g[1]*TILE+TILE/2;merchant.state='leaving';
+   tale([],'🛒 '+merchant.name+' packs the cart and rolls on toward the next town.');
+  }
+ }else if(cday()>=nextMerchantDay&&villages.length&&chance(.6)){
+  spawnMerchant(); nextMerchantDay=cday()+ri(3,6);
+ }else if(cday()>=nextMerchantDay){ nextMerchantDay=cday()+2; }
+}
+function merchantBuy(){
+ const m=merchant; if(!m||m.state!=='stalled')return null;
+ const w=m.ware;
+ if(heroStone<w.cost){m.em={g:'🪨?',until:performance.now()+1500};toast('The pedlar taps the sign — '+w.cost+' 🪨 for '+w.label+'. You are short.');return {ok:false,need:w.cost,have:heroStone};}
+ heroStone-=w.cost;
+ if(w.kind==='heal'){Hero.hp=Math.min(Hero.maxHp,Hero.hp+2);toast('❤️ Patched up — two hearts mended.');}
+ else if(w.kind==='renown'){Hero.renown=(Hero.renown||0)+2;toast('✦ The pedlar carries your name down the road. (renown '+Hero.renown+')');}
+ else if(w.kind==='relic'){grantHeroRelic(pick(RELICS));}
+ else if(w.kind==='heart'){Hero.maxHp++;Hero.hp=Hero.maxHp;toast('💗 A heart-flask — your vigour grows.');}
+ m.ware=newWare(); m.em={g:'🤝',until:performance.now()+1500};
+ return {ok:true,bought:w.kind};
+}
+
+/* ================= renown reactions & the Sage's shrine ================= */
+// as the Sage's renown grows, the folk who pass greet them warmer — and a proud,
+// developed town will raise a shrine in their honour, which leaves offerings.
+let renownEmoteT=0;
+function renownFrameTick(rdt){
+ if(hero.down||interior)return;
+ // passing folk salute the Sage, warmer the higher the renown
+ renownEmoteT-=rdt;
+ if(renownEmoteT<=0){
+  renownEmoteT=rf(1.5,3.5);
+  const r=Hero.renown||0;
+  let near=null,bd=(3*TILE)**2;
+  for(const p of people){if(p.dead||p.inDungeon||p.age<10)continue;if(p.task&&['fight','build','guard'].includes(p.task.k))continue;const d=dist2(p.x,p.y,hero.x,hero.y);if(d<bd){bd=d;near=p}}
+  if(near&&chance(.6)){
+   const g = r>=12?pick(['😍','🙏','🌟']) : r>=5?pick(['👋','😊','🙌']) : pick(['👋','🙂']);
+   emote(near,g);
+  }
+ }
+ // shrine offerings: a shrine now and then turns up a gift for the Sage
+ for(const sh of shrines){
+  sh.t=(sh.t||0)+rdt;
+  if(dist2(hero.x,hero.y,sh.x,sh.y)<(3*TILE)**2){ if(Hero.hp<Hero.maxHp&&chance(rdt*0.02))Hero.hp++; }
+ }
+}
+// a grateful, developed town raises a shrine to the renowned Sage (once)
+function maybeShrine(v){
+ if(Hero.renown<6)return;
+ if(shrines.some(s=>s.vid===v.id))return;
+ if(villageDev(v)<2)return;
+ const s=findSpot(Math.round(v.cx),Math.round(v.cy),1,1,null);
+ if(!s)return;
+ shrines.push({vid:v.id,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,t:0,name:v.name});
+ tale([],'🗿 The people of '+v.name+' raise a small shrine to the Sage, whose deeds have become a story they tell. Offerings gather at its foot.',true);
+ toast('🗿 '+v.name+' raises a shrine to you');
+}
+function shrineDailyTick(){
+ for(const v of villages)maybeShrine(v);
+ // each standing shrine leaves an offering out in the world
+ for(const sh of shrines){
+  if(chance(.5)){const res=pick(['stone','stone','food']);depositResource(res,ri(1,3),sh.x,sh.y);}
+ }
 }
 
 // the surface uses the shared TileGen engine, sampled at WORLD coordinates so
@@ -4504,6 +4916,104 @@ function nightFactor(){
  return 1;
 }
 
+/* ================= living sky & ambient particles ================= */
+// a screen-space wash + drifting motes give each season and each hour its own
+// light: petals & pollen on warm days, leaves in the turn, snow in the lean, and
+// fireflies waking with the dark. Cosmetic only (Math.random, never the world rng).
+let ambient=[], ambT=0;
+const arand=(a,b)=>a+Math.random()*(b-a);
+function spawnMote(sn){
+ const p={kind:'mote',ph:Math.random()*6,seed:Math.random()*6,life:1};
+ p.x=Math.random()*cw; p.y=-8-Math.random()*ch*0.35;
+ if(sn.mote==='pollen'){p.vx=arand(0.05,0.35);p.vy=arand(0.10,0.28);p.sway=0.5;p.r=1.1;p.col='rgba(240,222,120,0.7)';}
+ else if(sn.mote==='snow'){p.vx=arand(-0.1,0.25);p.vy=arand(0.45,0.95);p.sway=0.8;p.r=arand(1.1,1.9);p.col='rgba(240,246,255,0.9)';}
+ else if(sn.mote==='leaf'){p.vx=arand(0.2,0.8);p.vy=arand(0.5,1.0);p.sway=1.1;p.r=arand(1.8,2.6);p.col=Math.random()<0.5?'rgba(212,120,48,0.82)':'rgba(198,150,58,0.82)';p.leaf=1;}
+ else{p.vx=arand(0.1,0.5);p.vy=arand(0.35,0.7);p.sway=0.9;p.r=arand(1.4,2.1);p.col='rgba(255,190,212,0.78)';}
+ return p;
+}
+function spawnFire(){
+ return {kind:'fire',x:Math.random()*cw,y:ch*0.35+Math.random()*ch*0.6,vx:0,vy:0,
+  ph:Math.random()*6,seed:Math.random()*6,r:arand(1.0,1.7),life:1};
+}
+function skyAndAmbient(t){
+ if(interior)return;
+ const sn=seasonNow(), nf=nightFactor();
+ const dt=Math.min(0.05,(t-ambT)/1000)||0.016; ambT=t;
+ ctx.setTransform(dpr,0,0,dpr,0,0);
+ // seasonal colour wash tints the whole scene toward the season's light
+ if(sn.washA>0){
+  ctx.globalCompositeOperation='soft-light';
+  ctx.fillStyle='rgba('+sn.wash[0]+','+sn.wash[1]+','+sn.wash[2]+','+sn.washA.toFixed(3)+')';
+  ctx.fillRect(0,0,cw,ch);
+  ctx.globalCompositeOperation='source-over';
+ }
+ // aurora event: cold ribbons across the night sky
+ if(eventActive('aurora')){
+  const nf2=nightFactor();
+  if(nf2>0.05){
+   ctx.globalCompositeOperation='screen';
+   for(let r=0;r<3;r++){
+    const yy=ch*(0.10+r*0.10)+Math.sin(t*0.0004+r)*12;
+    const g=ctx.createLinearGradient(0,yy-40,0,yy+40);
+    const col=r===1?'80,240,160':(r===2?'120,160,255':'160,240,120');
+    g.addColorStop(0,'rgba('+col+',0)');g.addColorStop(0.5,'rgba('+col+','+(0.10*nf2).toFixed(3)+')');g.addColorStop(1,'rgba('+col+',0)');
+    ctx.fillStyle=g;
+    ctx.save();ctx.translate(0,Math.sin(t*0.0006+r*2)*10);ctx.fillRect(0,yy-40,cw,80);ctx.restore();
+   }
+   ctx.globalCompositeOperation='source-over';
+  }
+ }
+ // a warm band low on the sky at dawn and dusk
+ const td=tod(); let dA=0,dC='255,150,90';
+ if(td>0.74&&td<0.90){dA=(1-Math.abs(td-0.82)/0.08)*0.16;dC='255,116,66';}
+ else if(td>0.22&&td<0.34){dA=(1-Math.abs(td-0.28)/0.06)*0.11;dC='255,204,150';}
+ if(dA>0.003){
+  const g=ctx.createLinearGradient(0,0,0,ch);
+  g.addColorStop(0,'rgba('+dC+','+dA.toFixed(3)+')');g.addColorStop(0.62,'rgba('+dC+',0)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,cw,ch);
+ }
+ // particle budgets: motes always drift; fireflies only wake in the dark
+ const moteN=sn.mote==='snow'?46:sn.mote==='leaf'?26:20;
+ const fireN=Math.round(nf*26);
+ let motes=0,fires=0; for(const p of ambient){if(p.kind==='fire')fires++;else motes++;}
+ const slow=speedIdx>=2?0.2:1;    // barely stir while the Sage meditates
+ while(motes<moteN){ambient.push(spawnMote(sn));motes++;}
+ while(fires<fireN){ambient.push(spawnFire());fires++;}
+ for(let i=ambient.length-1;i>=0;i--){
+  const p=ambient[i]; p.ph+=dt;
+  if(p.kind==='fire'){
+   p.x+=Math.sin(p.ph*1.6+p.seed)*0.4*slow; p.y+=Math.cos(p.ph*1.2+p.seed)*0.3*slow;
+   const a=(0.35+0.55*Math.abs(Math.sin(p.ph*1.7+p.seed)))*Math.min(1,nf*1.5);
+   ctx.fillStyle='rgba(196,240,120,'+a.toFixed(3)+')';
+   ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,7);ctx.fill();
+   ctx.fillStyle='rgba(230,255,170,'+(a*0.5).toFixed(3)+')';
+   ctx.beginPath();ctx.arc(p.x,p.y,p.r*0.5,0,7);ctx.fill();
+   if(nf<0.18)p.life-=dt*1.5;
+   if(p.life<=0||fires>fireN+4){ambient.splice(i,1);continue;}
+  }else{
+   p.x+=(p.vx*60*dt+Math.sin(p.ph*1.2+p.seed)*p.sway)*slow;
+   p.y+=p.vy*60*dt*slow;
+   ctx.fillStyle=p.col;
+   if(p.leaf){ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.ph*1.3);ctx.fillRect(-p.r,-p.r*0.6,p.r*2,p.r*1.2);ctx.restore();}
+   else{ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,7);ctx.fill();}
+   if(p.y>ch+12||p.x<-14||p.x>cw+14){ambient.splice(i,1);continue;}
+  }
+ }
+ // event flash (a bright bloom when stars fall / an event breaks)
+ if(eventFlash>0.01){ ctx.fillStyle='rgba(255,240,210,'+(eventFlash*0.5).toFixed(3)+')'; ctx.fillRect(0,0,cw,ch); }
+ // a slim banner at the top while a world event runs
+ if(worldEvent){
+  const label=worldEvent.glyph+'  '+worldEvent.name;
+  ctx.font='bold 13px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  const w=ctx.measureText(label).width+30, bx=cw/2-w/2, by=Math.round(ch*0.085);
+  const pulse=0.5+0.5*Math.sin(t*0.004);
+  ctx.fillStyle=worldEvent.ban+(0.16+pulse*0.10).toFixed(3)+')';
+  rr(ctx,bx,by,w,24,12);ctx.fill();
+  ctx.fillStyle=worldEvent.ban+'0.9)';ctx.fillText(label,cw/2,by+13);
+  ctx.textBaseline='alphabetic';
+ }
+}
+
 /* ================= main draw ================= */
 function draw(t){
  if(interior){drawInterior(t);return}
@@ -4694,6 +5204,20 @@ function draw(t){
   ctx.fillStyle='rgba(80,220,255,'+(0.5+fl*0.4)+')';
   ctx.beginPath();ctx.moveTo(vx+1,vy-19);ctx.lineTo(vx+11,vy-16);ctx.lineTo(vx+1,vy-13);ctx.closePath();ctx.fill();
   if(z>1.1){ctx.font='7px system-ui';ctx.textAlign='center';ctx.fillStyle='rgba(150,235,255,0.9)';ctx.fillText(v.name,vx,vy-21)}
+  // festival: a warm plaza glow, strung bobbing lanterns, and rising music
+  if(v.festival){
+   const go2=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';
+   ctx.globalAlpha=0.6+0.25*Math.sin(t*0.005);
+   ctx.drawImage(GLOW_WARM,vx-34,vy-30,68,68);
+   ctx.globalAlpha=1;ctx.globalCompositeOperation=go2;
+   for(let li=0;li<6;li++){
+    const a=li/6*6.283, lx=vx+Math.cos(a+t*0.0004)*20, ly=vy-14+Math.sin(a*2+t*0.002)*3;
+    const cols=['#ff8a5a','#ffd24a','#7de0ff','#ff6ac0','#9ae86a','#ffa0d0'];
+    ctx.fillStyle=cols[li%cols.length];ctx.beginPath();ctx.arc(lx,ly,1.8,0,7);ctx.fill();
+   }
+   if(z>0.9){ctx.font='9px system-ui';ctx.textAlign='center';
+    ctx.fillText(['🎵','🎶','✨'][((t*0.002+v.id)|0)%3],vx+Math.sin(t*0.003+v.id)*8,vy-24-((t*0.02)%12));}
+  }
  }
  // salvage caches
  for(const sv of salvage){
@@ -4752,6 +5276,19 @@ function draw(t){
   else if(p.courting&&t%1400<700)ctx.fillText('❤',0,-18);
   ctx.restore();
  }}));
+ for(const c of carrion){
+  if(c.x/TILE<vx0-1||c.x/TILE>vx1+1||c.y/TILE<vy0-1||c.y/TILE>vy1+1)continue;
+  drawables.push({y:c.y-2,f:()=>drawCarrion(ctx,c,t)});
+ }
+ for(const sh of shrines){
+  if(sh.x/TILE<vx0-1||sh.x/TILE>vx1+1||sh.y/TILE<vy0-1||sh.y/TILE>vy1+1)continue;
+  drawables.push({y:sh.y,f:()=>drawShrine(ctx,sh,t)});
+ }
+ if(merchant){
+  const m=merchant;
+  if(!(m.x/TILE<vx0-2||m.x/TILE>vx1+2||m.y/TILE<vy0-2||m.y/TILE>vy1+2))
+   drawables.push({y:m.y,f:()=>drawMerchant(ctx,m,t)});
+ }
  for(const a of animals){
   if(a.x/TILE<vx0-2||a.x/TILE>vx1+2||a.y/TILE<vy0-2||a.y/TILE>vy1+2)continue;
   drawables.push({y:a.y,f:()=>drawAnimal(ctx,a,t)});
@@ -4832,6 +5369,7 @@ function draw(t){
   ctx.globalAlpha=1;
   ctx.globalCompositeOperation=go;
  }
+ skyAndAmbient(t);
  // quest guide (screen space): a bold dotted trail + arrow steering the Sage to
  // the tracked objective — with an edge arrow when the goal is off-screen
  if(!interior){
@@ -5280,6 +5818,13 @@ function drawHero(t){
    ctx.fillStyle='#1b1626';ctx.fillRect(-2,-8,1.5,2);ctx.fillRect(1,-8,1.5,2);
   }
   if(speedIdx>=2){ctx.font='8px system-ui';ctx.textAlign='center';ctx.fillText('🧘',0,-22)}
+  if(hero.em&&hero.em.until>performance.now()){ctx.font='8px system-ui';ctx.textAlign='center';ctx.fillText(hero.em.g,0,-22)}
+ }
+ // a growing charge ring while winding up a spin strike
+ if(charging){
+  const c=clamp(chargeT/1.1,0,1);
+  ctx.strokeStyle='rgba(255,'+(200-c*60|0)+',80,'+(0.4+c*0.5)+')';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(0,0,10+c*16,0,6.283*Math.min(1,chargeT/1.1));ctx.stroke();
  }
  ctx.restore();
 }
@@ -5329,7 +5874,41 @@ function heroSlash(ang){
  heroSlashes.push({ang,t:0,hit:new Set(),range:HERO_RANGE*Hero.rangeMul,arc:Math.min(Math.PI*1.6,HERO_ARC*Hero.arcMul),dmg});
  if(navigator.vibrate)navigator.vibrate(12);
 }
+// a dodge-roll: a quick burst of speed in a direction, with brief invulnerability
+function heroDashDo(ang){
+ if(hero.down||interior||inDialog||dashCd>0||heroStam<28)return false;
+ if(ang==null||isNaN(ang))ang=hero.face||0;
+ heroStam-=28; dashCd=0.62;
+ heroDash={ang,t:0,dur:0.22};
+ hero.ifr=Math.max(hero.ifr,0.32); hero.face=ang; hero.dir=CFHelp.angToDir(ang);
+ emote2Hero('💨');
+ if(navigator.vibrate)navigator.vibrate(10);
+ return true;
+}
+// a charged spin: a full-circle strike whose reach & damage grow with the charge
+function heroSpin(charge){
+ if(hero.down||interior||inDialog||heroSlashCd>0)return false;
+ charge=clamp(charge==null?1:charge,0,1);
+ const cost=24+charge*30; if(heroStam<cost)return false;
+ heroStam-=cost; heroSlashCd=0.42;
+ hero.atkT=0.5;hero.atkClock=0;
+ const dmg=(16+Hero.level*4)*Hero.dmg*(1.1+charge*1.2);
+ heroSlashes.push({ang:hero.face||0,t:0,hit:new Set(),range:(HERO_RANGE*Hero.rangeMul)*(1.25+charge*0.9),arc:Math.PI*2,dmg,spin:true});
+ particlesRing(hero.x,hero.y,charge);
+ if(navigator.vibrate)navigator.vibrate([12,24,12]);
+ return true;
+}
+function emote2Hero(g){hero.em={g,until:performance.now()+900}}
+function particlesRing(x,y,charge){
+ const n=8+((charge*10)|0);
+ for(let i=0;i<n;i++){const a=i/n*6.283,sp=60+charge*80;
+  particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:0,max:0.3+charge*0.3,size:1.6+charge*1.6,col:'#cfe8ff',g:20,spark:true});}
+}
 function updateHero(rdt){
+ // stamina regenerates (slower while dashing/charging), and cooldowns tick
+ heroStam=clamp(heroStam+(charging?4:hero.moving?9:15)*rdt,0,HERO_STAM_MAX);
+ dashCd=Math.max(0,dashCd-rdt);
+ if(charging){chargeT=Math.min(1.2,chargeT+rdt);heroStam=Math.max(0,heroStam-6*rdt);}
  heroSlashCd-=rdt;
  hero.ifr=Math.max(0,hero.ifr-rdt);
  hero.hurtFlash=Math.max(0,hero.hurtFlash-rdt);
@@ -5345,24 +5924,32 @@ function updateHero(rdt){
   }
   return;
  }
- // joystick movement
+ // active dash overrides normal steering: fling the Sage along the roll
+ if(heroDash){
+  heroDash.t+=rdt;
+  const k=Math.max(0,1-heroDash.t/heroDash.dur), dspd=HERO_SPEED*Hero.speedMul*3.4*(0.4+k);
+  moveHero(Math.cos(heroDash.ang)*dspd*rdt,Math.sin(heroDash.ang)*dspd*rdt);
+  hero.moving=true;hero.anim='run';hero.animClock+=rdt*1.6;
+  if(heroDash.t>=heroDash.dur)heroDash=null;
+ }
+ // joystick movement (suppressed during a dash / while charging a spin)
  let mx=0,my=0;
- if(stick&&!inDialog){
+ if(stick&&!inDialog&&!heroDash){
   let dx=stick.x-stick.ox,dy=stick.y-stick.oy;
   const d=Math.hypot(dx,dy);
   if(d>STICK_RADIUS){const ex=(d-STICK_RADIUS)/d;stick.ox+=dx*ex;stick.oy+=dy*ex;dx=stick.x-stick.ox;dy=stick.y-stick.oy}
   const m=Math.min(d/STICK_RADIUS,1);
   if(d>4){mx=dx/d*m;my=dy/d*m;hero.face=Math.atan2(dy,dx)}
  }
- const spd=HERO_SPEED*Hero.speedMul;
+ const spd=HERO_SPEED*Hero.speedMul*(charging?0.4:1);
  const vx=mx*spd,vy=my*spd;
- hero.moving=Math.hypot(vx,vy)>6;
- if(hero.moving){
+ if(!heroDash)hero.moving=Math.hypot(vx,vy)>6;
+ if(hero.moving&&!heroDash){
   moveHero(vx*rdt,vy*rdt);
   hero.dir=CFHelp.angToDir(Math.atan2(vy,vx));
   hero.anim=Math.hypot(mx,my)>0.85?'run':'walk';
   hero.animClock+=rdt;
- }else hero.anim='walk';
+ }else if(!heroDash)hero.anim='walk';
  if(hero.atkT>0){hero.atkT-=rdt;hero.atkClock+=rdt}
  // slashes vs monsters
  for(const s of heroSlashes){
@@ -5601,6 +6188,26 @@ function endPtr(e){
 cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('wheel',e=>{e.preventDefault();cam.z=clamp(cam.z*(e.deltaY<0?1.1:0.9),0.6,3.2)},{passive:false});
+/* ---- Sage action controls: dash button/key + charged-spin button/key ---- */
+function currentMoveAng(){ if(stick){const dx=stick.x-stick.ox,dy=stick.y-stick.oy;if(Math.hypot(dx,dy)>6)return Math.atan2(dy,dx);} return hero.face||0; }
+function beginCharge(){ if(hero.down||interior||inDialog)return; charging=true; chargeT=0; const s=$('sSpinBtn');if(s)s.classList.add('charging'); }
+function releaseCharge(){ if(!charging)return; charging=false; const s=$('sSpinBtn');if(s)s.classList.remove('charging'); heroSpin(clamp(chargeT/1.1,0,1)); }
+{
+ const dash=$('sDashBtn'), spin=$('sSpinBtn');
+ if(dash)dash.addEventListener('pointerdown',e=>{e.preventDefault();heroDashDo(currentMoveAng());});
+ if(spin){
+  spin.addEventListener('pointerdown',e=>{e.preventDefault();beginCharge();});
+  spin.addEventListener('pointerup',e=>{e.preventDefault();releaseCharge();});
+  spin.addEventListener('pointercancel',releaseCharge);
+  spin.addEventListener('pointerleave',releaseCharge);
+ }
+}
+window.addEventListener('keydown',e=>{
+ if(interior||inDialog||hero.down)return;
+ if(e.key===' '||e.key==='Shift'){heroDashDo(currentMoveAng());}
+ else if((e.key==='e'||e.key==='E')&&!charging){beginCharge();}
+});
+window.addEventListener('keyup',e=>{ if((e.key==='e'||e.key==='E'))releaseCharge(); });
 function tapAt(sx,sy){
  if(interior){
   // tapping a resident inside just gives a little flavour
@@ -5609,6 +6216,9 @@ function tapAt(sx,sy){
   return;
  }
  const wx=cam.x+(sx-cw/2)/cam.z,wy=cam.y+(sy-ch/2)/cam.z;
+ // tapping the pedlar's stall (while standing near it) makes the trade
+ if(merchant&&merchant.state==='stalled'&&dist2(wx,wy,merchant.x,merchant.y)<(1.6*TILE)**2
+    &&dist2(hero.x,hero.y,merchant.x,merchant.y)<(3*TILE)**2){ merchantBuy(); return; }
  let best=null,bd=1e18;
  for(const p of people){
   if(p.inDungeon)continue;
@@ -6068,16 +6678,28 @@ function frame(t){
  terrainTick();
  updateHero(rdt);
  updateParticles(rdt);
+ eventFrameTick(rdt);
+ heroFestivalTick(rdt);
+ befriendTick(rdt);
+ updateMerchant(rdt);
+ renownFrameTick(rdt);
  if(cine){
   cam.z+=(cineZoomTarget-cam.z)*0.09;
  }
  draw(t);
  if(t-uiT>(cine?260:450)){
   uiT=t;
-  $('clock').textContent='Day '+cday();
+  {const sn=seasonNow();$('clock').textContent=sn.glyph+' Day '+cday();}
   $('era').textContent=(surfEra?surfEra.name:phase());
   $('pop').textContent='👥 '+people.length+(animals.length?' · 🐾'+animals.length:'')+(monsters.length?' · 👹'+monsters.length:'')+(heroStone?' · 🪨'+heroStone:'');
   $('hearts').textContent=speedIdx>=2?'🧘 the Sage meditates':heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
+  // stamina bar + action buttons only in surface real-time play
+  {const show=!interior&&!cine&&speedIdx<=1&&!hero.down;
+   const sw=$('staminaWrap'),sb=$('staminaBar'),acts=$('sActs');
+   if(sw){sw.style.display=show?'block':'none';sb.style.width=(heroStam/HERO_STAM_MAX*100).toFixed(0)+'%';sb.style.background=heroStam<28?'#d2694a':'linear-gradient(90deg,#3fae54,#9ae06a)';}
+   if(acts)acts.style.display=show?'flex':'none';
+   if($('sDashBtn'))$('sDashBtn').disabled=heroStam<28||dashCd>0;
+  }
   if(cine&&selected)updateCine();
   if(selected&&!$('charPanel').classList.contains('hidden')){
    renderPanelLive(selected);
@@ -6194,6 +6816,19 @@ return {
   rerollFlora:()=>{bakeFlora('garden-'+seed+'-'+((Math.random()*1e6)|0));buildTerrainLayer();repaintDynAll();toast('The flora reconsiders its whole aesthetic.')},
   era:()=>eraState(),
   biome:()=>biome,
+  season:()=>{const s=seasonNow();return {i:s.i,name:s.name,glyph:s.glyph,fert:s.fert,fauna:s.fauna};},
+  dash:(ang)=>heroDashDo(ang==null?hero.face:ang),
+  spinStrike:(c)=>heroSpin(c==null?1:c),
+  stamina:()=>({v:+heroStam.toFixed(1),max:HERO_STAM_MAX,dashCd:+dashCd.toFixed(2)}),
+  merchant:()=>merchant?{name:merchant.name,state:merchant.state,ware:merchant.ware,leaveDay:merchant.leaveDay}:null,
+  summonMerchant:()=>{if(!merchant)spawnMerchant();if(merchant){merchant.x=hero.x+TILE;merchant.y=hero.y;merchant.tx=(hero.x/TILE)|0;merchant.ty=(hero.y/TILE)|0;merchant.state='stalled';}return merchant?merchant.name:null},
+  merchantBuy:()=>merchantBuy(),
+  giveStone:(n)=>{heroStone+=(n||10);return heroStone},
+  shrines:()=>shrines.map(s=>({name:s.name,x:(s.x/TILE)|0,y:(s.y/TILE)|0})),
+  raiseShrine:()=>{const v=villages[0];if(!v)return null;shrines.push({vid:v.id,x:hero.x,y:hero.y,t:0,name:v.name});Hero.renown=Math.max(Hero.renown,6);tale([],'🗿 A shrine rises to the Sage.',true);return v.name},
+  worldEvent:()=>worldEvent?{kind:worldEvent.kind,name:worldEvent.name}:null,
+  forceEvent:(k)=>{startEvent(k);return worldEvent?worldEvent.name:null},
+  endEvent:()=>{endEvent();return true},
   eraStats:()=>({green:eraGreen(),salvage:salvage.length,relicTarget:relicTarget(),
     animals:animals.length,animalTarget:animalTarget(),theme:worldTheme,decor:decorList?decorList.length:0,
     nodeFood:nodes.filter(n=>n.yield==='food').reduce((a,n)=>a+n.amt,0)}),
@@ -6205,6 +6840,10 @@ return {
   forgeAnimal:()=>{const made=AF.make(null,'forge-'+((Math.random()*1e9)|0));made._preview=AF.bake(made.params,48,['walk']);return made},
   spawnAnimalMade:(made)=>made&&made.flyer?spawnFlyer(made.kind,made):spawnAnimal(made&&made.key,made),
   populateFauna:()=>{const at=animalTarget();let n=0;while(animals.length<at&&n++<40)if(!spawnAnimal())break;toast('The green fills with life.')},
+  carrionCount:()=>carrion.length,
+  spawnCarrion:()=>{const s=randOpenTile();carrion.push({x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,amt:3,until:simMin+3*DAY,t:0});return carrion.length},
+  companion:()=>companion?{name:companion.name,label:companion.spec&&companion.spec.label,tame:!!companion.tame}:null,
+  tameNearest:()=>{let best=null,bd=1e18;for(const a of animals){if(a.dead||a.tame)continue;const d=dist2(a.x,a.y,hero.x,hero.y);if(d<bd){bd=d;best=a}}return best?tameAnimal(best):null},
   forgeFlyer:()=>{const made=AF.makeFlyer(null,'forge-'+((Math.random()*1e9)|0));made._preview=AF.bakeFlyer(made.params,48);return made},
   releaseFlock:()=>{spawnFlock();toast('A flock takes to the wing.')},
   populateFlyers:()=>{const ft=flyerTarget();let g=0;while(flyers.length<ft&&g++<50){if(chance(.4))spawnFlock();else spawnFlyer()}toast('The skies fill with wings.')},
@@ -6246,6 +6885,8 @@ return {
   objective:()=>{const q=trackedQuestObj();const o=q?questObjective(q):null;return o?{tx:(o[0]/TILE)|0,ty:(o[1]/TILE)|0,kind:q.kind}:null},
   socialStats:()=>Object.assign({},socialLog),
   settlement:()=>{const counts={};for(const b of buildings){if(b.gone)continue;const k=b.ruined?b.tp+'(ruin)':b.tp;counts[k]=(counts[k]||0)+1;}return {villages:villages.map(v=>({name:v.name,members:villageMembers(v).length,dev:villageDev(v)})),buildings:counts};},
+  forceFestival:()=>{const v=villages.find(x=>x.homes&&x.homes.length)||villages[0];if(!v)return null;v.lastFest=0;v.festival={id:nextId++,endDay:cday()+1,cx:v.cx,cy:v.cy};tale([],'🎉 '+v.name+' throws a festival.',true);gatherFestival(v,.9);return v.name},
+  festivals:()=>villages.filter(v=>v.festival).map(v=>({name:v.name,revellers:people.filter(p=>p.task&&p.task.k==='festival').length})),
   terrain:()=>{ if(!terTier)return null; let open=0,weak=0,hard=0,lush=0,barren=0; for(let i=0;i<W*H;i++){ if(map[i]===0){open++; if(fert&&fert[i]>=0.46)lush++; else barren++;} else if(terTier[i]===2)hard++; else weak++;} let emn=1,emx=0; if(elevF)for(let i=0;i<W*H;i++){if(elevF[i]<emn)emn=elevF[i];if(elevF[i]>emx)emx=elevF[i];} return {W,H,open,weak,hard,lush,barren,solidPct:+((weak+hard)/(W*H)*100).toFixed(1),elevMin:+emn.toFixed(3),elevMax:+emx.toFixed(3),blooms:graveBlooms.length}; },
   forceSocialAct:(kind)=>{
    const a=people.filter(x=>!x.dead&&!x.inDungeon);
