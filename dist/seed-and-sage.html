@@ -107,6 +107,26 @@ button:active{transform:translateY(1px)}
 #sActs button:active{transform:scale(.93)}
 #sActs button:disabled{opacity:.4}
 #sSpinBtn.charging{border-color:#ffd24a;box-shadow:0 0 12px 3px rgba(255,210,74,.6)}
+/* cinematic warmup overlay */
+#warm{position:fixed;inset:0;z-index:120;background:radial-gradient(130% 100% at 50% 0%,#101c14,#05080a 72%);
+  color:#e8e2d5;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;
+  transition:opacity .6s ease}
+#warm.hidden{opacity:0;pointer-events:none;display:none}
+#warmInner{max-width:520px;width:100%}
+#warmTitle{font-family:Georgia,serif;font-size:30px;letter-spacing:.1em;color:#cfe37a;margin-bottom:6px}
+#warmSub{font-size:13px;color:#8fa885;font-style:italic;letter-spacing:.04em;margin-bottom:34px}
+#warmYear{font-family:Georgia,serif;font-size:19px;color:#e8d9a8;margin-bottom:20px;min-height:1.3em}
+#warmLine{font-family:Georgia,serif;font-style:italic;font-size:14px;line-height:1.6;color:#b9c7ac;
+  min-height:4.2em;margin:0 auto 30px;max-width:440px;transition:opacity .4s ease}
+#warmBarWrap{width:min(340px,80%);height:5px;margin:0 auto 14px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden}
+#warmBar{height:100%;width:0%;background:linear-gradient(90deg,#3fae54,#cfe37a);border-radius:99px;transition:width .18s linear}
+#warmHint{font-size:11px;color:#5f7358;letter-spacing:.12em;text-transform:uppercase}
+/* zoom in/out buttons (so pinch isn't needed, freeing swipe for attacks) */
+#sZoom{position:fixed;right:16px;top:calc(env(safe-area-inset-top,0px) + 96px);z-index:6;display:flex;flex-direction:column;gap:7px;align-items:center}
+#sZoom button{width:42px;height:42px;border-radius:50%;font-size:22px;font-weight:700;line-height:1;
+  background:rgba(20,28,20,.82);border:2px solid #4a6a44;color:#dfeccf;cursor:pointer;
+  -webkit-user-select:none;user-select:none;touch-action:none;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+#sZoom button:active{transform:scale(.92)}
 #staminaWrap{position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);width:120px;height:6px;
   background:rgba(10,16,10,.7);border-radius:4px;z-index:6;overflow:hidden;display:none}
 #staminaBar{height:100%;width:100%;background:linear-gradient(90deg,#3fae54,#9ae06a);transition:width .08s linear}
@@ -268,6 +288,18 @@ button:active{transform:translateY(1px)}
   </div>
 </div>
 
+<!-- ================= CINEMATIC WARMUP (the world ages before you arrive) ================= -->
+<div id="warm" class="hidden">
+  <div id="warmInner">
+    <div id="warmTitle">The World</div>
+    <div id="warmSub"></div>
+    <div id="warmYear">the ages turn…</div>
+    <div id="warmLine"></div>
+    <div id="warmBarWrap"><div id="warmBar"></div></div>
+    <div id="warmHint">a living history is being written…</div>
+  </div>
+</div>
+
 <!-- ================= SURFACE ================= -->
 <div id="sui">
   <canvas id="cvS"></canvas>
@@ -336,6 +368,10 @@ button:active{transform:translateY(1px)}
   <button id="sTalkBtn">💬 TALK</button>
   <button id="sEnterBtn">🚪 ENTER</button>
   <button id="sDescendBtn">🕳 DESCEND</button>
+  <div id="sZoom">
+    <button id="sZoomIn" title="Zoom in">＋</button>
+    <button id="sZoomOut" title="Zoom out">－</button>
+  </div>
   <div id="sActs">
     <button id="sSpinBtn" title="Hold to charge a spin strike">🌀</button>
     <button id="sDashBtn" title="Dash / dodge roll">💨</button>
@@ -2969,7 +3005,7 @@ const hero={x:0,y:0,face:0,dir:0,anim:'walk',animClock:0,atkClock:0,atkT:0,movin
   ifr:0,down:false,downT:0,sprite:null,spawnX:0,spawnY:0,hurtFlash:0,get relics(){return Hero.relics}};
 let salvage=[];   // surface tech-salvage caches the Sage can pick up for a relic
 const HERO_T={isHero:true,get x(){return hero.x},get y(){return hero.y},get dead(){return hero.down}};
-function heroTargetable(){return !hero.down&&speedIdx<=1}
+function heroTargetable(){return !hero.down&&speedIdx<=1&&!warming}
 let heroSlashes=[],heroSlashCd=0;
 let heroStam=100; const HERO_STAM_MAX=100;   // dash & spin draw on stamina
 let heroDash=null, dashCd=0;                  // active dodge-roll + its cooldown
@@ -9093,10 +9129,12 @@ cv.addEventListener('pointermove',e=>{
  }else if(ptrs.size===2){
   const a=[...ptrs.values()];
   const d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
-  if(pinchD>0)cam.z=clamp(cam.z*(d/pinchD),0.6,3.2);
-  pinchD=d;
+  // small deadzone so a two-finger tap/rest doesn't fight a swipe-attack
+  if(pinchD>0&&Math.abs(d-pinchD)>6){cam.z=clamp(cam.z*(d/pinchD),0.6,3.2);pinchD=d;}
+  else if(pinchD===0)pinchD=d;
  }
 });
+function zoomBy(mult){ cam.z=clamp(cam.z*mult,0.6,3.2); }
 function endPtr(e){
  ptrs.delete(e.pointerId);
  if(ptrs.size<2)pinchD=0;
@@ -9113,6 +9151,12 @@ function endPtr(e){
 cv.addEventListener('pointerup',endPtr);
 cv.addEventListener('pointercancel',endPtr);
 cv.addEventListener('wheel',e=>{e.preventDefault();cam.z=clamp(cam.z*(e.deltaY<0?1.1:0.9),0.6,3.2)},{passive:false});
+/* ---- zoom buttons: explicit +/- so pinch isn't needed (frees swipe-to-attack) ---- */
+{
+ const zi=$('sZoomIn'), zo=$('sZoomOut');
+ if(zi)zi.addEventListener('pointerdown',e=>{e.preventDefault();zoomBy(1.25);});
+ if(zo)zo.addEventListener('pointerdown',e=>{e.preventDefault();zoomBy(0.8);});
+}
 /* ---- Sage action controls: dash button/key + charged-spin button/key ---- */
 function currentMoveAng(){ if(stick){const dx=stick.x-stick.ox,dy=stick.y-stick.oy;if(Math.hypot(dx,dy)>6)return Math.atan2(dy,dx);} return hero.face||0; }
 function beginCharge(){ if(hero.down||interior||inDialog)return; charging=true; chargeT=0; const s=$('sSpinBtn');if(s)s.classList.add('charging'); }
@@ -9569,6 +9613,7 @@ $('newBtn').onclick=()=>{
  }
 };
 function reseed(newSeed,theme,params){
+ warming=false; const wov=$('warm'); if(wov)wov.classList.add('hidden');
  seed=(newSeed===undefined)?((Math.random()*2**31)|0):newSeed;
  if(theme)worldTheme=theme;
  if(params)worldParams=Object.assign({buildup:0,flora:.5,fertility:.5,fauna:.5,monsters:.5,treasure:.5,hue:-1,sat:-1},params);
@@ -9579,9 +9624,89 @@ function reseed(newSeed,theme,params){
  toast('A new garden dreams itself up… (seed '+seed+')');
 }
 
+/* ================= cinematic warmup: age the world before you arrive =================
+   The player is dropped into a world that has already lived a long history — villages
+   risen (and some fallen to ruin), the age turned, the folk grown into their stories.
+   We fast-forward the sim across a loading overlay with a lore crawl, then reveal it. */
+let warming=false, warmTargetMin=0, warmStartMin=0, warmYears=0, warmLineNext=0, warmLineIdx=0, warmDone=null, warmWallStart=0, warmLastFloorDay=0;
+const WARM_DAYS=120;                 // simulated days; narrated as a long age
+const WARM_MS_CAP=5500;              // hard wall-clock cap so the load never drags
+// give the warmup a populous, built-up world to age — so the player lands in a
+// living town, not a dwindling handful of wanderers
+function seedHistory(){
+ for(let i=people.length;i<26;i++)arrive(ri(18,44));
+ if(typeof seedCity==='function')seedCity(Math.max(0.55,worldParams.buildup||0));
+ detectVillages();
+}
+function beginWarmup(days,onDone){
+ days=days||WARM_DAYS;
+ warmDone=onDone||null;
+ seedHistory();
+ // jump the age forward so the world opens already weathered by time
+ eraOffset+=ERA_SEG_DAYS*rf(0.6,1.6); surfEra=eraState();
+ warming=true; warmStartMin=simMin; warmTargetMin=simMin+days*DAY; warmYears=ri(600,1400);
+ warmLineNext=0; warmLineIdx=0; warmWallStart=performance.now(); warmLastFloorDay=cday();
+ const th={fantasy:'an age of sword, oath and green',cyberpunk:'a neon waste that still dreams of rain',modern:'an ordinary place, quietly extraordinary'}[worldTheme]||'';
+ const nm=(Lore.active&&('The Age of '+Lore.name(4,10)))||'A Living World';
+ if($('warmTitle'))$('warmTitle').textContent=nm;
+ if($('warmSub'))$('warmSub').textContent=th;
+ if($('warmLine'))$('warmLine').textContent='';
+ if($('warmBar'))$('warmBar').style.width='0%';
+ const ov=$('warm'); if(ov)ov.classList.remove('hidden');
+}
+function warmupStep(t){
+ const deadline=performance.now()+13;
+ while(simMin<warmTargetMin&&performance.now()<deadline){ stepSim(2); }
+ // population floor: never let a harsh world dwindle to nothing during the age —
+ // fresh folk keep coming over the hills so the player arrives to a living town
+ {const d=cday();
+  if(d!==warmLastFloorDay){ warmLastFloorDay=d;
+   let alive=0;for(const p of people)if(!p.dead)alive++;
+   let guard=0;
+   while(alive<16&&guard++<8){ arrive(ri(18,42)); alive++; }
+  }}
+ const dayProg=clamp((simMin-warmStartMin)/((warmTargetMin-warmStartMin)||1),0,1);
+ const timeProg=clamp((performance.now()-warmWallStart)/WARM_MS_CAP,0,1);
+ const prog=Math.max(dayProg,timeProg);
+ if($('warmBar'))$('warmBar').style.width=(prog*100).toFixed(1)+'%';
+ if($('warmYear'))$('warmYear').textContent=Math.round(prog*warmYears)+' years pass…';
+ if(performance.now()-warmWallStart>WARM_MS_CAP){endWarmup();return;}
+ if(performance.now()>=warmLineNext){
+  warmLineNext=performance.now()+1500; warmLineIdx++;
+  let line='';
+  if(chron.length)line=chron[chron.length-1-(warmLineIdx%Math.min(chron.length,10))].text;
+  if(!line&&Lore.active)line=Lore.line(6,16);
+  if($('warmLine')&&line){const el=$('warmLine');el.style.opacity=0;setTimeout(()=>{el.textContent=line;el.style.opacity=1;},120);}
+ }
+ if(simMin>=warmTargetMin)endWarmup();
+}
+function endWarmup(){
+ warming=false;
+ // guarantee a living town to arrive in: if the age left no real village, raise one now
+ let live=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length);
+ if(!live.length||villageMembers(live[0]).length<5){
+  seedHistory();
+  live=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length);
+ }
+ const v=live[0];
+ if(v){
+  const s=nearOpen(Math.round(v.cx),Math.round(v.cy));
+  if(s){hero.x=hero.spawnX=s[0]*TILE+TILE/2;hero.y=hero.spawnY=s[1]*TILE+TILE/2;hero.down=false;hero.ifr=2;Hero.hp=Hero.maxHp;}
+  cam.x=hero.x;cam.y=hero.y;cam.z=1.8;
+ }
+ dayMark=cday();
+ const ov=$('warm'); if(ov){ov.classList.add('hidden');}
+ const yrs=warmYears;
+ toast('⌛ '+yrs+' years have passed. You arrive in '+((v&&v.name)||'a weathered land')+'.','card');
+ tale([],'And so, after '+yrs+' years of seasons, births, feuds and quiet triumphs, a wandering Sage crests the hills and walks down into the living world.',true);
+ refreshChron();
+ if(warmDone)warmDone();
+}
+
 /* ================= main loop (driven by main.js) ================= */
 let last=performance.now(),acc=0,uiT=0;
 function frame(t){
+ if(warming){ warmupStep(t); last=t; return; }
  const f0=performance.now();
  const rdt=Math.min(0.1,(t-last)/1000);last=t;
  const sp=SPEEDS[speedIdx];
@@ -9623,6 +9748,7 @@ function frame(t){
    const sw=$('staminaWrap'),sb=$('staminaBar'),acts=$('sActs');
    if(sw){sw.style.display=show?'block':'none';sb.style.width=(heroStam/HERO_STAM_MAX*100).toFixed(0)+'%';sb.style.background=heroStam<28?'#d2694a':'linear-gradient(90deg,#3fae54,#9ae06a)';}
    if(acts)acts.style.display=show?'flex':'none';
+   {const zoom=$('sZoom');if(zoom)zoom.style.display=(!interior&&!cine)?'flex':'none';}
    if($('sDashBtn'))$('sDashBtn').disabled=heroStam<28||dashCd>0;
   }
   if(cine&&selected)updateCine();
@@ -9692,6 +9818,11 @@ return {
  api:{
   reseed,
   get seed(){return seed},
+  zoom:()=>+cam.z.toFixed(3),
+  zoomBy:(m)=>{zoomBy(m);return +cam.z.toFixed(3)},
+  beginWarmup:(days,cb)=>beginWarmup(days,cb),
+  warming:()=>warming,
+  warmupInfo:()=>({warming,day:cday(),targetDay:Math.round(warmTargetMin/DAY),years:warmYears}),
   get peaceful(){return peaceful},
   set peaceful(v){peaceful=v;if(v){for(let i=monsters.length-1;i>=0;i--)killMonster(monsters[i],null,true);toast('The garden holds its breath. Peace.')}else toast('The Understories may stir again.')},
   get lastInspect(){return lastInspect},
@@ -12244,6 +12375,9 @@ function loop(t){
 function enterWorld(cfg){
   Surface.api.reseed(cfg?cfg.seed:undefined, cfg?cfg.theme:undefined, cfg?cfg.params:undefined);
   showSurface();
+  // age the world through a long history before handing the player the reins,
+  // unless a caller explicitly opts out (e.g. automated tests: {warmup:false})
+  if(!cfg||cfg.warmup!==false)Surface.api.beginWarmup();
   if(!running){ running=true; requestAnimationFrame(loop); }
 }
 
