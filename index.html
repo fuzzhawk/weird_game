@@ -98,6 +98,18 @@ button:active{transform:translateY(1px)}
 #sTalkBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 96px)}
 #sEnterBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 148px);background:#2a2016;border-color:#c79a5a;color:#f0d9b0}
 #sDescendBtn{bottom:calc(env(safe-area-inset-bottom,0px) + 44px);background:#241a35;border-color:#8a63c9;color:#d9cff2}
+/* Sage action buttons (dash / charged spin) + stamina bar */
+#sActs{position:fixed;right:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 44px);z-index:6;display:flex;flex-direction:column;gap:9px;align-items:center}
+#sActs button{width:56px;height:56px;border-radius:50%;font-size:22px;border:2px solid;cursor:pointer;
+  -webkit-user-select:none;user-select:none;touch-action:none;box-shadow:0 3px 12px rgba(0,0,0,.55)}
+#sDashBtn{background:rgba(26,42,60,.9);border-color:#5fa8e0;color:#cfe8ff}
+#sSpinBtn{background:rgba(46,30,52,.9);border-color:#c07adf;color:#f0d9ff}
+#sActs button:active{transform:scale(.93)}
+#sActs button:disabled{opacity:.4}
+#sSpinBtn.charging{border-color:#ffd24a;box-shadow:0 0 12px 3px rgba(255,210,74,.6)}
+#staminaWrap{position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);width:120px;height:6px;
+  background:rgba(10,16,10,.7);border-radius:4px;z-index:6;overflow:hidden;display:none}
+#staminaBar{height:100%;width:100%;background:linear-gradient(90deg,#3fae54,#9ae06a);transition:width .08s linear}
 #sDialog{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);
   display:none;background:rgba(16,24,14,0.95);border:2px solid #3fae54;border-radius:12px;
   padding:16px 18px 12px;color:#e8f0e3;z-index:8;box-shadow:0 6px 24px rgba(0,0,0,.7)}
@@ -324,6 +336,11 @@ button:active{transform:translateY(1px)}
   <button id="sTalkBtn">💬 TALK</button>
   <button id="sEnterBtn">🚪 ENTER</button>
   <button id="sDescendBtn">🕳 DESCEND</button>
+  <div id="sActs">
+    <button id="sSpinBtn" title="Hold to charge a spin strike">🌀</button>
+    <button id="sDashBtn" title="Dash / dodge roll">💨</button>
+  </div>
+  <div id="staminaWrap"><div id="staminaBar"></div></div>
   <div id="sDialog">
     <div id="sDialogName"></div>
     <div id="sDialogText"></div>
