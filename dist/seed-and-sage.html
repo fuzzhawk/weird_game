@@ -249,6 +249,9 @@ button:active{transform:translateY(1px)}
 #bootHead h1{font-family:Georgia,serif;font-size:26px;letter-spacing:.14em;margin:0;color:#cfe37a}
 #bootHead p{margin:6px 0 0;font-size:12.5px;color:#8fa885;letter-spacing:.03em}
 #wbody{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 16px 24px;max-width:560px;width:100%;margin:0 auto;box-sizing:border-box}
+#wPreviewWrap{display:flex;justify-content:center;margin:2px 0 12px}
+#wPreview{width:150px;height:150px;border-radius:50%;image-rendering:pixelated;
+  border:3px solid #3c4f33;box-shadow:0 0 0 2px #0a0f0c,0 0 22px rgba(120,180,90,.18),0 6px 20px rgba(0,0,0,.55);background:#0a0f0c}
 #wRandomAll{width:100%;background:linear-gradient(180deg,#274a30,#1a3524);color:#dff3df;border:2px solid #4fbe64;border-radius:12px;padding:14px;font-size:16px;font-weight:700;letter-spacing:.05em;cursor:pointer;margin:6px 0 4px}
 #wRandomAll:active{transform:translateY(1px)}
 .wsecLbl{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#7f9877;margin:16px 0 8px}
@@ -279,6 +282,7 @@ button:active{transform:translateY(1px)}
 <div id="boot">
   <div id="bootHead"><h1>SEED &amp; SAGE</h1><p>Shape a world, then seed its voice.</p></div>
   <div id="wbody">
+    <div id="wPreviewWrap"><canvas id="wPreview" width="64" height="64"></canvas></div>
     <button id="wRandomAll">🎲 Randomize all</button>
 
     <div class="wsecLbl">Voice &amp; era</div>
@@ -12696,12 +12700,57 @@ const Worlds = (function(){
  }
  function boot(cb){
   onEnter=cb;
-  [...$('wThemes').querySelectorAll('button')].forEach(b=>b.onclick=()=>pickTheme(b.dataset.t));
+  [...$('wThemes').querySelectorAll('button')].forEach(b=>b.onclick=()=>{pickTheme(b.dataset.t);schedulePreview();});
   pickTheme('fantasy');
   seedLore();                       // start with a coherent lore paragraph + seed
-  $('wRandomAll').onclick=randomizeAll;
+  $('wRandomAll').onclick=()=>{randomizeAll();schedulePreview();};
   $('wEnter').onclick=enter;
+  // live preview: any slider / seed change repaints the world-to-be
+  for(const id of SLD){const el=$(id);if(el)el.addEventListener('input',schedulePreview);}
+  const sn=$('wSeedNum');if(sn)sn.addEventListener('input',schedulePreview);
   $('boot').classList.remove('hidden');
+  schedulePreview();
+ }
+ // ---- the lo-rez preview circle: a stylised snapshot of the world-to-be ----
+ let previewRAF=null;
+ function schedulePreview(){ if(previewRAF)return; previewRAF=requestAnimationFrame(()=>{previewRAF=null;renderPreview();}); }
+ function pval(id){ const v=parseFloat($(id).value); return isNaN(v)?0.5:v; }
+ function renderPreview(){
+  const cv=$('wPreview'); if(!cv||typeof U==='undefined')return;
+  const c=cv.getContext('2d'); const N=cv.width;
+  const P={buildup:pval('wBuildup'),flora:pval('wFlora'),fertility:pval('wFertility'),fauna:pval('wFauna'),monsters:pval('wMonsters'),treasure:pval('wTreasure'),hue:pval('wHue'),sat:pval('wSat')};
+  const seed=(parseInt($('wSeedNum').value,10)||0)>>>0;
+  const rng=U.mulberry32(seed^0x9e3779b9);
+  const G=9, G2=5, grid=[], grid2=[];
+  for(let i=0;i<G*G;i++)grid.push(rng());
+  for(let i=0;i<G2*G2;i++)grid2.push(rng());
+  const samp=(gr,gs,fx,fy)=>{ const gx=fx*(gs-1),gy=fy*(gs-1),x0=gx|0,y0=gy|0,x1=Math.min(gs-1,x0+1),y1=Math.min(gs-1,y0+1),tx=gx-x0,ty=gy-y0;
+   const a=gr[y0*gs+x0],b=gr[y0*gs+x1],cc=gr[y1*gs+x0],d=gr[y1*gs+x1]; return (a*(1-tx)+b*tx)*(1-ty)+(cc*(1-tx)+d*tx)*ty; };
+  const hue=P.hue*360, sat=0.14+P.sat*0.62;
+  const img=c.createImageData(N,N);
+  const hsh=(x,y)=>{let h=(x*374761393+y*668265263+seed*0x9e3779b1)>>>0;h=(h^(h>>13))*1274126177>>>0;return (h>>>8)/16777216;};
+  const green=P.fertility*0.55+P.flora*0.45;
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+   const fx=x/(N-1),fy=y/(N-1);
+   const n=samp(grid,G,fx,fy)*0.62+samp(grid2,G2,fx,fy)*0.38;
+   const i=(y*N+x)*4; let rgb;
+   if(n<0.28){ rgb=U.hslToRgb(((hue+18)%360)/360, sat*0.5, 0.15+n*0.25); }        // rock / highland
+   else if(n<0.34){ rgb=U.hslToRgb(((hue+200)%360)/360, sat*0.6, 0.30); }          // a little water in the lows
+   else {
+    let l=0.30+n*0.14; rgb=U.hslToRgb(hue/360, sat, l);
+    if(hsh(x,y) < green*0.55*(0.3+n)) rgb=U.hslToRgb(0.27+hsh(y,x)*0.05, 0.5, 0.30+hsh(x,y)*0.12);
+   }
+   img.data[i]=rgb[0];img.data[i+1]=rgb[1];img.data[i+2]=rgb[2];img.data[i+3]=255;
+  }
+  c.putImageData(img,0,0);
+  // buildings cluster near the heart, scaled by buildup (towers glint at high buildup)
+  const cx=N/2,cy=N/2, nb=Math.round(P.buildup*46);
+  for(let k=0;k<nb;k++){ const a=rng()*6.283, rr=rng()*N*0.30, bx=(cx+Math.cos(a)*rr)|0, by=(cy+Math.sin(a)*rr)|0;
+   c.fillStyle=(P.buildup>0.55&&rng()<0.4)?'#cfc6b0':'#7f6f52'; c.fillRect(bx,by,1,1+((rng()*2)|0)); }
+  const scatter=(count,col)=>{ for(let k=0;k<count;k++){ const x=(rng()*N)|0,y=(rng()*N)|0; c.fillStyle=col; c.fillRect(x,y,1,1);} };
+  scatter(Math.round(P.fauna*22),'#d9b06a');       // fauna
+  scatter(Math.round(P.treasure*16),'#ffd24a');    // treasure glints
+  scatter(Math.round(P.monsters*16),'#e0506a');    // menace
  }
  // drop a fresh lore paragraph + seed matching the chosen theme into the text field
  function seedLore(t){
