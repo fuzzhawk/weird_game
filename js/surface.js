@@ -41,9 +41,12 @@ const BMETA={
  arcology:{cat:'house',cap:18,stories:9,minDev:4,label:'arcology'},
  grave:{cat:'grave',cap:0,stories:0,minDev:0},
 };
-// buildings big enough to sport skybridges, deep multi-room interiors, and to
-// leave a haunted cyber-ruin dungeon behind when they finally fall
+// buildings big enough to sport skybridges and deep multi-room interiors
 const MEGA_TP={highrise:1,arcology:1};
+// the "large buildings" that degrade in three visible stages rather than simply
+// falling to rubble: abandoned-cyber → ancient-ruin → collapsed rubble
+const STAGED_TP={apartment:1,warehouse:1,venue:1,factory:1,highrise:1,arcology:1};
+const DECAY_STAGE=9*DAY;   // how long a large ruin lingers in each stage before the next
 function bcap(b){const m=BMETA[b.tp];return m?m.cap:0}   // unknown/graves are never homes
 function bsolid(b){const m=BMETA[b.tp];return m?m.solid!==false:true}
 const RUIN_DELAY=6*DAY,CRUMBLE_DELAY=10*DAY;
@@ -1306,13 +1309,15 @@ function ruinBuilding(b){
  if(b.gone||b.ruined||b.tp==='grave')return;
  // an abandoned park just goes wild again rather than leaving rubble
  if(BMETA[b.tp]&&BMETA[b.tp].cat==='park'){tale([],'The green went untended and the wilds reclaimed it.');demolish(b);return}
+ // a LARGE building doesn't slump straight to rubble — it decays through stages
+ // (abandoned-cyber → ancient-ruin → collapse), staying standing & enterable until
+ // the end. No dungeon is spawned; the interior itself is the playable crawl.
+ if(STAGED_TP[b.tp]){decayBuilding(b,1);return}
  b.ruined=true;b.emptySince=simMin;
  for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++)if(bld[idx(x,y)]===b.i)setSolid(x,y,S_RUIN);
  for(const id of b.owners){const p=allById.get(id);if(p&&p.home===b)p.home=null}
  b.owners=[];
  if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
- // a toppled megastructure leaves a lasting, raidable haunted cyber-ruin
- if(MEGA_TP[b.tp]){b.ancient=true;makeHauntedRuin(b);return}
  const lbl=b.tp==='biz'?b.name:(BMETA[b.tp]&&BMETA[b.tp].label)||('a '+b.tp);
  const what=b.tp==='biz'||BMETA[b.tp]&&BMETA[b.tp].cat!=='house'?lbl:'a '+lbl;
  tale([],'With no one to tend it, '+what+' fell to ruin, and the vines moved in without asking.');
@@ -1330,25 +1335,31 @@ function makeAncientRuin(b){
  b.owners=[];
  if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
 }
-// a fallen megastructure doesn't merely crumble — it DECOMPOSES into a haunted
-// cyber-ruin: the old net wakes in its gutted floors, treasure settles in the
-// wreck, and augmented things move into the dark. It becomes a raidable dungeon.
-function makeHauntedRuin(b){
- if(!b||b.gone)return null;
- const cx=b.x+((b.w/2)|0), cy=b.y+((b.h/2)|0);
- let mouth=nearOpen(cx,cy);
- if(!mouth){ if(bld[idx(cx,cy)]>=0)bld[idx(cx,cy)]=-1; carveFloor(cx,cy); mouth=[cx,cy]; }
- if(dungeonAt(mouth[0],mouth[1]))return null;
- const d=makeDungeon(mouth[0],mouth[1]);
- if(!d)return null;
- const what=b.name||('the '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower'));
- d.ruin=true; d.cyber=true; usedDun.delete(d.name);
- d.name=pick(['The Hollow of ','The Gutted Levels of ','The Haunted Shell of ','The Dead Floors of ','Ruin of '])+what;
- d.danger=rf(.4,.7); d.depth=ri(3,5); d.loot=rf(1.1,1.5);
- for(let i=0;i<ri(2,4);i++)spawnMonster(d);
- for(let i=0;i<ri(2,4);i++){const s=nearOpen(cx+ri(-2,2),cy+ri(-2,2));if(s)spawnFind(s[0],s[1],chance(.3)?'gem':'gold',ri(3,9),chance(.12)?pick(RELICS):null)}
- tale([],'The '+((b.name?b.name:((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')))+' finally gave way — its gutted floors settling into a haunted cyber-ruin. The old net stirs in the wreck, and something warm-blooded and wrong has already moved in.',true);
- return d;
+// a large building degrades through three visible stages. It STAYS STANDING and
+// enterable through stages 1 & 2 — the danger (and the story) is inside — and only
+// collapses to rubble at stage 3. No dungeon is ever spawned by this.
+//   1 = abandoned cyberpunk: dark, gutted, traps & things in the halls
+//   2 = ancient ruin: nature reclaiming it, but the rooms can still be walked
+//   3 = collapse: the floors pancake down into a heap of rubble (S_RUIN, sealed)
+function decayLabel(b){ return b.name||('the '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')); }
+function decayBuilding(b,stage){
+ if(!b||b.gone||b.tp==='grave')return;
+ if(stage===1){
+  // dead but still standing: tiles stay solid (the tower doesn't vanish), owners cleared
+  b.ruined=true;b.ancient=true;b.decay=1;b.decaySince=simMin;b.emptySince=simMin;
+  for(const id of b.owners){const p=allById.get(id);if(p&&p.home===b)p.home=null}
+  b.owners=[];
+  if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
+  tale([],'The '+decayLabel(b)+' emptied out and went dark — its halls abandoned to flickering, gutted ruin. Something moves in the dead floors now.',true);
+ }else if(stage===2){
+  b.decay=2;b.decaySince=simMin;
+  tale([],'The wilds have found the abandoned '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')+' — vines through the shattered glass, moss over the wreck — though its rooms can still be walked.');
+ }else if(stage===3){
+  b.decay=3;b.decaySince=simMin;
+  for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++)if(bld[idx(x,y)]===b.i)setSolid(x,y,S_RUIN);
+  if(interior&&interior.b===b)exitInterior();   // kick the player out if they were inside as it fell
+  tale([],'At last the old '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')+' gave way — its floors pancaking down into a heap of rubble.');
+ }
 }
 // a town whose people are all gone falls into ruin: its buildings become lasting
 // rubble and a raidable ruin-site opens at its heart (quests, the town's lost
@@ -4246,6 +4257,9 @@ function upkeepTick(){
   if(!b.ruined){
    if(empty){if(!b.emptySince)b.emptySince=simMin;else if(simMin-b.emptySince>RUIN_DELAY)ruinBuilding(b)}
    else b.emptySince=0;
+  }else if(STAGED_TP[b.tp]&&b.decay&&b.decay<3){
+   // large ruins walk their own stages: cyber → ancient → collapse
+   if(simMin-(b.decaySince||b.emptySince)>DECAY_STAGE)decayBuilding(b,b.decay+1);
   }else{
    if(!b.ancient&&simMin-b.emptySince>CRUMBLE_DELAY)crumbleBuilding(b);   // ancient ruins persist
   }
@@ -5086,9 +5100,13 @@ function drawTallBuilding(c,b){
  const stories=BMETA[b.tp].stories||1, STORY=9, rise=stories*STORY;
  const byTop=py-rise, bh=h+rise;
  const futur=buildingFutur(b);
+ const decay=b.decay||0, dead=decay>=1, cyb=decay===1, anc=decay===2;
  c.fillStyle='rgba(0,0,0,0.32)';c.beginPath();c.ellipse(px+w/2,py+h-1,w*0.54,3.4,0,0,7);c.fill();
- // facade: flat concrete when the town is young, a glass gradient as it modernises
- if(futur>0.02){const g=c.createLinearGradient(px,byTop,px+w,py+h);g.addColorStop(0,lerpHex(st.wall,'#22314a',futur*0.5));g.addColorStop(1,lerpHex(st.edge,'#0e1622',futur*0.5));c.fillStyle=g;}
+ // facade: a gutted dark shell (cyber) or a mossy overgrown one (ancient) when dead;
+ // otherwise flat concrete young, glass gradient as the town modernises
+ if(dead){const g=c.createLinearGradient(px,byTop,px,py+h);
+  if(cyb){g.addColorStop(0,'#20242e');g.addColorStop(1,'#0b0e15');}else{g.addColorStop(0,'#2d3426');g.addColorStop(1,'#151b11');}c.fillStyle=g;}
+ else if(futur>0.02){const g=c.createLinearGradient(px,byTop,px+w,py+h);g.addColorStop(0,lerpHex(st.wall,'#22314a',futur*0.5));g.addColorStop(1,lerpHex(st.edge,'#0e1622',futur*0.5));c.fillStyle=g;}
  else c.fillStyle=st.wall;
  if(arc){
   // a tapered megastructure: broad base, set-back tower — a vertical city
@@ -5110,34 +5128,54 @@ function drawTallBuilding(c,b){
    const wx=Math.round(px+3+cc*gapX);
    if(taper&&(wx<px+arcInset||wx>px+w-arcInset))continue;   // no windows on the set-back void
    const hsh=((seed^(r*73856093)^(cc*19349663))>>>0)%12;
-   const on=hsh>2 || ((t*0.0006+r*1.7+cc)|0)%9<6;
-   c.fillStyle=on?lerpHex(st.win,'#cdefff',futur):'rgba(18,22,32,0.65)';
+   if(dead){
+    // mostly black sockets; a cyber shell keeps a few dying red flickers
+    const flick = cyb && (hsh===0) && Math.sin(t*0.009+r*2+cc)>0.55;
+    c.fillStyle = flick?'#e0503a':(cyb?'rgba(8,10,16,0.9)':'rgba(10,14,9,0.88)');
+   }else{
+    const on=hsh>2 || ((t*0.0006+r*1.7+cc)|0)%9<6;
+    c.fillStyle=on?lerpHex(st.win,'#cdefff',futur):'rgba(18,22,32,0.65)';
+   }
    c.fillRect(wx,Math.round(wy),2.5,3.5);
   }}
- c.fillStyle='#161320';c.fillRect(px+w/2-3,py+h-6,6,6);   // door
- if(b.tp==='factory'){
-  const chx=px+w-7,chy=byTop-2;
-  c.fillStyle=st.edge;c.fillRect(chx,chy-8,4,10);
-  c.fillStyle='rgba(185,185,195,0.32)';
-  for(let k=0;k<3;k++){const pk=((t*0.02+k*2.1)%6); c.beginPath();c.arc(chx+2+Math.sin(t*0.01+k)*2,chy-10-pk*3,2.1+pk*0.5,0,7);c.fill();}
- }else if(b.tp==='venue'){
-  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
-  c.drawImage(GLOW_PINK,px+w/2-11,py+h-16,22,18);c.globalCompositeOperation=go;
-  c.fillStyle=st.roof;c.fillRect(px+w/2-8,byTop+1,16,3);
- }else if(b.tp==='warehouse'){
-  c.fillStyle=st.edge;c.fillRect(px+w/2-7,py+h-10,14,10);
-  c.fillStyle=st.wall;c.fillRect(px+w/2-6,py+h-9,12,8);
- }else if(b.tp==='highrise'||arc){
-  // rooftop mast with a blinking aviation beacon
-  c.strokeStyle=st.edge;c.lineWidth=1;c.beginPath();c.moveTo(px+w/2,byTop-3);c.lineTo(px+w/2,byTop-(arc?15:9));c.stroke();
-  c.fillStyle=(Math.sin(t*0.006)>0)?'#ff5a5a':'#6a2626';c.beginPath();c.arc(px+w/2,byTop-(arc?15:9),1.6,0,7);c.fill();
+ // ancient overgrowth: vines trailing down the facade and shrubs sprouting up top
+ if(anc){
+  const gr=U.mulberry32(seed||1);
+  c.strokeStyle='rgba(70,120,60,0.7)';c.lineWidth=1.4;
+  for(let k=0;k<Math.max(3,(w/7)|0);k++){const vx=px+2+gr()*(w-4),vy0=byTop+gr()*6,vl=6+gr()*(bh*0.5);
+   c.beginPath();c.moveTo(vx,vy0);c.lineTo(vx+Math.sin(k)*2,vy0+vl);c.stroke();}
+  c.fillStyle='#4a8a4a';for(let k=0;k<4;k++){const bx=px+3+gr()*(w-6);c.beginPath();c.arc(bx,byTop-2-gr()*3,2.4+gr()*1.5,0,7);c.fill();}
  }
- // a neon holo-crown once the city is properly futuristic
- if(futur>0.4){
-  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
-  c.globalAlpha=0.5+0.3*Math.sin(t*0.004+b.id);
-  c.drawImage(arc?GLOW_CYAN:GLOW_PINK,px+w/2-13,byTop-9,26,15);
-  c.globalAlpha=1;c.globalCompositeOperation=go;
+ c.fillStyle=dead?'#0a0c12':'#161320';c.fillRect(px+w/2-3,py+h-6,6,6);   // door (a dark maw when derelict)
+ if(!dead){
+  if(b.tp==='factory'){
+   const chx=px+w-7,chy=byTop-2;
+   c.fillStyle=st.edge;c.fillRect(chx,chy-8,4,10);
+   c.fillStyle='rgba(185,185,195,0.32)';
+   for(let k=0;k<3;k++){const pk=((t*0.02+k*2.1)%6); c.beginPath();c.arc(chx+2+Math.sin(t*0.01+k)*2,chy-10-pk*3,2.1+pk*0.5,0,7);c.fill();}
+  }else if(b.tp==='venue'){
+   const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+   c.drawImage(GLOW_PINK,px+w/2-11,py+h-16,22,18);c.globalCompositeOperation=go;
+   c.fillStyle=st.roof;c.fillRect(px+w/2-8,byTop+1,16,3);
+  }else if(b.tp==='warehouse'){
+   c.fillStyle=st.edge;c.fillRect(px+w/2-7,py+h-10,14,10);
+   c.fillStyle=st.wall;c.fillRect(px+w/2-6,py+h-9,12,8);
+  }else if(b.tp==='highrise'||arc){
+   // rooftop mast with a blinking aviation beacon
+   c.strokeStyle=st.edge;c.lineWidth=1;c.beginPath();c.moveTo(px+w/2,byTop-3);c.lineTo(px+w/2,byTop-(arc?15:9));c.stroke();
+   c.fillStyle=(Math.sin(t*0.006)>0)?'#ff5a5a':'#6a2626';c.beginPath();c.arc(px+w/2,byTop-(arc?15:9),1.6,0,7);c.fill();
+  }
+  // a neon holo-crown once the city is properly futuristic
+  if(futur>0.4){
+   const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+   c.globalAlpha=0.5+0.3*Math.sin(t*0.004+b.id);
+   c.drawImage(arc?GLOW_CYAN:GLOW_PINK,px+w/2-13,byTop-9,26,15);
+   c.globalAlpha=1;c.globalCompositeOperation=go;
+  }
+ }else if(cyb){
+  // a dead tower with one sputtering, shorted-out sign
+  if(Math.sin(t*0.02+b.id)>0.4){const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+   c.globalAlpha=0.4+0.4*Math.random();c.drawImage(GLOW_CYAN,px+w/2-9,byTop-6,18,12);c.globalAlpha=1;c.globalCompositeOperation=go;}
  }
 }
 /* ---- skybridges & ground tunnels linking a city's great buildings ---- */
@@ -5213,7 +5251,12 @@ function drawBuilding(c,b,nf){
    c.fillStyle='#3a5a34';c.fillRect(fx-0.5,fy,1,2);}
   return;
  }
- if(b.ruined)return;
+ if(b.ruined){
+  // a large building in stage 1-2 is still STANDING (gutted or overgrown) — draw its
+  // decayed facade; only a stage-3 collapse (or a plain ruin) shows as bare rubble tiles
+  if((b.decay===1||b.decay===2)&&['apartment','warehouse','venue','factory','highrise','arcology'].includes(b.tp))drawTallBuilding(c,b);
+  return;
+ }
  if(!b.done){
   c.strokeStyle='rgba(232,192,101,0.7)';c.setLineDash([4,3]);
   c.strokeRect(px+1,py+1,w-2,h-2);c.setLineDash([]);
@@ -5905,7 +5948,8 @@ function enterLabel(b){ return b.name||(b.tp==='home'?'the cottage':b.tp==='shel
 function enterableAt(px,py){
  let best=null,bd=(TILE*1.7)**2;
  for(const b of buildings){
-  if(b.gone||b.ruined||!b.done||!ENTER_TP[b.tp])continue;
+  if(b.gone||!b.done||!ENTER_TP[b.tp])continue;
+  if(b.ruined&&!(b.decay===1||b.decay===2))continue;   // rubble (or a plain ruin) can't be entered
   const[dx,dy]=doorTileOf(b),wx=dx*TILE+TILE/2,wy=dy*TILE+TILE/2;
   const d=dist2(px,py,wx,wy);
   if(d<bd){bd=d;best=b}
@@ -5920,20 +5964,29 @@ function freeSpotInt(intr,rng){
  }
  return[1,1];
 }
+// a foe that prowls a ruined interior — a lighter cousin of the surface monsters
+function makeIntFoe(type,x,y){
+ const M=MONSTERS[type]||MONSTERS.grub, hp=Math.max(6,Math.round(M.hp*0.55));
+ return {type,x,y,tx:x,ty:y,hp,maxhp:hp,dmg:1,spd:14+M.spd*16,dir:0,animClock:R()*4,
+  atkCd:0,retarget:0,col:M.col,g:M.g,em:null};
+}
 function makeInterior(b){
  // big civic buildings & towers open into deep, multi-room floors you can wander
  const mega=['apartment','warehouse','venue','factory','highrise','arcology'].includes(b.tp);
- const gw=clamp(b.w*3+4, 9, mega?24:17), gh=clamp(b.h*3+3, 8, mega?19:13);
+ const decay=b.decay||0;                 // 0 lived-in · 1 abandoned-cyber · 2 ancient-ruin
+ const cyber=decay===1, ancient=decay===2;
+ // an abandoned-cyber floor sprawls the largest — big gutted halls to fight through
+ const gw=clamp(b.w*3+4, 9, cyber?28:mega?24:(decay?18:17)), gh=clamp(b.h*3+3, 8, cyber?22:mega?19:(decay?16:13));
  const solid=new Uint8Array(gw*gh), si=(x,y)=>y*gw+x;
  for(let x=0;x<gw;x++){solid[si(x,0)]=1;solid[si(x,gh-1)]=1}
  for(let y=0;y<gh;y++){solid[si(0,y)]=1;solid[si(gw-1,y)]=1}
  const dcx=(gw/2)|0;
  solid[si(dcx,gh-1)]=0;solid[si(dcx-1,gh-1)]=0;      // 2-wide doorway on the south wall
  // interior partitions: a central corridor runs from the door to the back, with
- // rooms walled off to either side — so a large building holds several rooms to
- // travel between rather than one big hall
- if(mega){
-  const bands = gh>=15?3 : gh>=11?2 : 1;
+ // rooms walled off to either side — a large (or degraded) building holds several
+ // rooms to travel between rather than one big hall
+ if(mega||decay>=1){
+  const bands = cyber?(gh>=18?4:3) : (gh>=15?3 : gh>=11?2 : 1);
   for(let bnd=1;bnd<=bands;bnd++){
    const wy=Math.round(bnd*gh/(bands+1));
    if(wy<=1||wy>=gh-1)continue;
@@ -5942,14 +5995,40 @@ function makeInterior(b){
  }
  const FLOORS={biz:'#4a4152',factory:'#3a3d42',venue:'#3a2f45',warehouse:'#48412f',highrise:'#3d4450',apartment:'#4a4038',arcology:'#33404f'};
  const WALLS={biz:'#332c40',factory:'#2a2d32',venue:'#2a2035',warehouse:'#34301f',highrise:'#2c3340',apartment:'#332c26',arcology:'#243140'};
+ const floor = cyber?'#161c28' : ancient?'#2a3122' : (FLOORS[b.tp]||'#5a4230');
+ const wall  = cyber?'#0d1220' : ancient?'#20291a' : (WALLS[b.tp]||'#3a2f22');
  const intr={b,gw,gh,solid,si,door:[dcx,gh-1],doorGap:[dcx,dcx-1],furniture:[],occupants:[],
-   name:enterLabel(b), floor:FLOORS[b.tp]||'#5a4230', wall:WALLS[b.tp]||'#3a2f22'};
- const rng=U.mulberry32(U.hashStr('interior-'+b.id));
+   traps:[],foes:[],loot:[],decay,name:(cyber?'the derelict ':ancient?'the overgrown ':'')+(decay?enterLabel(b).replace(/^the /,''):enterLabel(b)),
+   floor, wall};
+ const rng=U.mulberry32(U.hashStr('interior-'+b.id+'-'+decay));
+ const rpick=a=>a[(rng()*a.length)|0];
  const put=(x,y,w,h,kind,blk)=>{
   intr.furniture.push({x,y,w,h,kind});
   if(blk)for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)if(xx>0&&yy>0&&xx<gw-1&&yy<gh-1)solid[si(xx,yy)]=1;
  };
  const midx=(gw/2|0), midy=(gh/2|0);
+ // ---- a degraded floor: hostile & haunted (cyber) or nature-reclaimed (ancient) ----
+ if(decay>=1){
+  const debris = cyber?['debris','machine','terminal','wire','crate']:['overgrowth','sapling','rubble','moss','barrel'];
+  for(let k=0;k<(cyber?11:9);k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2)continue; put(s[0],s[1],1,1,rpick(debris),rng()<.45?1:0); }
+  // traps underfoot — cyber floors bristle with more, and deadlier
+  const nTrap=cyber?(4+((rng()*3)|0)):(2+((rng()*2)|0));
+  for(let k=0;k<nTrap;k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2||(s[0]===dcx||s[0]===dcx-1))continue;
+   intr.traps.push({x:s[0],y:s[1],kind:cyber?'spike':'thorn',ph:rng()*3,cd:0}); }
+  // things that have moved into the halls
+  const foeKinds = cyber?['lurker','horror','grub','lurker']:['grub','grub','lurker'];
+  const nFoe=cyber?(2+((rng()*3)|0)):(1+((rng()*2)|0));
+  for(let k=0;k<nFoe;k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2)continue;
+   intr.foes.push(makeIntFoe(rpick(foeKinds), s[0]*TILE+TILE/2, s[1]*TILE+TILE/2)); }
+  // loot spilled through the wreck to reward the crawl
+  const nLoot=2+((rng()*3)|0);
+  for(let k=0;k<nLoot;k++){ const s=freeSpotInt(intr,rng);
+   const r=rng(), kind=r<.12?'relic':r<.42?'gem':'gold';
+   intr.loot.push({x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,kind,amt:kind==='gold'?(3+((rng()*7)|0)):(1+((rng()*2)|0)),relic:kind==='relic'?pick(RELICS):null,got:false,t:rng()*6}); }
+  put(dcx-1,gh-3,2,1,'rug',0);
+  for(let y=1;y<gh-1;y++){solid[si(dcx,y)]=0;solid[si(dcx-1,y)]=0;}   // keep the spine walkable
+  return intr;
+ }
  if(b.tp==='biz'){
   put(2,1,gw-4,1,'counter',1);
   put(1,3,1,Math.max(1,gh-5),'shelf',1);
@@ -6037,7 +6116,8 @@ function intMoveHero(dx,dy){
  hero.y=clamp(hero.y,3,interior.gh*TILE-3);
 }
 function enterInterior(b){
- if(interior||cine||!b||b.gone||b.ruined)return;
+ if(interior||cine||!b||b.gone)return;
+ if(b.ruined&&!(b.decay===1||b.decay===2))return;   // only alive or standing-ruin (stage 1-2) buildings open
  interior=makeInterior(b);
  hero._sx=hero.x;hero._sy=hero.y;hero._scz=cam.z;
  const[dx,dy]=interior.door;
@@ -6072,7 +6152,9 @@ function updateOcc(o,rdt){
  }
 }
 function updateInteriorScene(rdt){
- if(interior.b.gone||interior.b.ruined){exitInterior();return}
+ const ib=interior.b;
+ if(ib.gone||(ib.ruined&&!(ib.decay===1||ib.decay===2))){exitInterior();return}
+ if(hero.down){exitInterior();return}    // struck down inside: spat back out to the surface to be begun again
  let mx=0,my=0;
  if(stick&&!inDialog){
   let dx=stick.x-stick.ox,dy=stick.y-stick.oy;
@@ -6089,9 +6171,83 @@ function updateInteriorScene(rdt){
   hero.anim=Math.hypot(mx,my)>0.85?'run':'walk';hero.animClock+=rdt;
  }else hero.anim='walk';
  for(const o of interior.occupants)updateOcc(o,rdt);
+ if(hero.atkT>0)hero.atkT=Math.max(0,hero.atkT-rdt);
+ // ---- a ruined floor is a live crawl: foes, traps, loot, and the Sage's blade ----
+ if(interior.foes&&interior.foes.length)updateIntFoes(rdt);
+ if(interior.traps&&interior.traps.length)updateIntTraps(rdt);
+ if(interior.loot&&interior.loot.length)collectIntLoot(rdt);
+ if(heroSlashes.length)resolveIntSlashes(rdt);
  // stepping into the doorway leads back outside
  if(((hero.y/TILE)|0)>=interior.gh-1)exitInterior();
  uiProxT-=rdt;if(uiProxT<=0){uiProxT=0.2;updateContextButtons()}
+}
+function hurtHeroInterior(dmg,srcx,srcy){
+ if(hero.ifr>0||hero.down)return;
+ Hero.hp-=dmg; hero.ifr=1.1; hero.hurtFlash=0.45;
+ const a=Math.atan2(hero.y-srcy,hero.x-srcx), k=14;   // knocked back from whatever bit
+ if(intCanStand(hero.x+Math.cos(a)*k,hero.y))hero.x+=Math.cos(a)*k;
+ if(intCanStand(hero.x,hero.y+Math.sin(a)*k))hero.y+=Math.sin(a)*k;
+ if(navigator.vibrate)navigator.vibrate([20,30,20]);
+ if(Hero.hp<=0){ hero.down=true; hero.downT=0; tale([],'The wandering Sage fell in the ruins — and the garden, patient as ever, begins them again.',true); }
+}
+function updateIntFoes(rdt){
+ const intr=interior;
+ for(const f of intr.foes){
+  if(f.dead)continue;
+  f.animClock+=rdt; if(f.atkCd>0)f.atkCd-=rdt;
+  const dx=hero.x-f.x,dy=hero.y-f.y,d=Math.hypot(dx,dy)||1;
+  const step=f.spd*rdt, nx=f.x+dx/d*step, ny=f.y+dy/d*step;
+  if(intCanStand(nx,f.y))f.x=nx;
+  if(intCanStand(f.x,ny))f.y=ny;
+  f.dir=CFHelp.angToDir(Math.atan2(dy,dx));
+  if(d<12&&f.atkCd<=0){ f.atkCd=1.0; f.em={g:'⚔',until:performance.now()+400}; hurtHeroInterior(f.dmg,f.x,f.y); }
+ }
+ intr.foes=intr.foes.filter(f=>!f.dead);
+}
+function updateIntTraps(rdt){
+ for(const tr of interior.traps){
+  tr.ph+=rdt; if(tr.cd>0)tr.cd-=rdt;
+  const armed=Math.sin(tr.ph*1.7)>0.25;          // telegraph, then a beat of armed spikes
+  if(armed&&tr.cd<=0){
+   const cx=tr.x*TILE+TILE/2, cy=tr.y*TILE+TILE/2;
+   if(dist2(hero.x,hero.y,cx,cy)<(TILE*0.58)**2){ tr.cd=1.3; hurtHeroInterior(1,cx,cy); }
+  }
+ }
+}
+function collectIntLoot(rdt){
+ const intr=interior;
+ for(const lo of intr.loot){
+  lo.t=(lo.t||0)+rdt;
+  if(!lo.got&&dist2(lo.x,lo.y,hero.x,hero.y)<(TILE*0.85)**2){
+   lo.got=true;
+   if(lo.kind==='relic'&&lo.relic){ Hero.relics.push(lo.relic); toast('You prised '+lo.relic.g+' '+lo.relic.n+' from the wreckage!'); }
+   else if(lo.kind==='gem'){ heroGems+=lo.amt; toast('💎 +'+lo.amt+' gems from the ruins.'); }
+   else { heroGold+=lo.amt; toast('🪙 +'+lo.amt+' gold from the ruins.'); }
+   if(navigator.vibrate)navigator.vibrate(lo.kind==='relic'?24:12);
+  }
+ }
+ intr.loot=intr.loot.filter(l=>!l.got);
+}
+function resolveIntSlashes(rdt){
+ const intr=interior;
+ for(const s of heroSlashes){
+  s.t+=rdt;
+  if(s.t<=0.15){
+   for(const f of intr.foes){
+    if(f.dead||s.hit.has(f))continue;
+    const dx=f.x-hero.x,dy=f.y-hero.y,d=Math.hypot(dx,dy);
+    if(d<s.range+8){ let da=Math.atan2(dy,dx)-s.ang; da=Math.atan2(Math.sin(da),Math.cos(da));
+     if(Math.abs(da)<s.arc/2){
+      s.hit.add(f); f.hp-=s.dmg; f.em={g:'💥',until:performance.now()+350};
+      const k=20; if(intCanStand(f.x+Math.cos(s.ang)*k,f.y))f.x+=Math.cos(s.ang)*k;
+      if(intCanStand(f.x,f.y+Math.sin(s.ang)*k))f.y+=Math.sin(s.ang)*k;
+      if(f.hp<=0){ f.dead=true; if(chance(.4)){intr.loot.push({x:f.x,y:f.y,kind:chance(.3)?'gem':'gold',amt:chance(.3)?1:(2+ri(0,5)),relic:null,got:false,t:0});} }
+     } }
+   }
+  }
+ }
+ heroSlashes=heroSlashes.filter(s=>s.t<0.25);
+ interior.foes=interior.foes.filter(f=>!f.dead);
 }
 function drawFurniture(c,f){
  const px=f.x*TILE,py=f.y*TILE,w=f.w*TILE,h=f.h*TILE;
@@ -6181,7 +6337,41 @@ function drawFurniture(c,f){
   c.fillStyle='#4a8a4a';c.beginPath();c.arc(px+w/2,py+h-4,3.2,0,7);c.fill();
   c.fillStyle='#5a9a54';c.beginPath();c.arc(px+w/2-1.5,py+h-5,2,0,7);c.fill();return;
  }
+ // ---- ruin dressing: cyber wreckage and nature reclaiming ----
+ if(f.kind==='debris'){
+  c.fillStyle='#33363d';c.fillRect(px+1,py+3,w-2,h-4);
+  c.fillStyle='#20232a';c.fillRect(px+2,py+h-3,w-4,2);
+  c.fillStyle='#565f69';c.fillRect(px+2,py+2,3,3);c.fillRect(px+w-5,py+4,2,2);return;
+ }
+ if(f.kind==='wire'){
+  c.strokeStyle='#24272d';c.lineWidth=1.4;c.beginPath();c.moveTo(px,py+h*0.6);c.lineTo(px+w*0.5,py+2);c.lineTo(px+w,py+h*0.7);c.stroke();
+  if(Math.sin(performance.now()*0.02+f.x)>0.7){c.fillStyle='#7fe0ff';c.fillRect(px+w*0.5-1,py+1,2,2);}return;
+ }
+ if(f.kind==='rubble'){
+  c.fillStyle='#565149';c.fillRect(px+1,py+h-4,w-2,4);
+  c.fillStyle='#6c6a63';c.fillRect(px+2,py+h-6,4,3);c.fillRect(px+w-6,py+h-5,4,3);return;
+ }
+ if(f.kind==='overgrowth'||f.kind==='moss'){
+  c.fillStyle=f.kind==='moss'?'#3f6a3a':'#4a8a4a';c.fillRect(px+1,py+2,w-2,h-3);
+  c.fillStyle='#5a9a54';for(let k=0;k<4;k++)c.fillRect(px+2+k*3,py+2+((k*7)%4),2,2);return;
+ }
+ if(f.kind==='sapling'){
+  c.fillStyle='#5a3f2a';c.fillRect(px+w/2-1,py+h-5,2,5);
+  c.fillStyle='#4a8a4a';c.beginPath();c.arc(px+w/2,py+h-6,3.4,0,7);c.fill();
+  c.fillStyle='#5aa85a';c.beginPath();c.arc(px+w/2-1.5,py+h-8,2,0,7);c.fill();return;
+ }
  c.fillStyle='#6a5236';c.fillRect(px,py,w,h);
+}
+function drawIntFoe(c,f,t){
+ const px=f.x,py=f.y;
+ const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+ c.drawImage(GLOW_RED,px-14,py-14,28,28);c.globalCompositeOperation=go;
+ c.fillStyle='rgba(0,0,0,0.4)';c.beginPath();c.ellipse(px,py+2,7,3,0,0,7);c.fill();
+ const bob=Math.sin(t*0.02+f.animClock)*1.2;
+ c.fillStyle=f.col||'#a23a5a';c.beginPath();c.ellipse(px,py-3+bob,7,6,0,0,7);c.fill();
+ c.fillStyle='#ffe14a';c.fillRect(px-3,py-5+bob,2,2);c.fillRect(px+1,py-5+bob,2,2);
+ if(f.hp<f.maxhp){c.fillStyle='#1b1626';c.fillRect(px-8,py-15,16,2);c.fillStyle='#d24a5a';c.fillRect(px-8,py-15,16*clamp(f.hp/f.maxhp,0,1),2);}
+ if(f.em&&f.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(f.em.g,px,py-18);}
 }
 function drawInterior(t){
  const intr=interior;
@@ -6216,8 +6406,27 @@ function drawInterior(t){
  // rugs first (they sit under everyone), then the rest of the furniture
  for(const f of intr.furniture)if(f.kind==='rug')drawFurniture(ctx,f);
  for(const f of intr.furniture)if(f.kind!=='rug')drawFurniture(ctx,f);
- // residents + the Sage, painter-sorted
+ // floor traps: a telegraph then a beat of live spikes/thorns
+ if(intr.traps)for(const tr of intr.traps){
+  const px=tr.x*TILE,py=tr.y*TILE, armed=Math.sin(tr.ph*1.7)>0.25, warn=Math.sin(tr.ph*1.7)>-0.1;
+  if(tr.kind==='spike'){
+   ctx.fillStyle=armed?'rgba(120,20,20,0.5)':(warn?'rgba(90,70,20,0.35)':'rgba(40,40,50,0.3)');ctx.fillRect(px+2,py+2,TILE-4,TILE-4);
+   if(armed){ctx.fillStyle='#c9d0da';for(let s=0;s<4;s++){const sx=px+4+s*3;ctx.beginPath();ctx.moveTo(sx,py+TILE-3);ctx.lineTo(sx+1.5,py+4);ctx.lineTo(sx+3,py+TILE-3);ctx.closePath();ctx.fill();}}
+  }else{ // thorns
+   ctx.fillStyle=armed?'rgba(40,90,30,0.55)':'rgba(50,70,40,0.3)';ctx.fillRect(px+2,py+2,TILE-4,TILE-4);
+   if(armed){ctx.strokeStyle='#2f5a24';ctx.lineWidth=1.4;for(let s=0;s<3;s++){const sx=px+4+s*4;ctx.beginPath();ctx.moveTo(sx,py+TILE-3);ctx.lineTo(sx+2,py+3);ctx.stroke();}}
+  }
+ }
+ // residents/foes/loot + the Sage, painter-sorted
  const ds=[];
+ if(intr.loot)for(const lo of intr.loot){ if(lo.got)continue; const bob=Math.sin((lo.t||0)*3)*1.5;
+  ds.push({y:lo.y-6,f:()=>{const gcol=lo.kind==='relic'?GLOW_CYAN:lo.kind==='gem'?GLOW_PINK:GLOW_WARM;
+   const go=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';ctx.drawImage(gcol,lo.x-7,lo.y-9+bob,14,14);ctx.globalCompositeOperation=go;
+   ctx.font='9px system-ui';ctx.textAlign='center';ctx.fillText(lo.kind==='relic'?'🔩':lo.kind==='gem'?'💎':'🪙',lo.x,lo.y-3+bob);}});
+ }
+ if(intr.foes)for(const f of intr.foes){ if(f.dead)continue;
+  ds.push({y:f.y,f:()=>drawIntFoe(ctx,f,t)});
+ }
  for(const o of intr.occupants)ds.push({y:o.y,f:()=>{
   ctx.save();ctx.translate(o.x,o.y);
   ctx.fillStyle='rgba(0,0,0,0.3)';ctx.beginPath();ctx.ellipse(0,1,5,2,0,0,7);ctx.fill();
@@ -6231,6 +6440,11 @@ function drawInterior(t){
  ds.push({y:hero.y,f:()=>drawHero(t)});
  ds.sort((a,b)=>a.y-b.y);
  for(const d of ds)d.f();
+ // the Sage's blade-arc, so a swing reads inside the ruins too
+ for(const s of heroSlashes){ if(s.t>0.16)continue; const k=1-s.t/0.16;
+  ctx.strokeStyle='rgba(220,240,255,'+(0.55*k)+')';ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(hero.x,hero.y,s.range*0.7,s.ang-s.arc/2,s.ang+s.arc/2);ctx.stroke();
+ }
  // cosy vignette
  ctx.setTransform(dpr,0,0,dpr,0,0);
  const g=ctx.createRadialGradient(cw/2,ch*0.45,ch*0.22,cw/2,ch*0.5,ch*0.72);
@@ -6352,7 +6566,7 @@ function moveHero(dx,dy){
  hero.y=clamp(hero.y,TILE,H*TILE-TILE);
 }
 function heroSlash(ang){
- if(hero.down||heroSlashCd>0||inDialog||interior)return;
+ if(hero.down||heroSlashCd>0||inDialog)return;   // works inside ruined interiors too (foes to cut down)
  heroSlashCd=0.18;
  hero.face=ang;hero.dir=CFHelp.angToDir(ang);
  hero.atkT=0.42;hero.atkClock=0;
@@ -8044,9 +8258,15 @@ return {
   cityLinks:()=>{rebuildCityLinks();return cityLinks.map(l=>({kind:l.kind,a:l.a.tp,b:l.b.tp}));},
   giveParts:(n)=>{const v=villages[0];if(!v)return null;v.stock.parts=(v.stock.parts||0)+(n||12);return v.stock.parts;},
   forceArcology:()=>{const v=villages.find(x=>villageMembers(x).length)||villages[0];if(!v)return null;v.dev=Math.max(v.dev||0,4);v.stock.parts=(v.stock.parts||0)+COST.arcology.parts;const bp=villageMembers(v).find(p=>p.age>=16);if(!bp)return null;const ok=startBuild(bp,'arcology',null,v);if(ok){const b=buildings[buildings.length-1];b.prog=b.need;completeBuild(b);return b.id;}return null;},
-  hauntedRuins:()=>dungeons.filter(d=>d.cyber).map(d=>({name:d.name,x:d.x,y:d.y,depth:d.depth})),
-  collapseBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;ruinBuilding(b);return {cyberRuins:dungeons.filter(d=>d.cyber).length,ruined:!!b.ruined};},
-  enterBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b||b.gone||b.ruined||!b.done)return null;enterInterior(b);return interior?{gw:interior.gw,gh:interior.gh,occupants:interior.occupants.map(o=>o.name),solidCount:Array.prototype.reduce.call(interior.solid,(a,v)=>a+v,0),border:2*(interior.gw+interior.gh)-4}:null;},
+  slash:(ang)=>{heroSlash(ang==null?hero.face||0:ang);return heroSlashes.length;},
+  intState:()=>interior?{decay:interior.decay||0,foes:interior.foes?interior.foes.length:0,traps:interior.traps?interior.traps.length:0,loot:interior.loot?interior.loot.length:0,hp:Hero.hp,down:!!hero.down,gold:heroGold,gems:heroGems}:null,
+  intFoes:()=>interior&&interior.foes?interior.foes.map(f=>({x:(f.x/TILE)|0,y:(f.y/TILE)|0,hp:f.hp})):null,
+  warpInt:(tx,ty)=>{if(!interior)return null;hero.x=tx*TILE+TILE/2;hero.y=ty*TILE+TILE/2;return {x:(hero.x/TILE)|0,y:(hero.y/TILE)|0};},
+  decayedBuildings:()=>buildings.filter(b=>!b.gone&&b.decay).map(b=>({id:b.id,tp:b.tp,decay:b.decay})),
+  decayStage:(id)=>{const b=buildings.find(x=>x.id===id);return b?(b.decay||0):null;},
+  collapseBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;ruinBuilding(b);return {decay:b.decay||0,ruined:!!b.ruined};},
+  advanceDecay:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;if(!b.decay){ruinBuilding(b);}else{decayBuilding(b,Math.min(3,b.decay+1));}return {decay:b.decay||0,ruined:!!b.ruined,solid:struct[idx(b.x,b.y)]===S_RUIN};},
+  enterBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b||b.gone||!b.done)return null;if(b.ruined&&!(b.decay===1||b.decay===2))return null;enterInterior(b);return interior?{gw:interior.gw,gh:interior.gh,decay:interior.decay||0,occupants:interior.occupants.map(o=>o.name),foes:interior.foes?interior.foes.length:0,traps:interior.traps?interior.traps.length:0,loot:interior.loot?interior.loot.length:0,solidCount:Array.prototype.reduce.call(interior.solid,(a,v)=>a+v,0),border:2*(interior.gw+interior.gh)-4}:null;},
   exitBuilding:()=>{if(interior)exitInterior();return !interior;},
   farmCount:()=>farmTiles.size,
   farmAbandonSet:(radius)=>{ // TEST: convert some open tiles far from villages into farm plots to exercise decay
