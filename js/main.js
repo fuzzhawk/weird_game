@@ -32,9 +32,16 @@ Surface.onEnterDungeon=(dun)=>{
   );
 };
 
+// a stray exception inside a frame must never kill the animation loop (that would
+// freeze the game): catch it, log it, and keep the frames coming.
+let loopErrs=0;
 function loop(t){
-  if(mode==='surface')Surface.frame(t);
-  else Dungeon.frame(t);
+  try{
+    if(mode==='surface')Surface.frame(t);
+    else Dungeon.frame(t);
+  }catch(e){
+    if(loopErrs++<20)console.error('frame error (recovered):',e&&e.stack||e);
+  }
   requestAnimationFrame(loop);
 }
 

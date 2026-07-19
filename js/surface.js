@@ -1734,7 +1734,7 @@ function doTask(p,dt){
     b.prosperity++;
     const owner=allById.get(b.builder);
     if(owner&&!owner.dead&&owner!==p){applyAff(p,owner,rf(1,4));applyAff(owner,p,rf(1,3))}
-    if(p.hunger>50&&['teahouse','apiary','seedhall'].includes(b.sub[0]))p.hunger=Math.max(0,p.hunger-30);
+    if(p.hunger>50&&b.sub&&['teahouse','apiary','seedhall'].includes(b.sub[0]))p.hunger=Math.max(0,p.hunger-30);
     if(chance(.15))tale([p],p.name+' passed an easy hour at '+b.name+'.');
     if(b.prosperity===6||b.prosperity===16||b.prosperity===40)tale(owner&&!owner.dead?[owner]:[],b.name+' is the talk of the garden — everyone has been through its door.',true);
     p.socialN=Math.max(0,p.socialN-35);
@@ -2459,6 +2459,7 @@ function dailyTick(){
  ecologyTick();
  villageTick();
  upkeepTick();
+ compactBuildings();
 }
 
 /* ================= sim step ================= */
@@ -3976,6 +3977,19 @@ function bloomGrave(b){
    if(nx>=0&&ny>=0&&nx<W&&ny<H){const j=idx(nx,ny);fert[j]=clamp(fert[j]+0.06,0,1)}}
  }
 }
+// over long fast-forwards the buildings list bloats with dead (gone) entries that
+// every hot loop still walks — compact it and rebuild the tile→building index so
+// the sim doesn't slowly grind to a stutter. Object refs (p.home, task.b) are kept;
+// only the bld index array and each building's own .i slot are remapped.
+function compactBuildings(){
+ let gone=0; for(const b of buildings)if(b.gone)gone++;
+ if(gone<48)return;
+ buildings=buildings.filter(b=>!b.gone);
+ bld.fill(-1);
+ for(let i=0;i<buildings.length;i++){ const b=buildings[i]; b.i=i;
+  for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++){ if(inB(x,y))bld[idx(x,y)]=i; }
+ }
+}
 function upkeepTick(){
  for(const b of buildings){
   if(b.gone)continue;
@@ -4883,7 +4897,7 @@ function drawBuilding(c,b,nf){
  if(b.tp==='park'){drawPark(c,b);return}
  if(['apartment','warehouse','venue','factory','highrise'].includes(b.tp)){drawTallBuilding(c,b);return}
  c.fillStyle='#1b1626';c.fillRect(px+w/2-2,py+h-4,4,4);
- if(b.tp==='biz'){
+ if(b.tp==='biz'&&b.sub){
   // neon storefront sign
   const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
   c.drawImage(GLOW_PINK,px+w-14,py-18,18,18);c.globalCompositeOperation=go;
@@ -6785,7 +6799,7 @@ function seedAncientRuins(n){
   d.ruin=true; d.danger=rf(.35,.6); d.depth=ri(2,4); d.loot=rf(.9,1.3);
   // the tumbled bones of the old town around the ruin-mouth
   for(let i=0;i<ri(3,6);i++){
-   const tp=pick(['home','home','biz','apartment']); const[w,h]=SZ[tp];
+   const tp=pick(['home','home','warehouse','apartment']); const[w,h]=SZ[tp];
    const spot=findSpot(clamp(s[0]+ri(-4,4),2,W-3),clamp(s[1]+ri(-4,4),2,H-3),w,h,null); if(!spot)continue;
    const b={i:buildings.length,id:nextId++,tp,x:spot[0],y:spot[1],w,h,prog:NEED[tp],need:NEED[tp],done:true,gone:false,
     owners:[],builder:null,forId:null,stock:{food:0,wood:0,stone:0},prosperity:0,sub:null,name:null,ref:null,emptySince:simMin,ruined:false,vid:null};
