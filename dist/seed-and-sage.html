@@ -3945,7 +3945,16 @@ function relicMult(){ return worldTheme==='cyberpunk'?2.1 : worldTheme==='modern
 function relicTarget(){ return Math.round((1 + (1-eraGreen())*13)*relicMult()*wpMul('treasure')); }
 // a ground find the Sage can collect: gold & gems are common spendable treasure;
 // a relic is rare and special (it installs a lasting tech-skill)
-function spawnFind(x,y,kind,amt,relic){ salvage.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,t:R()*6.28,kind,amt:amt||0,relic:relic||null}); }
+const SALVAGE_CAP=55;   // ground finds only get picked up by the Sage — cap them so
+                        // uncollected treasure can't pile up and choke the render
+function spawnFind(x,y,kind,amt,relic){
+ salvage.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,t:R()*6.28,kind,amt:amt||0,relic:relic||null,born:simMin});
+ if(salvage.length>SALVAGE_CAP){
+  // sacrifice the oldest common find (gold/gem) first; keep rare relics longest
+  let i=salvage.findIndex(s=>s.kind!=='relic'&&!s.relic);
+  salvage.splice(i<0?0:i,1);
+ }
+}
 // a surfaced cache: mostly coin, some gems, and only rarely an old-world relic
 function spawnSalvageAt(x,y){
  const r=R();
@@ -5381,18 +5390,27 @@ function dailyTick(){
   const tgt=relicTarget();
   if(salvage.length<tgt&&chance(.5)){spawnSalvage();if(salvage.length&&chance(.3))tale([],'Something old works its way up through the soil, catching the light.')}
   else if(salvage.length>tgt+3&&eraGreen()>0.6&&chance(.25))salvage.pop();
+  // common finds the Sage never came for settle back into the earth over time,
+  // so uncollected treasure can't clutter the map (relics linger — they're rare)
+  if(salvage.length>16){ for(let i=salvage.length-1;i>=0;i--){ const s=salvage[i];
+   if(s.kind==='relic'||s.relic)continue;
+   if(simMin-(s.born||0)>4*DAY && dist2(s.x,s.y,hero.x,hero.y)>(22*TILE)**2 && chance(.5))salvage.splice(i,1); } }
  }
  // fauna wax in green ages and thin out toward the waste
  {
   const at=animalTarget();
   if(animals.length<at&&chance(.5))spawnAnimal();
   else if(animals.length>at+2&&chance(.15)){const a=animals[ri(0,animals.length-1)];if(a&&!a.tame)a.dead=true}
+  // hard ceiling so they can't overshoot without bound at high speed
+  let over=animals.length-(at+8);
+  for(let i=animals.length-1;i>=0&&over>0;i--){if(!animals[i].tame){animals.splice(i,1);over--;}}
  }
  // flyers likewise — flocks arrive on the wing, thin out toward the waste
  {
   const ft=flyerTarget();
-  if(flyers.length<ft){ if(chance(.35))spawnFlock(); else if(chance(.6))spawnFlyer(); }
+  if(flyers.length<ft){ if(flyers.length+9<=ft+6&&chance(.35))spawnFlock(); else if(chance(.6))spawnFlyer(); }
   else if(flyers.length>ft+6&&chance(.2)){const fl=flyers[ri(0,flyers.length-1)];if(fl)fl.dead=true}
+  if(flyers.length>ft+10)flyers.length=ft+10;   // firm ceiling on wings on screen
  }
  // the age turns, and the land with it (the ground re-composites live in frame())
  if(surfEra&&chance(.05))tale([],pick(surfEra.lines));
