@@ -2962,9 +2962,10 @@ const W=112,H=112,TILE=16,DAY=1440,RATE=12,WALK=2.15;
 const SPEEDS=[0,1,16,500];
 const COST={shelter:{wood:5},home:{wood:10,stone:6},biz:{wood:12,stone:8},
  apartment:{wood:22,stone:16},warehouse:{wood:20,stone:14},park:{wood:8,stone:2},
- venue:{wood:26,stone:20},factory:{wood:24,stone:24},highrise:{wood:42,stone:44}};
-const NEED={shelter:50,home:130,biz:150,apartment:260,warehouse:210,park:110,venue:320,factory:340,highrise:560};
-const SZ={shelter:[1,1],home:[2,2],biz:[2,2],grave:[1,1],apartment:[2,3],warehouse:[3,2],park:[3,3],venue:[3,3],factory:[3,3],highrise:[3,3]};
+ venue:{wood:26,stone:20},factory:{wood:24,stone:24},highrise:{wood:42,stone:44},
+ arcology:{wood:64,stone:66,parts:10}};
+const NEED={shelter:50,home:130,biz:150,apartment:260,warehouse:210,park:110,venue:320,factory:340,highrise:560,arcology:1100};
+const SZ={shelter:[1,1],home:[2,2],biz:[2,2],grave:[1,1],apartment:[2,3],warehouse:[3,2],park:[3,3],venue:[3,3],factory:[3,3],highrise:[3,3],arcology:[4,4]};
 // as a settlement grows it unlocks grander builds. cat drives who tends it (so it
 // knows when to fall to ruin), cap = households it holds, stories = drawn height.
 const BMETA={
@@ -2977,8 +2978,12 @@ const BMETA={
  venue:{cat:'civic',cap:0,stories:2,minDev:2,label:'meeting hall'},
  factory:{cat:'civic',cap:0,stories:1,minDev:2,label:'manufactory'},
  highrise:{cat:'house',cap:9,stories:5,minDev:3,label:'tower'},
+ arcology:{cat:'house',cap:18,stories:9,minDev:4,label:'arcology'},
  grave:{cat:'grave',cap:0,stories:0,minDev:0},
 };
+// buildings big enough to sport skybridges, deep multi-room interiors, and to
+// leave a haunted cyber-ruin dungeon behind when they finally fall
+const MEGA_TP={highrise:1,arcology:1};
 function bcap(b){const m=BMETA[b.tp];return m?m.cap:0}   // unknown/graves are never homes
 function bsolid(b){const m=BMETA[b.tp];return m?m.solid!==false:true}
 const RUIN_DELAY=6*DAY,CRUMBLE_DELAY=10*DAY;
@@ -3010,9 +3015,10 @@ let map,bld,nodeAt,nodes,openTiles,openChunks;
 let terTier=null;          // 0 open · 1 weak upland · 2 hard highland (destroyable-terrain tiers)
 let struct,farmGrid,farmTimer;
 let farmTiles=new Set();
+let farmAband=new Map();     // tile→days a farm plot has gone untended by any living town
 let region,regionsDirty=true;
 let people=[],allById=new Map(),buildings=[];
-let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[],quests=[];
+let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[],quests=[],vehicles=[];
 let flockSeq=1;
 let civFallen=false,expeditionDay=0;   // settlements can die out; an expedition reseeds a new town
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
@@ -3749,7 +3755,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;heroGold=0;heroGems=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];vehicles=[];farmAband=new Map();cityLinks=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -4245,6 +4251,8 @@ function ruinBuilding(b){
  for(const id of b.owners){const p=allById.get(id);if(p&&p.home===b)p.home=null}
  b.owners=[];
  if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
+ // a toppled megastructure leaves a lasting, raidable haunted cyber-ruin
+ if(MEGA_TP[b.tp]){b.ancient=true;makeHauntedRuin(b);return}
  const lbl=b.tp==='biz'?b.name:(BMETA[b.tp]&&BMETA[b.tp].label)||('a '+b.tp);
  const what=b.tp==='biz'||BMETA[b.tp]&&BMETA[b.tp].cat!=='house'?lbl:'a '+lbl;
  tale([],'With no one to tend it, '+what+' fell to ruin, and the vines moved in without asking.');
@@ -4261,6 +4269,26 @@ function makeAncientRuin(b){
  for(const id of b.owners){const p=allById.get(id);if(p&&p.home===b)p.home=null}
  b.owners=[];
  if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
+}
+// a fallen megastructure doesn't merely crumble — it DECOMPOSES into a haunted
+// cyber-ruin: the old net wakes in its gutted floors, treasure settles in the
+// wreck, and augmented things move into the dark. It becomes a raidable dungeon.
+function makeHauntedRuin(b){
+ if(!b||b.gone)return null;
+ const cx=b.x+((b.w/2)|0), cy=b.y+((b.h/2)|0);
+ let mouth=nearOpen(cx,cy);
+ if(!mouth){ if(bld[idx(cx,cy)]>=0)bld[idx(cx,cy)]=-1; carveFloor(cx,cy); mouth=[cx,cy]; }
+ if(dungeonAt(mouth[0],mouth[1]))return null;
+ const d=makeDungeon(mouth[0],mouth[1]);
+ if(!d)return null;
+ const what=b.name||('the '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower'));
+ d.ruin=true; d.cyber=true; usedDun.delete(d.name);
+ d.name=pick(['The Hollow of ','The Gutted Levels of ','The Haunted Shell of ','The Dead Floors of ','Ruin of '])+what;
+ d.danger=rf(.4,.7); d.depth=ri(3,5); d.loot=rf(1.1,1.5);
+ for(let i=0;i<ri(2,4);i++)spawnMonster(d);
+ for(let i=0;i<ri(2,4);i++){const s=nearOpen(cx+ri(-2,2),cy+ri(-2,2));if(s)spawnFind(s[0],s[1],chance(.3)?'gem':'gold',ri(3,9),chance(.12)?pick(RELICS):null)}
+ tale([],'The '+((b.name?b.name:((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')))+' finally gave way — its gutted floors settling into a haunted cyber-ruin. The old net stirs in the wreck, and something warm-blooded and wrong has already moved in.',true);
+ return d;
 }
 // a town whose people are all gone falls into ruin: its buildings become lasting
 // rubble and a raidable ruin-site opens at its heart (quests, the town's lost
@@ -5469,6 +5497,8 @@ function dailyTick(){
   }
  }
  maintainCivilization();   // newcomers in good times; a fall + founding expedition when the town dies out
+ decayFarms();             // untended plots dissolve back into plain terrain
+ rebuildCityLinks();       // skybridges & tunnels between the city's great buildings
  // tech relics pay out their treasure trickle to whoever carries them
  for(const p of people){
   if(p.dead)continue;
@@ -5537,6 +5567,7 @@ function stepSim(dt){
  if(quests.length)updateQuests(dt);
  updateAnimals(dt);
  updateFlyers(dt);
+ if(vehicles.length)updateVehicles(dt);
  if(WATER_ON)weatherTick(dt);
  ripenAll(dt);
  heroParkTick(dt);
@@ -6426,6 +6457,82 @@ function updateFlyer(fl,dt){
 function updateFlyers(dt){
  for(let i=flyers.length-1;i>=0;i--){const fl=flyers[i];if(fl.dead){flyers.splice(i,1);continue}updateFlyer(fl,dt)}
 }
+
+/* ================= vehicles: cars & aircraft off the factory line ================= */
+const VEHICLE_CAP=16, GROUND_SPD=2.6, AIR_SPD=3.4;
+const VEH_GROUND_COL=['#ff5a5a','#5affd0','#ffd05a','#9a7fff','#ff8fd0','#7fd0ff'];
+const VEH_AIR_COL=['#8fd0ff','#c78fff','#ff8fbf','#9affd0'];
+function factorySpawnVehicle(v,f){
+ if(vehicles.length>=VEHICLE_CAP)return null;
+ const air=chance(.4);
+ const cx=f.x+f.w/2, cy=f.y+f.h/2;
+ let sx,sy;
+ if(air){ sx=cx; sy=cy; }
+ else { const s=nearOpen(cx|0,cy|0); if(!s)return null; sx=s[0]+.5; sy=s[1]+.5; }
+ const veh={kind:air?'air':'ground',x:sx*TILE,y:sy*TILE,ang:R()*6.28,vid:v.id,born:simMin,
+  col:pick(air?VEH_AIR_COL:VEH_GROUND_COL),tx:sx,ty:sy,z:air?11+R()*9:0,bob:R()*6.28,
+  retarget:0,style:(R()*3)|0,len:air?(6+R()*2):(5+R()*1.5)};
+ vehicles.push(veh);
+ return veh;
+}
+function vehRetarget(veh){
+ const v=villages.find(x=>x.id===veh.vid);
+ if(v){ veh.tx=clamp(v.cx+rf(-v.rad,v.rad),2,W-2); veh.ty=clamp(v.cy+rf(-v.rad,v.rad),2,H-2); }
+ else { veh.tx=clamp((veh.x/TILE)+rf(-7,7),2,W-2); veh.ty=clamp((veh.y/TILE)+rf(-7,7),2,H-2); }
+ veh.retarget=rf(3,9);
+}
+function updateVehicles(dt){
+ for(let i=vehicles.length-1;i>=0;i--){
+  const veh=vehicles[i];
+  const v=villages.find(x=>x.id===veh.vid);
+  if((!v||!villageMembers(v).length)&&chance(dt*0.02)){vehicles.splice(i,1);continue}  // strays wind down & leave
+  veh.retarget-=dt;
+  if(veh.retarget<=0)vehRetarget(veh);
+  const tx=veh.tx*TILE, ty=veh.ty*TILE;
+  let dx=tx-veh.x, dy=ty-veh.y; const d=Math.hypot(dx,dy)||1;
+  if(d<10){veh.retarget=Math.min(veh.retarget,0.2);}
+  const spd=(veh.kind==='air'?AIR_SPD:GROUND_SPD)*dt;
+  const nx=veh.x+dx/d*spd, ny=veh.y+dy/d*spd;
+  if(veh.kind==='air'){ veh.x=clamp(nx,3,W*TILE-3); veh.y=clamp(ny,3,H*TILE-3); veh.bob+=dt*0.2; }
+  else{
+   let moved=false;
+   if(walkable((nx/TILE)|0,(veh.y/TILE)|0)){veh.x=nx;moved=true;}
+   if(walkable((veh.x/TILE)|0,(ny/TILE)|0)){veh.y=ny;moved=true;}
+   if(!moved)veh.retarget=0;   // boxed in → pick a new heading
+  }
+  const mgx=veh.tx*TILE-veh.x, mgy=veh.ty*TILE-veh.y;
+  if(Math.hypot(mgx,mgy)>2)veh.ang+=(Math.atan2(mgy,mgx)-veh.ang)*Math.min(1,dt*0.4);
+ }
+}
+function drawVehicle(c,veh,t){
+ const air=veh.kind==='air';
+ const bob=air?Math.sin(t*0.003+veh.born)*2:0;
+ const px=veh.x, py=veh.y-(air?veh.z:0)-bob;
+ const ang=veh.ang, ca=Math.cos(ang), sa=Math.sin(ang), L=veh.len, Wd=air?4.4:3.4;
+ // ground shadow (smaller & offset up high for aircraft)
+ c.fillStyle='rgba(0,0,0,'+(air?0.16:0.28)+')';
+ c.beginPath();c.ellipse(veh.x,veh.y+1,L*0.7,2.2,0,0,7);c.fill();
+ c.save();c.translate(px,py);c.rotate(ang);
+ if(air){
+  // sleek hovercraft: hull + canopy + thruster glow
+  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+  c.drawImage(GLOW_CYAN,-L-3,-Wd-3,L*2+6,Wd*2+6);c.globalCompositeOperation=go;
+  c.fillStyle=veh.col;c.beginPath();c.moveTo(L,0);c.lineTo(-L*0.7,-Wd);c.lineTo(-L,0);c.lineTo(-L*0.7,Wd);c.closePath();c.fill();
+  c.fillStyle='rgba(255,255,255,0.55)';c.fillRect(-1,-1.4,3,2.8);   // canopy
+  c.fillStyle='#26e0ff';c.fillRect(-L,-1,1.6,2);                    // thruster
+ }else{
+  // wheeled roadster: body, cabin glass, neon underglow, headlights
+  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+  c.drawImage(GLOW_WARM,-L-2,-Wd-2,L*2+4,Wd*2+4);c.globalCompositeOperation=go;
+  c.fillStyle='#15121c';c.fillRect(-L,Wd-0.5,L*2,1.5);             // underglow shadow
+  c.fillStyle=veh.col;c.beginPath();c.moveTo(L,-Wd*0.6);c.lineTo(L*0.5,-Wd);c.lineTo(-L,-Wd);c.lineTo(-L,Wd);c.lineTo(L*0.5,Wd);c.lineTo(L,Wd*0.6);c.closePath();c.fill();
+  c.fillStyle='rgba(180,225,255,0.75)';c.fillRect(-1.5,-Wd+0.5,4,Wd*2-1);   // windshield
+  c.fillStyle='#0c0a12';c.fillRect(-L+1,-Wd,1.5,Wd*2);
+  c.fillStyle='#fff2a0';c.fillRect(L-1,-Wd*0.7,1.2,1.4);c.fillRect(L-1,Wd*0.7-1.4,1.2,1.4);   // headlights
+ }
+ c.restore();
+}
+function cullVehiclesFar(){ if(vehicles.length>VEHICLE_CAP)vehicles.length=VEHICLE_CAP; }
 function drawFlyer(c,fl,t){
  const bob=Math.sin(t*0.004+fl.id*1.3)*2;
  const s=fl.sizeScale;
@@ -6844,8 +6951,9 @@ function heroFestivalTick(rdt){
 const HOME_RESERVE=4;
 function villagePool(v){ let wood=v.stock.wood||0, stone=v.stock.stone||0; const seen=new Set();
  for(const p of villageMembers(v)){const b=p.home; if(b&&!b.gone&&b.stock&&!seen.has(b)){seen.add(b);wood+=Math.max(0,(b.stock.wood||0)-HOME_RESERVE);stone+=Math.max(0,(b.stock.stone||0)-HOME_RESERVE);}}
- return {wood,stone}; }
+ return {wood,stone,parts:v.stock.parts||0}; }   // 'parts' are factory-milled and pooled only at the town stores
 function spendPool(v,cost){ let nw=cost.wood||0,ns=cost.stone||0;
+ v.stock.parts=Math.max(0,(v.stock.parts||0)-(cost.parts||0));
  take(v.stock);
  function take(st,reserve){if(!st)return;const dw=Math.min(nw,Math.max(0,(st.wood||0)-(reserve||0)));st.wood-=dw;nw-=dw;const ds=Math.min(ns,Math.max(0,(st.stone||0)-(reserve||0)));st.stone-=ds;ns-=ds;}
  for(const p of villageMembers(v)){if(nw<=0&&ns<=0)break;const b=p.home;if(b&&b.stock)take(b.stock,HOME_RESERVE);}
@@ -6858,7 +6966,7 @@ function developVillage(v){
  if(!members.length)return;
  const has=(tp)=>buildings.filter(b=>!b.gone&&!b.ruined&&b.vid===v.id&&b.tp===tp).length;
  const pool=villagePool(v);
- const afford=(tp)=>{const c=COST[tp];return pool.wood>=(c.wood||0)&&pool.stone>=(c.stone||0)};
+ const afford=(tp)=>{const c=COST[tp];return pool.wood>=(c.wood||0)&&pool.stone>=(c.stone||0)&&pool.parts>=(c.parts||0)};
  const pickBuilder=()=>{let fallback=null;for(const pp of members){if(pp.dead||pp.age<16)continue;if(buildings.some(b=>!b.gone&&!b.done&&b.builder===pp.id))continue;if(!pp.task||['wander','villagejob','chat','visit','gather','gohome'].includes(pp.task.k))return pp;if(!fallback)fallback=pp;}return fallback;};
  const commission=(tp)=>{ if(!afford(tp))return false; const bp=pickBuilder(); if(!bp)return false; if(startBuild(bp,tp,null,v)){spendPool(v,COST[tp]);return true;} return false; };
  // 1) housing: raise tenements then towers when folk sleep rough OR the town has
@@ -6867,6 +6975,8 @@ function developVillage(v){
  const vacant=buildings.filter(b=>!b.gone&&!b.ruined&&b.done&&b.vid===v.id&&bcap(b)>0).reduce((a,b)=>a+(bcap(b)-b.owners.length),0);
  const shelters=buildings.filter(b=>!b.gone&&!b.ruined&&b.vid===v.id&&b.tp==='shelter').length;
  if(homeless>vacant+1 || (dev>=2 && shelters>=3)){
+  // a factory city with milled parts on hand raises an arcology — the grandest home of all
+  if(dev>=4&&has('factory')>=1&&has('arcology')<Math.max(1,dev-3)&&(v.stock.parts||0)>=(COST.arcology.parts||0)){ if(commission('arcology'))return; }
   if(dev>=3&&has('highrise')<dev-1){ if(commission('highrise'))return; }
   if(commission('apartment'))return;
  }
@@ -6913,7 +7023,11 @@ function factoryTick(v){
  const members=villageMembers(v);
  for(const f of facs){
   v.stock.wood=(v.stock.wood||0)+2; v.stock.stone=(v.stock.stone||0)+2;
+  // milled building-parts: the finished materials that let a city raise arcologies
+  v.stock.parts=Math.min(40,(v.stock.parts||0)+1);
   f.prosperity=(f.prosperity||0)+1;
+  // manufactories also roll mechanical vehicles off the line for the city streets & skies
+  if(chance(0.5))factorySpawnVehicle(v,f);
   if(chance(0.16)&&members.length){
    const p=pick(members), relic=pick(RELICS); giveRelic(p,relic);
    tale([p],'The manufactory of '+v.name+' pressed out '+relic.g+' the '+relic.n+', and it fell to '+p.name+'.',true);
@@ -7091,6 +7205,21 @@ function ripenAll(dt){
  for(const i of farmTiles){
   if(farmGrid[i]===1){farmTimer[i]-=dt;if(farmTimer[i]<=0){farmGrid[i]=2;markMod(i)}}
   else if(farmGrid[i]===0)farmTiles.delete(i);
+ }
+}
+// a plot no living town still works goes fallow and, after a few days, the wild
+// green takes it back — the rows dissolve into ordinary empty terrain
+function decayFarms(){
+ if(!farmTiles.size)return;
+ for(const i of Array.from(farmTiles)){
+  const x=i%W, y=(i/W)|0;
+  let tended=false;
+  for(const v of villages){ const cl=v.claim; if(!cl)continue;
+   if(x>=cl.x0&&x<=cl.x1&&y>=cl.y0&&y<=cl.y1&&villageMembers(v).length){tended=true;break} }
+  if(tended){ if(farmAband.size)farmAband.delete(i); continue; }
+  const n=(farmAband.get(i)||0)+1;
+  if(n>=3){ farmGrid[i]=0; farmSp[i]=-1; farmTiles.delete(i); farmAband.delete(i); markMod(i); }
+  else farmAband.set(i,n);
  }
 }
 const SAY={
@@ -7881,22 +8010,46 @@ const BSTYLE={
  venue:{wall:'#5a4a6a',edge:'#3a2b4a',roof:'#c77ad0',win:'#ffe07a'},
  factory:{wall:'#585560',edge:'#37343e',roof:'#7a7a86',win:'#a0d0ff'},
  highrise:{wall:'#556072',edge:'#323b49',roof:'#7f93b5',win:'#bfe0ff'},
+ arcology:{wall:'#3f4d63',edge:'#232d3e',roof:'#6fa8d8',win:'#cdefff'},
 };
+// how modern a building reads scales with its town's development: a young town
+// builds plain concrete; a grown city sheathes the same tower in neon glass
+function buildingFutur(b){ const v=b.vid!=null?villages.find(x=>x.id===b.vid):null; return clamp(((v?v.dev:2)-1)/4,0,1); }
 function drawTallBuilding(c,b){
  const st=BSTYLE[b.tp]||BSTYLE.apartment, t=performance.now();
  const px=b.x*TILE,py=b.y*TILE,w=b.w*TILE,h=b.h*TILE;
+ const arc=b.tp==='arcology';
  const stories=BMETA[b.tp].stories||1, STORY=9, rise=stories*STORY;
  const byTop=py-rise, bh=h+rise;
- c.fillStyle='rgba(0,0,0,0.30)';c.beginPath();c.ellipse(px+w/2,py+h-1,w*0.52,3.2,0,0,7);c.fill();
- c.fillStyle=st.wall;c.fillRect(px,byTop,w,bh);
- c.fillStyle=st.edge;c.fillRect(px+w-3,byTop,3,bh);
- c.fillStyle='rgba(255,255,255,0.05)';c.fillRect(px,byTop,2,bh);
+ const futur=buildingFutur(b);
+ c.fillStyle='rgba(0,0,0,0.32)';c.beginPath();c.ellipse(px+w/2,py+h-1,w*0.54,3.4,0,0,7);c.fill();
+ // facade: flat concrete when the town is young, a glass gradient as it modernises
+ if(futur>0.02){const g=c.createLinearGradient(px,byTop,px+w,py+h);g.addColorStop(0,lerpHex(st.wall,'#22314a',futur*0.5));g.addColorStop(1,lerpHex(st.edge,'#0e1622',futur*0.5));c.fillStyle=g;}
+ else c.fillStyle=st.wall;
+ if(arc){
+  // a tapered megastructure: broad base, set-back tower — a vertical city
+  const midTop=byTop+bh*0.42, tw=w*0.66, tx=px+(w-tw)/2, fill=c.fillStyle;
+  c.fillRect(px,midTop,w,py+h-midTop);
+  c.fillStyle=fill;c.fillRect(tx,byTop,tw,midTop-byTop+2);
+  c.fillStyle=st.edge;c.fillRect(px+w-3,midTop,3,py+h-midTop);c.fillRect(tx+tw-3,byTop,3,midTop-byTop);
+ }else{
+  c.fillRect(px,byTop,w,bh);
+  c.fillStyle=st.edge;c.fillRect(px+w-3,byTop,3,bh);
+ }
+ c.fillStyle='rgba(255,255,255,0.06)';c.fillRect(px,byTop,2,bh);
  c.fillStyle=st.roof;c.fillRect(px-1,byTop-3,w+2,4);
- // storeys of lit windows
- const cols=Math.max(2,Math.round(w/6)), gapX=(w-4)/cols;
- c.fillStyle=st.win;
- for(let r=0;r<stories;r++){const wy=byTop+4+r*STORY;
-  for(let cc=0;cc<cols;cc++)c.fillRect(Math.round(px+3+cc*gapX),Math.round(wy),2.5,3.5);}
+ // storeys of windows — a lit grid, bluer & brighter with modernity, some dark
+ const cols=Math.max(2,Math.round(w/6)), gapX=(w-4)/cols, seed=(b.id*2654435761)>>>0;
+ const arcInset=arc?(w-w*0.66)/2:0;
+ for(let r=0;r<stories;r++){const wy=byTop+4+r*STORY, taper=(arc&&r<stories*0.58);
+  for(let cc=0;cc<cols;cc++){
+   const wx=Math.round(px+3+cc*gapX);
+   if(taper&&(wx<px+arcInset||wx>px+w-arcInset))continue;   // no windows on the set-back void
+   const hsh=((seed^(r*73856093)^(cc*19349663))>>>0)%12;
+   const on=hsh>2 || ((t*0.0006+r*1.7+cc)|0)%9<6;
+   c.fillStyle=on?lerpHex(st.win,'#cdefff',futur):'rgba(18,22,32,0.65)';
+   c.fillRect(wx,Math.round(wy),2.5,3.5);
+  }}
  c.fillStyle='#161320';c.fillRect(px+w/2-3,py+h-6,6,6);   // door
  if(b.tp==='factory'){
   const chx=px+w-7,chy=byTop-2;
@@ -7910,10 +8063,59 @@ function drawTallBuilding(c,b){
  }else if(b.tp==='warehouse'){
   c.fillStyle=st.edge;c.fillRect(px+w/2-7,py+h-10,14,10);
   c.fillStyle=st.wall;c.fillRect(px+w/2-6,py+h-9,12,8);
- }else if(b.tp==='highrise'){
-  c.strokeStyle=st.edge;c.lineWidth=1;c.beginPath();c.moveTo(px+w/2,byTop-3);c.lineTo(px+w/2,byTop-9);c.stroke();
-  c.fillStyle=(Math.sin(t*0.006)>0)?'#ff5a5a':'#6a2626';c.beginPath();c.arc(px+w/2,byTop-9,1.4,0,7);c.fill();
+ }else if(b.tp==='highrise'||arc){
+  // rooftop mast with a blinking aviation beacon
+  c.strokeStyle=st.edge;c.lineWidth=1;c.beginPath();c.moveTo(px+w/2,byTop-3);c.lineTo(px+w/2,byTop-(arc?15:9));c.stroke();
+  c.fillStyle=(Math.sin(t*0.006)>0)?'#ff5a5a':'#6a2626';c.beginPath();c.arc(px+w/2,byTop-(arc?15:9),1.6,0,7);c.fill();
  }
+ // a neon holo-crown once the city is properly futuristic
+ if(futur>0.4){
+  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+  c.globalAlpha=0.5+0.3*Math.sin(t*0.004+b.id);
+  c.drawImage(arc?GLOW_CYAN:GLOW_PINK,px+w/2-13,byTop-9,26,15);
+  c.globalAlpha=1;c.globalCompositeOperation=go;
+ }
+}
+/* ---- skybridges & ground tunnels linking a city's great buildings ---- */
+let cityLinks=[];
+function towerTopY(b){ return b.y*TILE - (BMETA[b.tp]?(BMETA[b.tp].stories||1):1)*9 + 5; }
+function rebuildCityLinks(){
+ const megs=buildings.filter(b=>!b.gone&&!b.ruined&&b.done&&MEGA_TP[b.tp]);
+ const links=[],cnt=new Map();
+ for(let i=0;i<megs.length;i++)for(let j=i+1;j<megs.length;j++){
+  const a=megs[i],b=megs[j];
+  if(a.vid==null||a.vid!==b.vid)continue;
+  const ax=a.x+a.w/2,ay=a.y+a.h/2,bx=b.x+b.w/2,by=b.y+b.h/2;
+  if(Math.hypot(ax-bx,ay-by)>11)continue;
+  if((cnt.get(a)||0)>=2||(cnt.get(b)||0)>=2)continue;
+  const kind=((a.id+b.id)%3===0&&(a.tp==='arcology'||b.tp==='arcology'))?'tunnel':'bridge';
+  links.push({a,b,kind});cnt.set(a,(cnt.get(a)||0)+1);cnt.set(b,(cnt.get(b)||0)+1);
+ }
+ cityLinks=links;
+}
+function drawTunnel(c,a,b){
+ const ax=(a.x+a.w/2)*TILE,ay=(a.y+a.h)*TILE-3,bx=(b.x+b.w/2)*TILE,by=(b.y+b.h)*TILE-3;
+ c.lineCap='round';
+ c.strokeStyle='rgba(12,14,20,0.85)';c.lineWidth=7;c.beginPath();c.moveTo(ax,ay);c.lineTo(bx,by);c.stroke();
+ c.strokeStyle='rgba(60,66,80,0.9)';c.lineWidth=5;c.beginPath();c.moveTo(ax,ay);c.lineTo(bx,by);c.stroke();
+ c.strokeStyle='rgba(120,220,255,0.5)';c.lineWidth=1;c.setLineDash([3,4]);c.beginPath();c.moveTo(ax,ay);c.lineTo(bx,by);c.stroke();c.setLineDash([]);
+ c.lineCap='butt';
+}
+function drawSkybridge(c,a,b,t){
+ const ax=(a.x+a.w/2)*TILE,ay=towerTopY(a)+6,bx=(b.x+b.w/2)*TILE,by=towerTopY(b)+6;
+ // support struts down from each end
+ c.strokeStyle='rgba(30,36,48,0.6)';c.lineWidth=1.5;
+ c.beginPath();c.moveTo(ax,ay);c.lineTo(ax,(a.y+a.h)*TILE-6);c.moveTo(bx,by);c.lineTo(bx,(b.y+b.h)*TILE-6);c.stroke();
+ // the deck
+ c.lineCap='round';
+ c.strokeStyle='rgba(0,0,0,0.28)';c.lineWidth=6;c.beginPath();c.moveTo(ax,ay+2);c.lineTo(bx,by+2);c.stroke();
+ c.strokeStyle='#6b7890';c.lineWidth=4.5;c.beginPath();c.moveTo(ax,ay);c.lineTo(bx,by);c.stroke();
+ c.strokeStyle='#95a6bf';c.lineWidth=1.5;c.beginPath();c.moveTo(ax,ay-1.6);c.lineTo(bx,by-1.6);c.stroke();
+ // running neon lights along the rail
+ const len=Math.hypot(bx-ax,by-ay),n=Math.max(2,(len/6)|0);
+ for(let k=0;k<n;k++){const f=(k+((t*0.02)%1))/n,lx=ax+(bx-ax)*f,ly=ay+(by-ay)*f-1.6;
+  c.fillStyle='rgba(125,227,255,'+(0.5+0.4*Math.sin(t*0.01+k))+')';c.fillRect(lx-0.5,ly-0.5,1.4,1.4);}
+ c.lineCap='butt';
 }
 function drawPark(c,b){
  const px=b.x*TILE,py=b.y*TILE,w=b.w*TILE,h=b.h*TILE, gr=U.mulberry32((b.id*2654435761)>>>0);
@@ -7957,7 +8159,7 @@ function drawBuilding(c,b,nf){
   return;
  }
  if(b.tp==='park'){drawPark(c,b);return}
- if(['apartment','warehouse','venue','factory','highrise'].includes(b.tp)){drawTallBuilding(c,b);return}
+ if(['apartment','warehouse','venue','factory','highrise','arcology'].includes(b.tp)){drawTallBuilding(c,b);return}
  c.fillStyle='#1b1626';c.fillRect(px+w/2-2,py+h-4,4,4);
  if(b.tp==='biz'&&b.sub){
   // neon storefront sign
@@ -8351,7 +8553,11 @@ function draw(t){
   vis.push(b);
  }
  vis.sort((a,b)=>(a.y+a.h)-(b.y+b.h));
+ // ground tunnels run beneath the towers (draw before the buildings)
+ for(const l of cityLinks){ if(l.kind!=='tunnel')continue; if(l.a.gone||l.a.ruined||l.b.gone||l.b.ruined)continue; drawTunnel(ctx,l.a,l.b); }
  for(const b of vis)drawBuilding(ctx,b,nf);
+ // skybridges arc over everything (draw after the buildings, at rooftop height)
+ for(const l of cityLinks){ if(l.kind!=='bridge')continue; if(l.a.gone||l.a.ruined||l.b.gone||l.b.ruined)continue; drawSkybridge(ctx,l.a,l.b,t); }
  for(const d of dungeons){
   if(d.x<vx0||d.x>vx1||d.y<vy0||d.y>vy1)continue;
   drawDungeon(ctx,d,t);
@@ -8456,10 +8662,16 @@ function draw(t){
   if(a.x/TILE<vx0-2||a.x/TILE>vx1+2||a.y/TILE<vy0-2||a.y/TILE>vy1+2)continue;
   drawables.push({y:a.y,f:()=>drawAnimal(ctx,a,t)});
  }
+ // ground vehicles ride at street level, painter-sorted with folk & beasts
+ for(const veh of vehicles){
+  if(veh.kind!=='ground')continue;
+  if(veh.x/TILE<vx0-2||veh.x/TILE>vx1+2||veh.y/TILE<vy0-2||veh.y/TILE>vy1+2)continue;
+  drawables.push({y:veh.y,f:()=>drawVehicle(ctx,veh,t)});
+ }
  if(!hero.down)drawables.push({y:hero.y,f:()=>drawHero(t)});
  drawables.sort((a,b)=>a.y-b.y);
  for(const d of drawables)d.f();
- // flyers ride above everything (with a ground shadow), sorted among themselves
+ // flyers & aircraft ride above everything (with a ground shadow), sorted among themselves
  const airborne=[];
  for(const fl of flyers){
   if(fl.x/TILE<vx0-3||fl.x/TILE>vx1+3||fl.y/TILE<vy0-3||fl.y/TILE>vy1+3)continue;
@@ -8467,6 +8679,11 @@ function draw(t){
  }
  airborne.sort((a,b)=>a.y-b.y);
  for(const fl of airborne)drawFlyer(ctx,fl,t);
+ for(const veh of vehicles){
+  if(veh.kind!=='air')continue;
+  if(veh.x/TILE<vx0-3||veh.x/TILE>vx1+3||veh.y/TILE<vy0-3||veh.y/TILE>vy1+3)continue;
+  drawVehicle(ctx,veh,t);
+ }
  if(particles.length)drawParticles(ctx);   // mining debris & sparks, above the ground
  // ---- rain, then clouds overhead ----
  if(WATER_ON&&clouds.length){
@@ -8617,7 +8834,7 @@ function draw(t){
    Walk up to a home/shop/lean-to and step inside a generated room — larger than
    its footprint — with furniture and its residents pottering about. The surface
    sim keeps running outside while you're in here. */
-const ENTER_TP={home:1,shelter:1,biz:1,apartment:1,warehouse:1,venue:1,factory:1,highrise:1};
+const ENTER_TP={home:1,shelter:1,biz:1,apartment:1,warehouse:1,venue:1,factory:1,highrise:1,arcology:1};
 function doorTileOf(b){ return [b.x+((b.w/2)|0), b.y+b.h]; }   // the tile just outside the door
 function enterLabel(b){ return b.name||(b.tp==='home'?'the cottage':b.tp==='shelter'?'the lean-to':b.tp==='biz'?'the shop':'the '+((BMETA[b.tp]&&BMETA[b.tp].label)||b.tp)); }
 function enterableAt(px,py){
@@ -8639,14 +8856,27 @@ function freeSpotInt(intr,rng){
  return[1,1];
 }
 function makeInterior(b){
- const gw=clamp(b.w*3+4,9,17), gh=clamp(b.h*3+3,8,13);
+ // big civic buildings & towers open into deep, multi-room floors you can wander
+ const mega=['apartment','warehouse','venue','factory','highrise','arcology'].includes(b.tp);
+ const gw=clamp(b.w*3+4, 9, mega?24:17), gh=clamp(b.h*3+3, 8, mega?19:13);
  const solid=new Uint8Array(gw*gh), si=(x,y)=>y*gw+x;
  for(let x=0;x<gw;x++){solid[si(x,0)]=1;solid[si(x,gh-1)]=1}
  for(let y=0;y<gh;y++){solid[si(0,y)]=1;solid[si(gw-1,y)]=1}
  const dcx=(gw/2)|0;
  solid[si(dcx,gh-1)]=0;solid[si(dcx-1,gh-1)]=0;      // 2-wide doorway on the south wall
- const FLOORS={biz:'#4a4152',factory:'#3a3d42',venue:'#3a2f45',warehouse:'#48412f',highrise:'#3d4450',apartment:'#4a4038'};
- const WALLS={biz:'#332c40',factory:'#2a2d32',venue:'#2a2035',warehouse:'#34301f',highrise:'#2c3340',apartment:'#332c26'};
+ // interior partitions: a central corridor runs from the door to the back, with
+ // rooms walled off to either side — so a large building holds several rooms to
+ // travel between rather than one big hall
+ if(mega){
+  const bands = gh>=15?3 : gh>=11?2 : 1;
+  for(let bnd=1;bnd<=bands;bnd++){
+   const wy=Math.round(bnd*gh/(bands+1));
+   if(wy<=1||wy>=gh-1)continue;
+   for(let x=1;x<gw-1;x++){ if(x===dcx||x===dcx-1)continue; solid[si(x,wy)]=1; }   // leave the corridor open
+  }
+ }
+ const FLOORS={biz:'#4a4152',factory:'#3a3d42',venue:'#3a2f45',warehouse:'#48412f',highrise:'#3d4450',apartment:'#4a4038',arcology:'#33404f'};
+ const WALLS={biz:'#332c40',factory:'#2a2d32',venue:'#2a2035',warehouse:'#34301f',highrise:'#2c3340',apartment:'#332c26',arcology:'#243140'};
  const intr={b,gw,gh,solid,si,door:[dcx,gh-1],doorGap:[dcx,dcx-1],furniture:[],occupants:[],
    name:enterLabel(b), floor:FLOORS[b.tp]||'#5a4230', wall:WALLS[b.tp]||'#3a2f22'};
  const rng=U.mulberry32(U.hashStr('interior-'+b.id));
@@ -8684,6 +8914,14 @@ function makeInterior(b){
   put(1,gh-3,1,1,'potted',1);put(gw-2,gh-3,1,1,'potted',1);
   put(2,midy,gw-4,1,'seat',0);
   put(dcx-1,gh-3,2,1,'rug',0);
+ }else if(b.tp==='arcology'){
+  // a vertical city: lift core, glowing terminals, plazas of seats & hydroponic greens
+  put(midx-1,1,2,1,'lift',1);
+  put(1,1,1,1,'terminal',1);put(gw-2,1,1,1,'terminal',1);
+  put(1,midy,1,1,'potted',1);put(gw-2,midy,1,1,'potted',1);
+  for(let y=2;y<gh-2;y+=3)for(let x=2;x<gw-2;x+=4){if(x===dcx||x===dcx-1)continue;put(x,y,1,1,rng()<.5?'seat':'terminal',1);}
+  put(gw-3,gh-3,2,1,'machine',1);
+  put(dcx-1,gh-3,2,1,'rug',0);
  }else if(b.tp==='apartment'){
   // several small units: beds along the walls, a shared table
   put(1,1,2,1,'bed',1);put(gw-3,1,2,1,'bed',1);
@@ -8697,15 +8935,26 @@ function makeInterior(b){
   put(gw-2,gh-3,1,1,'hearth',1);
   put(dcx-1,gh-3,2,2,'rug',0);
  }
- // continuity: only show occupants who are actually AT the house in the overworld
- // (standing on/adjacent to its footprint — this is where they sleep), not those
- // out working the fields, so the inside matches what you saw outside
+ // the central corridor is kept clear no matter what furniture landed on it, so
+ // every room stays reachable from the door
+ if(mega)for(let y=1;y<gh-1;y++){solid[si(dcx,y)]=0;solid[si(dcx-1,y)]=0;}
+ // continuity: show occupants actually AT the building in the overworld (standing on/
+ // adjacent to its footprint), so the inside matches what you saw outside. Big civic
+ // buildings pull in nearby townsfolk as workers/visitors so they aren't deserted.
  const atHome=o=>{ const tx=(o.x/TILE)|0,ty=(o.y/TILE)|0;
    return tx>=b.x-1&&tx<b.x+b.w+1&&ty>=b.y-1&&ty<b.y+b.h+1; };
- const owners=(b.owners||[]).map(id=>allById.get(id)).filter(o=>o&&!o.dead&&o.sprite&&atHome(o));
- for(const o of owners.slice(0,3)){
+ // a building's own residents are always in (it's their home); prefer to place those
+ // actually standing at the footprint, but never leave a lived-in home deserted
+ const residents=(b.owners||[]).map(id=>allById.get(id)).filter(o=>o&&!o.dead&&o.sprite);
+ const here=residents.filter(atHome);
+ let occSrc=here.length?here:residents;
+ if(mega&&occSrc.length<2){
+  for(const o of people){ if(o.dead||!o.sprite||o.inDungeon||o.age<8||occSrc.includes(o))continue; if(atHome(o))occSrc.push(o); }
+ }
+ const cap=mega?(b.tp==='arcology'?6:4):3;
+ for(const o of occSrc.slice(0,cap)){
   const s=freeSpotInt(intr,rng);
-  intr.occupants.push({name:o.name,sprite:o.sprite,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,
+  intr.occupants.push({pid:o.id,name:o.name,sprite:o.sprite,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,
     tx:0,ty:0,dir:0,animClock:0,wait:rng()*2.5,moving:false});
  }
  return intr;
@@ -9198,8 +9447,17 @@ let uiProxT=0,talkTarget=null,descendTarget=null;
 function updateContextButtons(){
  const eb=$('sEnterBtn');
  if(interior){
-  $('sTalkBtn').style.display='none';$('sDescendBtn').style.display='none';
+  $('sDescendBtn').style.display='none';
   eb.style.display='block';eb.textContent='🚪 EXIT — '+interior.name;
+  // talk to a resident you're standing beside
+  talkTarget=null;
+  if(!inDialog){
+   let bd=(TILE*1.5)**2;
+   for(const o of interior.occupants){ if(!o.pid)continue; const d=dist2(o.x,o.y,hero.x,hero.y); if(d<bd){const pr=allById.get(o.pid); if(pr&&!pr.dead){bd=d;talkTarget=pr}} }
+  }
+  const tbi=$('sTalkBtn');
+  tbi.style.display=talkTarget?'block':'none';
+  if(talkTarget)tbi.textContent='💬 TALK — '+talkTarget.name;
   return;
  }
  talkTarget=null;descendTarget=null;enterTarget=null;
@@ -10719,6 +10977,20 @@ return {
   mineAt:(x,y,power)=>mineTile(x,y,power||999,{hero:true}),
   bashAt:(x,y,power)=>bashStruct(x,y,power||999,{hero:true}),
   setTile:(x,y,kind)=>{ if(kind==='wall')setSolid(x,y,S_WALL); else if(kind==='ruin')setSolid(x,y,S_RUIN); else if(kind==='rock')revertTile(x,y); else carveFloor(x,y); regionsDirty=true; return struct[idx(x,y)]; },
+  // ---- megacity hooks (tinkering & tests) ----
+  vehicles:()=>vehicles.map(v=>({kind:v.kind,x:(v.x/TILE)|0,y:(v.y/TILE)|0,vid:v.vid})),
+  vehicleCount:()=>vehicles.length,
+  spawnVehicle:(air)=>{const v=villages[0];if(!v)return null;const f=buildings.find(b=>b.tp==='factory'&&!b.gone&&!b.ruined&&b.vid===v.id)||{x:(v.cx|0)-1,y:(v.cy|0)-1,w:3,h:3};const veh=factorySpawnVehicle(v,f);if(veh&&air!=null){veh.kind=air?'air':'ground';veh.z=air?12:0;}return veh?veh.kind:null;},
+  cityLinks:()=>{rebuildCityLinks();return cityLinks.map(l=>({kind:l.kind,a:l.a.tp,b:l.b.tp}));},
+  giveParts:(n)=>{const v=villages[0];if(!v)return null;v.stock.parts=(v.stock.parts||0)+(n||12);return v.stock.parts;},
+  forceArcology:()=>{const v=villages.find(x=>villageMembers(x).length)||villages[0];if(!v)return null;v.dev=Math.max(v.dev||0,4);v.stock.parts=(v.stock.parts||0)+COST.arcology.parts;const bp=villageMembers(v).find(p=>p.age>=16);if(!bp)return null;const ok=startBuild(bp,'arcology',null,v);if(ok){const b=buildings[buildings.length-1];b.prog=b.need;completeBuild(b);return b.id;}return null;},
+  hauntedRuins:()=>dungeons.filter(d=>d.cyber).map(d=>({name:d.name,x:d.x,y:d.y,depth:d.depth})),
+  collapseBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;ruinBuilding(b);return {cyberRuins:dungeons.filter(d=>d.cyber).length,ruined:!!b.ruined};},
+  enterBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b||b.gone||b.ruined||!b.done)return null;enterInterior(b);return interior?{gw:interior.gw,gh:interior.gh,occupants:interior.occupants.map(o=>o.name),solidCount:Array.prototype.reduce.call(interior.solid,(a,v)=>a+v,0),border:2*(interior.gw+interior.gh)-4}:null;},
+  exitBuilding:()=>{if(interior)exitInterior();return !interior;},
+  farmCount:()=>farmTiles.size,
+  farmAbandonSet:(radius)=>{ // TEST: convert some open tiles far from villages into farm plots to exercise decay
+   let n=0; for(const [x,y] of openTiles){ if(n>=(radius||10))break; if(villages.some(v=>v.claim&&x>=v.claim.x0&&x<=v.claim.x1&&y>=v.claim.y0&&y<=v.claim.y1))continue; const i=idx(x,y); if(farmGrid[i])continue; farmGrid[i]=1;farmSp[i]=0;farmTimer[i]=DAY;farmTiles.add(i);n++; } return farmTiles.size; },
   governance:()=>villages.map(v=>{const l=allById.get(v.leader);return{name:v.name,gov:v.gov,leader:l?l.name:null,leadTraits:l?l.traits:null,members:villageMembers(v).length,unrest:+(v.unrest||0).toFixed(2),gates:v.gates?v.gates.size:0,wallDone:!!v.wallDone};}),
   forceCouncil:()=>{for(const v of villages)holdCouncil(v);return villages.length},
   forceSchism:()=>{for(const v of villages){const m=villageMembers(v);if(m.length>=6){const lead=allById.get(v.leader);const diss=m.filter(p=>p!==lead).sort((a,b)=>leadership(b)-leadership(a));if(diss.length>=3){schism(v,diss[0],diss);return v.name}}}return null},
