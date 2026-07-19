@@ -4670,6 +4670,8 @@ function doTask(p,dt){
     p.task=null;
    }else if(t.why==='sleep'){
     p.sleeping=true;p.task=null;
+    // step inside to sleep: they leave the overworld and turn up in the interior
+    if(p.home&&!p.home.gone&&ENTER_TP[p.home.tp]&&bsolid(p.home))p.inside=p.home;
    }else p.task=null;
    break;
   }
@@ -5402,7 +5404,7 @@ function renderQuests(){
 }
 function die(p,cause){
  if(p.dead)return;
- p.dead=true;p.task=null;p.path=null;p.sleeping=false;
+ p.dead=true;p.task=null;p.path=null;p.sleeping=false;p.inside=null;
  const i=people.indexOf(p);if(i>=0)people.splice(i,1);
  const causeText={age:'passed away in their sleep, full of years',hunger:'succumbed to hunger, far from any table',doom:"answered the card that Death had dealt them",edited:'was quietly unwritten by the gardener’s hand',collapse:'was taken by a collapse'}[cause]||'passed beyond the hedge-light';
  const friends=knownRels(p).filter(([o,r])=>r.a>=30).length;
@@ -5593,11 +5595,13 @@ function updatePerson(p,dt){
  p.hunger=clamp(p.hunger+0.055*dt*(p.age<12?0.7:1),0,100);
  if(p.hp<100){const threatened=monsters.length&&nearestMonster(p,12*TILE);p.hp=clamp(p.hp+(threatened?0:0.05)*dt,0,100)}
  if(p.moving||p.working)p.animClock+=dt*0.12;
+ if(p.inside&&(p.inside.gone||p.inside.ruined))p.inside=null;   // their building fell while they slept
  if(p.sleeping){
   p.energy=clamp(p.energy+(p.home&&!p.home.gone?0.18:0.10)*dt,0,100);
   const t=tod();
-  if(p.energy>=99||(t>0.25&&t<0.85&&p.energy>62)){p.sleeping=false;p.thinkT=simMin+rf(1,4)}
- }else{
+  if(p.energy>=99||(t>0.25&&t<0.85&&p.energy>62)){p.sleeping=false;p.inside=null;p.thinkT=simMin+rf(1,4)}   // waking steps them back outside
+ }else if(p.inside){p.inside=null}    // any non-sleeping indoor state ends: back to the overworld
+ else{
   p.energy=clamp(p.energy-0.075*dt,0,100);
   if(p.hermitUntil<simMin)p.socialN=clamp(p.socialN+0.055*dt,0,100);
  }
@@ -5749,7 +5753,7 @@ function departExpedition(exp){
  exp.endMin=simMin+Math.max(180,dur);
  for(const p of exp.members){
   if(p.dead)continue;
-  p.inDungeon=true;p.task=null;p.path=null;p.moving=false;p.sleeping=false;
+  p.inDungeon=true;p.task=null;p.path=null;p.moving=false;p.sleeping=false;p.inside=null;
   d.inside.add(p.id);
   emote(p,'🔦');
  }
@@ -5872,7 +5876,7 @@ function emote2(m,g){m.em={g,until:performance.now()+2000}}
 function nearestSettler(mx,my,filter){
  let best=null,bd=1e18;
  for(const p of people){
-  if(p.dead||p.inDungeon||(filter&&!filter(p)))continue;
+  if(p.dead||p.inDungeon||p.inside||(filter&&!filter(p)))continue;   // indoors is safe from the dark
   const d=dist2(mx,my,p.x,p.y);
   if(d<bd){bd=d;best=p}
  }
@@ -8626,8 +8630,9 @@ function draw(t){
   ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,s.range,a0,a1);ctx.closePath();ctx.fill();
   ctx.restore();ctx.globalAlpha=1;
  }
- // people + the Sage, painter-sorted together
- const ppl=people.filter(p=>!p.inDungeon);
+ // people + the Sage, painter-sorted together — folk who've stepped inside a
+ // building are off the overworld entirely (you'll find them in its interior)
+ const ppl=people.filter(p=>!p.inDungeon&&!p.inside);
  const drawables=ppl.map(p=>({y:p.y,f:()=>{
   ctx.save();ctx.translate(p.x,p.y);
   if(p===selected){
@@ -8938,23 +8943,14 @@ function makeInterior(b){
  // the central corridor is kept clear no matter what furniture landed on it, so
  // every room stays reachable from the door
  if(mega)for(let y=1;y<gh-1;y++){solid[si(dcx,y)]=0;solid[si(dcx-1,y)]=0;}
- // continuity: show occupants actually AT the building in the overworld (standing on/
- // adjacent to its footprint), so the inside matches what you saw outside. Big civic
- // buildings pull in nearby townsfolk as workers/visitors so they aren't deserted.
- const atHome=o=>{ const tx=(o.x/TILE)|0,ty=(o.y/TILE)|0;
-   return tx>=b.x-1&&tx<b.x+b.w+1&&ty>=b.y-1&&ty<b.y+b.h+1; };
- // a building's own residents are always in (it's their home); prefer to place those
- // actually standing at the footprint, but never leave a lived-in home deserted
- const residents=(b.owners||[]).map(id=>allById.get(id)).filter(o=>o&&!o.dead&&o.sprite);
- const here=residents.filter(atHome);
- let occSrc=here.length?here:residents;
- if(mega&&occSrc.length<2){
-  for(const o of people){ if(o.dead||!o.sprite||o.inDungeon||o.age<8||occSrc.includes(o))continue; if(atHome(o))occSrc.push(o); }
- }
+ // occupants are EXACTLY the folk currently inside this building — the same souls
+ // who stepped off the overworld to sleep here. Empty if nobody's home, so the
+ // inside always matches the streets outside.
+ const occSrc=people.filter(o=>o.inside===b&&!o.dead);
  const cap=mega?(b.tp==='arcology'?6:4):3;
  for(const o of occSrc.slice(0,cap)){
   const s=freeSpotInt(intr,rng);
-  intr.occupants.push({pid:o.id,name:o.name,sprite:o.sprite,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,
+  intr.occupants.push({pid:o.id,name:o.name,sprite:o.sprite||null,col:o.col,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,
     tx:0,ty:0,dir:0,animClock:0,wait:rng()*2.5,moving:false});
  }
  return intr;
@@ -9165,7 +9161,11 @@ function drawInterior(t){
  for(const o of intr.occupants)ds.push({y:o.y,f:()=>{
   ctx.save();ctx.translate(o.x,o.y);
   ctx.fillStyle='rgba(0,0,0,0.3)';ctx.beginPath();ctx.ellipse(0,1,5,2,0,0,7);ctx.fill();
-  CFHelp.drawCreatureSprite(ctx,o.sprite,0,3,o.dir,'walk',o.moving?o.animClock:0);
+  if(o.sprite)CFHelp.drawCreatureSprite(ctx,o.sprite,0,3,o.dir,'walk',o.moving?o.animClock:0);
+  else{ // sprite not baked yet — a simple painted stand-in so they're never invisible
+   ctx.fillStyle=o.col||'#b48a5a';ctx.beginPath();ctx.ellipse(0,-3,3.4,4.4,0,0,7);ctx.fill();
+   ctx.fillStyle='#e8d0b0';ctx.beginPath();ctx.arc(0,-8,2.2,0,7);ctx.fill();
+  }
   ctx.restore();
  }});
  ds.push({y:hero.y,f:()=>drawHero(t)});
@@ -9464,7 +9464,7 @@ function updateContextButtons(){
  if(!hero.down&&!inDialog&&speedIdx<=1){
   let bd=44*44;
   for(const p of people){
-   if(p.dead||p.inDungeon||p.age<8)continue;
+   if(p.dead||p.inDungeon||p.inside||p.age<8)continue;
    const d=dist2(p.x,p.y,hero.x,hero.y);
    if(d<bd){bd=d;talkTarget=p}
   }
