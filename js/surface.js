@@ -1497,6 +1497,37 @@ function nearestMonster(p,range){
  for(const m of monsters){const d=dist2(p.x,p.y,m.x,m.y);if(d<bd){bd=d;best=m}}
  return best;
 }
+// when the world seals someone into a pocket cut off from their town — a wall
+// closed behind them, fresh rubble, a tightening claim — they take up the pick and
+// tunnel their own way out rather than pacing a dead end forever
+function digOutIfStuck(p){
+ if(p.age<12||(p.task&&p.task.k==='digout'))return false;
+ if(!p.vid&&(!p.home||p.home.gone))return false;
+ if(regionsDirty)computeRegions();
+ const px=(p.x/TILE)|0,py=(p.y/TILE)|0,myr=region[idx(px,py)];
+ if(myr<0)return false;
+ // the tile they ought to be able to reach: their town's heart, else their door
+ let gx,gy;
+ if(p.vid){const v=villages.find(vv=>vv.id===p.vid);if(v){const s=nearOpen(Math.round(v.cx),Math.round(v.cy));if(s){gx=s[0];gy=s[1]}}}
+ if(gx==null&&p.home&&!p.home.gone){const h=homeTile(p.home),s=nearOpen(h[0],h[1]);if(s){gx=s[0];gy=s[1]}}
+ if(gx==null||region[idx(gx,gy)]===myr)return false;    // no goal, or already connected — not boxed in
+ // the nearest diggable tile bounding this pocket that heads toward the goal
+ let best=null,bd=1e18;
+ for(let ry=-7;ry<=7;ry++)for(let rx=-7;rx<=7;rx++){
+  const x=px+rx,y=py+ry;
+  if(!digBreakable(x,y))continue;
+  // need an open tile in MY pocket to stand on while I work the face
+  let stand=false;
+  for(const[ax,ay]of[[x-1,y],[x+1,y],[x,y-1],[x,y+1]])
+   if(inB(ax,ay)&&walkable(ax,ay)&&region[idx(ax,ay)]===myr){stand=true;break}
+  if(!stand)continue;
+  const d=dist2(x,y,gx,gy);
+  if(d<bd){bd=d;best=[x,y]}
+ }
+ if(!best)return false;
+ setTask(p,'digout',{tx:best[0],ty:best[1]});
+ return true;
+}
 function think(p){
  const st=stageOf(p);
  const nearM=monsters.length?nearestMonster(p,9*TILE):null;
@@ -1515,6 +1546,8 @@ function think(p){
   if(dist2(p.x,p.y,tx*TILE,ty*TILE)<(5*TILE)**2||!walkable(tx,ty)){ p.migrate=null; }
   else { setTask(p,'migrate',{}); if(!goTo(p,tx,ty)){ p.migrate=null; } p.thinkT=simMin+rf(6,16); return; }
  }
+ // boxed in? tunnel out before anything else — a dead-ended villager fixes it themself
+ if(!p.sleeping&&digOutIfStuck(p)){p.thinkT=simMin+rf(4,10);return}
  // a festival is on in their town: idle adults drift to the plaza to celebrate
  if(p.age>=16&&p.vid&&!p.sleeping){
   const fv=villages.find(v=>v.id===p.vid&&v.festival);
@@ -1807,6 +1840,33 @@ function doTask(p,dt){
    if(t.h>=(j.type==='wall'||j.type==='pave'||j.type==='tidywall'||j.type==='weed'?6:12)){doVillageJob(p,v,j);p.task=null}
    break;
   }
+  case 'digout':{
+   const tx=t.tx,ty=t.ty;
+   if(!digBreakable(tx,ty)){p.task=null;break}          // opened already (by them, a neighbour, or the Sage)
+   if(dist2(p.x,p.y,tx*TILE+TILE/2,ty*TILE+TILE/2)>(1.7*TILE)**2){
+    if(!p.path&&!t.pathed){
+     t.pathed=true;
+     const spx=(p.x/TILE)|0,spy=(p.y/TILE)|0;
+     let go=null;
+     for(const[ax,ay]of[[tx-1,ty],[tx+1,ty],[tx,ty-1],[tx,ty+1]])
+      if(walkable(ax,ay)&&reachable(spx,spy,ax,ay)){go=[ax,ay];break}
+     if(!go||!goTo(p,go[0],go[1])){p.task=null;break}
+    }
+    if(p.path){if(moveAlong(p,dt))t.pathed=false;break}
+    p.task=null;break;
+   }
+   p.working=true;p.moving=false;
+   t.h=(t.h||0)+dt;
+   if(chance(dt*0.05))emote(p,'⛏');
+   if(t.h>=10){
+    const i=idx(tx,ty),s=struct[i],v=p.vid?villages.find(vv=>vv.id===p.vid):null;
+    if(s===S_ROCK)unearthRock(tx,ty,{p,v});
+    else{ if(bld[i]>=0)bld[i]=-1; carveFloor(tx,ty); p.inv.stone++; if(v)v.stock.stone++; }
+    if(chance(.4))tale([p],p.name+' dug free through the '+(s===S_WALL?'hedge-wall':s===S_RUIN?'old rubble':'rock')+', breaking back out into the open.');
+    p.task=null;
+   }
+   break;
+  }
   default:p.task=null;
  }
 }
@@ -1931,6 +1991,39 @@ function unearthRock(x,y,agent){
   if(agent&&agent.hero)heroStone+=1;
  }
  return stone;
+}
+// the Sage can smash through the hedge-walls villages raise AND the rubble of
+// fallen buildings, so a player hemmed in by stone is never permanently boxed in.
+// Walls give quickly; old rubble is tougher. Both bank damage in rockDmg[].
+const WALL_HARD=16, RUIN_HARD=32;
+function heroBashable(x,y){
+ if(!inB(x,y))return false;
+ const i=idx(x,y),s=struct[i];
+ return (s===S_WALL||s===S_RUIN)&&!nodeAt.has(i)&&!dungeonAt(x,y);
+}
+function bashStruct(x,y,power,agent){
+ if(!heroBashable(x,y))return false;
+ const i=idx(x,y),wall=struct[i]===S_WALL,col=wall?'#7f9152':'#8b7d70';
+ rockDmg[i]+=power;
+ spawnDebris(x*TILE+TILE/2,y*TILE+TILE/2,4,col,0.6);
+ if(rockDmg[i]>=(wall?WALL_HARD:RUIN_HARD)){
+  spawnDebris(x*TILE+TILE/2,y*TILE+TILE/2,14,col,1.3);
+  if(bld[i]>=0)bld[i]=-1;              // fully reclaim a ruined-building tile
+  carveFloor(x,y);rockDmg[i]=0;
+  if(agent&&agent.hero)heroStone+=wall?1:2;   // salvaged hedge-stone / rubble
+  return true;
+ }
+ return false;
+}
+// a solid tile an NPC may tunnel through to free itself or mine: raw rock, a
+// hedge-wall, or building rubble — never a live building, node, or dungeon mouth
+function digBreakable(x,y){
+ if(!inB(x,y))return false;
+ const i=idx(x,y);
+ if(map[i]===0||dungeonAt(x,y)||nodeAt.has(i))return false;
+ const s=struct[i];
+ if(s===S_ROCK)return bld[i]<0;
+ return s===S_WALL||s===S_RUIN;
 }
 // ---- debris particles ----
 function spawnDebris(px,py,n,col,scale){
@@ -3656,11 +3749,22 @@ function planVillage(v){
    if(unwanted){ v.jobs.push({type:'weed',x,y}); if(++added>=5)break weedscan; }
   }
  }
- if(v.jobs.filter(j=>j.type==='mine').length<4){
-  for(let tries=0;tries<18;tries++){
-   const x=ri(cl.x0+WALL_THICK,cl.x1-WALL_THICK),y=ri(cl.y0+WALL_THICK,cl.y1-WALL_THICK),i=idx(x,y);
-   if(!walkable(x,y)&&struct[i]!==S_WALL&&struct[i]!==S_HOUSE&&struct[i]!==S_RUIN&&bld[i]<0&&!nodeAt.has(i)&&!dungeonAt(x,y)){v.jobs.push({type:'mine',x,y});break}
+ // --- prospecting: the town hungers for stone & the treasure buried in the rock,
+ //     so folk are forever tunnelling into the surrounding highland. Bias toward the
+ //     FRONTIER (rock already touching open ground) so the diggings read as real
+ //     tunnels eating outward from town, and reach a ring beyond the walls. ---
+ if(v.jobs.filter(j=>j.type==='mine').length<6){
+  const M=6, mx0=cl.x0-M,my0=cl.y0-M,mx1=cl.x1+M,my1=cl.y1+M;
+  const frontier=[],deep=[];
+  for(let y=my0;y<=my1;y++)for(let x=mx0;x<=mx1;x++){
+   const i=inB(x,y)?idx(x,y):-1; if(i<0)continue;
+   if(walkable(x,y)||struct[i]!==S_ROCK||bld[i]>=0||nodeAt.has(i)||dungeonAt(x,y))continue;
+   if(v.jobs.some(j=>j.x===x&&j.y===y))continue;
+   const open=walkable(x-1,y)||walkable(x+1,y)||walkable(x,y-1)||walkable(x,y+1);
+   (open?frontier:deep).push([x,y]);
   }
+  const pool=frontier.length?shuffle(frontier):deep;   // prefer the tunnel mouth
+  for(let k=0;k<pool.length&&v.jobs.filter(j=>j.type==='mine').length<6;k++)v.jobs.push({type:'mine',x:pool[k][0],y:pool[k][1]});
  }
  // --- tidy the settlement: clear loose rock in a ring around the claim, and
  //     pull down stray/isolated stubs of hedge-wall left over from old plans ---
@@ -6118,17 +6222,20 @@ function updateHero(rdt){
      }
     }
    }
-   // slashes vs bramble-rock: the Sage mines the terrain, chipping tiles in the arc
+   // slashes vs terrain: the Sage cuts through bramble-rock, hedge-walls AND old
+   // rubble alike — so nothing a village raises (or leaves in ruin) can pen the player in
    const rr=Math.ceil((s.range+8)/TILE), htx=(hero.x/TILE)|0, hty=(hero.y/TILE)|0;
    for(let dyt=-rr;dyt<=rr;dyt++)for(let dxt=-rr;dxt<=rr;dxt++){
     const x=htx+dxt,y=hty+dyt; if(x<0||y<0||x>=W||y>=H)continue;
-    if(!mineable(x,y))continue;
+    const canMine=mineable(x,y), canBash=!canMine&&heroBashable(x,y);
+    if(!canMine&&!canBash)continue;
     const cx=x*TILE+TILE/2,cy=y*TILE+TILE/2,ddx=cx-hero.x,ddy=cy-hero.y;
     if(Math.hypot(ddx,ddy)>=s.range+8)continue;
     let da=Math.atan2(ddy,ddx)-s.ang; da=Math.atan2(Math.sin(da),Math.cos(da));
     if(Math.abs(da)>s.arc/2)continue;
     const key='r'+idx(x,y); if(s.hit.has(key))continue; s.hit.add(key);
-    mineTile(x,y,s.dmg,{hero:true});
+    if(canMine)mineTile(x,y,s.dmg,{hero:true});
+    else bashStruct(x,y,s.dmg,{hero:true});
    }
   }
  }
@@ -7670,6 +7777,8 @@ return {
   tileState:(x,y)=>({map:map[idx(x,y)],struct:struct[idx(x,y)],rock:map[idx(x,y)]!==0&&struct[idx(x,y)]===S_ROCK}),
   carveAt:(x,y)=>{if(walkable(x,y))return false;carveFloor(x,y);return true},
   mineAt:(x,y,power)=>mineTile(x,y,power||999,{hero:true}),
+  bashAt:(x,y,power)=>bashStruct(x,y,power||999,{hero:true}),
+  setTile:(x,y,kind)=>{ if(kind==='wall')setSolid(x,y,S_WALL); else if(kind==='ruin')setSolid(x,y,S_RUIN); else if(kind==='rock')revertTile(x,y); else carveFloor(x,y); regionsDirty=true; return struct[idx(x,y)]; },
   governance:()=>villages.map(v=>{const l=allById.get(v.leader);return{name:v.name,gov:v.gov,leader:l?l.name:null,leadTraits:l?l.traits:null,members:villageMembers(v).length,unrest:+(v.unrest||0).toFixed(2),gates:v.gates?v.gates.size:0,wallDone:!!v.wallDone};}),
   forceCouncil:()=>{for(const v of villages)holdCouncil(v);return villages.length},
   forceSchism:()=>{for(const v of villages){const m=villageMembers(v);if(m.length>=6){const lead=allById.get(v.leader);const diss=m.filter(p=>p!==lead).sort((a,b)=>leadership(b)-leadership(a));if(diss.length>=3){schism(v,diss[0],diss);return v.name}}}return null},
