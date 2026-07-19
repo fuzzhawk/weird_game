@@ -68,9 +68,22 @@ const FARM_RIPEN=1.4*DAY;
 const S_ROCK=0,S_HOUSE=1,S_WALL=2,S_RUIN=3,S_FLOOR=4;
 // monsters that crawl up out of the Understories
 const MONSTERS={
- grub:{n:"wire-root grub",g:"🐛",hp:24,dmg:4,spd:.82,col:'#8fa85a',cf:'slime',rare:0},
- lurker:{n:'chrome creeper',g:'🦂',hp:50,dmg:10,spd:.95,col:'#b0623a',cf:'wisp',rare:.4},
- horror:{n:'understory daemon',g:'👹',hp:100,dmg:18,spd:.8,col:'#a23a5a',cf:'brute',rare:.75}
+ grub:{n:"wire-root grub",g:"🐛",hp:24,dmg:4,spd:.82,col:'#8fa85a',cf:'slime',fam:'basic',hue:100,rare:0},
+ lurker:{n:'chrome creeper',g:'🦂',hp:50,dmg:10,spd:.95,col:'#b0623a',cf:'wisp',fam:'basic',hue:275,rare:.4},
+ horror:{n:'understory daemon',g:'👹',hp:100,dmg:18,spd:.8,col:'#a23a5a',cf:'brute',fam:'basic',hue:20,rare:.75},
+ // beasts prowling the wild reaches
+ crawler:{n:'thicket crawler',g:'🕷️',hp:38,dmg:7,spd:1.05,col:'#6f8a3e',cf:'crawler',fam:'beast',hue:95,rare:.28},
+ stalker:{n:'pale stalker',g:'🐆',hp:64,dmg:12,spd:1.16,col:'#8a7a5a',cf:'stalker',fam:'beast',hue:42,rare:.55},
+ brood:{n:'spore brood',g:'🐜',hp:30,dmg:6,spd:1.02,col:'#9a8a4a',cf:'brood',fam:'swarm',hue:70,rare:.34},
+ leviathan:{n:'root leviathan',g:'🐗',hp:150,dmg:23,spd:.72,col:'#5a6a3a',cf:'leviathan',fam:'beast',hue:110,rare:.85},
+ // cyber husks straying out of the abandoned arcologies
+ drone:{n:'scrap drone',g:'🛸',hp:44,dmg:9,spd:1.12,col:'#4a8ab0',cf:'drone',fam:'cyber',hue:200,rare:.44},
+ sentinel:{n:'rust sentinel',g:'🛡️',hp:82,dmg:14,spd:.86,col:'#5a7a9a',cf:'sentinel',fam:'cyber',hue:210,rare:.68},
+ chassis:{n:'derelict chassis',g:'⚙️',hp:126,dmg:21,spd:.68,col:'#6a8090',cf:'chassis',fam:'cyber',hue:190,rare:.82},
+ // ancient dead risen from the old ruins
+ husk:{n:'ashen husk',g:'💀',hp:48,dmg:10,spd:.9,col:'#7a6a5a',cf:'husk',fam:'ancient',hue:32,rare:.5},
+ wraith:{n:'grove wraith',g:'👻',hp:72,dmg:15,spd:1.03,col:'#6a5a7a',cf:'wraith',fam:'ancient',hue:280,rare:.72},
+ mossling:{n:'mossling',g:'🍃',hp:34,dmg:6,spd:.9,col:'#5a8a5a',cf:'mossling',fam:'ancient',hue:130,rare:.22}
 };
 
 /* ================= state ================= */
@@ -769,18 +782,28 @@ function ecologyTick(){
 
 /* ================= sprite baking (Creature Forge) ================= */
 let bakeQueue=[];                       // [{kind:'person'|'hero'|'mon', ...}]
-let surfMon={grub:null,lurker:null,horror:null};
+let surfMon={};
 function queuePersonBake(p){p.sprite=null;bakeQueue.push({kind:'person',p})}
 function queueHeroBake(){hero.sprite=null;bakeQueue.push({kind:'hero'})}
-function queueMonsterBakes(){surfMon={grub:null,lurker:null,horror:null};
- for(const t of ['grub','lurker','horror'])bakeQueue.push({kind:'mon',type:t});}
+function queueMonsterBakes(){surfMon={};
+ for(const t in MONSTERS){surfMon[t]=null;bakeQueue.push({kind:'mon',type:t});}}
+function monsterBakeSize(type){const hp=MONSTERS[type].hp;return hp>=120?56:hp>=64?52:48;}
 function surfMonsterParams(type){
+ const M=MONSTERS[type];
  const mrng=CF.mulberry32(U.hashStr(seed+'/mon/'+type+'/'+floraSeed)^0xBEA5);
- const arch=CFHelp.ARCHETYPES[MONSTERS[type].cf](mrng);
- const hueBase={grub:100,lurker:275,horror:20}[type];
+ const arch=CFHelp.ARCHETYPES[M.cf](mrng);
+ const hueBase=(M.hue!=null?M.hue:100);
+ const fam=M.fam||'basic';
+ // family-tinted palette: cyber reads as cold metal, ancient as faded bone/moss, beasts earthier
+ let sat=30+mrng()*24, lit=46+mrng()*12, metalHue=210;
+ if(fam==='cyber'){sat=16+mrng()*16;lit=52+mrng()*10;metalHue=Math.round(hueBase);}
+ else if(fam==='ancient'){sat=20+mrng()*18;lit=38+mrng()*10;}
+ else if(fam==='beast'){sat=34+mrng()*22;lit=44+mrng()*12;}
+ else if(fam==='swarm'){sat=32+mrng()*20;lit=48+mrng()*10;}
+ else if(type==='horror'){lit=36+mrng()*8;}
  return {...arch,
-  hue:Math.round(hueBase+mrng()*40-20),sat:Math.round(30+mrng()*24),lit:Math.round(type==='horror'?36+mrng()*8:46+mrng()*12),
-  hue2:Math.round(hueBase+30),accent:Math.round((hueBase+180)%360),
+  hue:Math.round(hueBase+mrng()*40-20),sat:Math.round(sat),lit:Math.round(lit),
+  hue2:Math.round(hueBase+30),accent:Math.round((hueBase+180)%360),metalHue,
   seed:seed+'-'+type+'-'+floraSeed};
 }
 function processBakeQueue(){
@@ -801,8 +824,7 @@ function processBakeQueue(){
     seed:Hero.lookSeed};
    hero.sprite=CFHelp.bakeCreature(params,48);
   }else if(job.kind==='mon'){
-   const sizes={grub:48,lurker:48,horror:48};
-   surfMon[job.type]=CFHelp.bakeCreature(surfMonsterParams(job.type),sizes[job.type],['walk','attack']);
+   surfMon[job.type]=CFHelp.bakeCreature(surfMonsterParams(job.type),monsterBakeSize(job.type),['walk','attack']);
   }else if(job.kind==='animal'){
    const a=job.a;if(a.dead)return;
    a.sprite=AF.bake(a.made.params,48,['walk','attack']);   // four-legged quad rig
@@ -2933,12 +2955,26 @@ function processExpeditions(){
 
 /* ================= monsters (mostly peaceful surface — occasional risers) ================= */
 function monsterCap(){return Math.max(0,Math.round(Math.min(16,3+((people.length/3)|0))*wpMul('monsters')))}   // the dark presses harder now
+// pick an ambient monster weighted by the site's danger: tougher/rarer kinds
+// only surface once danger climbs toward their gate, and grow likelier past it.
+function pickMonsterType(d){
+ const danger=(d&&d.danger)||0;
+ const entries=[];let total=0;
+ for(const k in MONSTERS){
+  const M=MONSTERS[k];
+  if(danger+0.12 < M.rare)continue;            // still too dangerous a place for this one
+  let w = 1 + danger*(1+M.rare*4);             // rarer kinds swell as the dark deepens
+  if(M.rare===0) w += (1-danger)*2.2;          // grubs keep the low end busy
+  entries.push([k,w]);total+=w;
+ }
+ if(!entries.length)return 'grub';
+ let r=R()*total;
+ for(const e of entries){r-=e[1];if(r<=0)return e[0];}
+ return entries[0][0];
+}
 function spawnMonster(d,at){
  if(monsters.length>=monsterCap()||peaceful||(d&&d.cleansed))return;
- const r=R();
- let type='grub';
- if(r<d.danger*0.35)type='horror';
- else if(r<0.25+d.danger*0.4)type='lurker';
+ const type=pickMonsterType(d);
  const M=MONSTERS[type];
  const s=at?nearOpen(at[0],at[1]):nearOpen(d.x,d.y);if(!s)return;
  const m={id:nextId++,type,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,fx:1,dirIdx:0,animClock:R()*4,
@@ -6154,14 +6190,18 @@ function makeInterior(b){
  bakeInteriorBg(intr);
  return intr;
 }
+// only the STRUCTURAL walls block movement (the visible rock border + partitions);
+// furniture is decorative, so the player never hits an invisible barrier on an
+// open-looking floor tile
 function intCanStand(x,y){
  const intr=interior;if(!intr)return false;
  const tx=(x/TILE)|0,ty=(y/TILE)|0;
  if(tx<0||ty<0||tx>=intr.gw||ty>=intr.gh)return false;
- return intr.solid[intr.si(tx,ty)]===0;
+ const blk=intr.wallMask||intr.solid;
+ return blk[intr.si(tx,ty)]===0;
 }
 function intHeroCanStand(x,y){
- const r=4.5;
+ const r=2.2;   // a slim clearance so the walls read but corridors stay easy to walk
  if(!intCanStand(x,y))return false;
  for(let i=0;i<4;i++){const a=i*Math.PI/2+Math.PI/4;if(!intCanStand(x+Math.cos(a)*r,y+Math.sin(a)*r))return false}
  return true;
@@ -8361,6 +8401,15 @@ return {
   intState:()=>interior?{decay:interior.decay||0,foes:interior.foes?interior.foes.length:0,traps:interior.traps?interior.traps.length:0,loot:interior.loot?interior.loot.length:0,hp:Hero.hp,down:!!hero.down,gold:heroGold,gems:heroGems}:null,
   intFoes:()=>interior&&interior.foes?interior.foes.map(f=>({x:(f.x/TILE)|0,y:(f.y/TILE)|0,hp:f.hp,arch:f.arch,hasSprite:!!f.sprite})):null,
   warpInt:(tx,ty)=>{if(!interior)return null;hero.x=tx*TILE+TILE/2;hero.y=ty*TILE+TILE/2;return {x:(hero.x/TILE)|0,y:(hero.y/TILE)|0};},
+  intWalk:()=>{ // TEST: how many open (non-wall) interior cells the hero can actually stand on
+   if(!interior)return null;const intr=interior;let wall=0,furn=0,openCells=0,standable=0;
+   for(let y=0;y<intr.gh;y++)for(let x=0;x<intr.gw;x++){
+    const i=intr.si(x,y),isWall=intr.wallMask[i]===1,isSolid=intr.solid[i]===1;
+    if(isWall)wall++; else if(isSolid)furn++;
+    if(!isWall){openCells++;const ox=hero.x,oy=hero.y;hero.x=x*TILE+TILE/2;hero.y=y*TILE+TILE/2;if(intHeroCanStand(hero.x,hero.y))standable++;hero.x=ox;hero.y=oy;}
+   }
+   return {wall,furniture:furn,openCells,standable,reachPct:openCells?Math.round(standable/openCells*100):0};
+  },
   decayedBuildings:()=>buildings.filter(b=>!b.gone&&b.decay).map(b=>({id:b.id,tp:b.tp,decay:b.decay})),
   decayStage:(id)=>{const b=buildings.find(x=>x.id===id);return b?(b.decay||0):null;},
   collapseBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;ruinBuilding(b);return {decay:b.decay||0,ruined:!!b.ruined};},
