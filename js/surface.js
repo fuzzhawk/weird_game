@@ -7845,7 +7845,12 @@ function activateChapter(){
  else if(ch.k==='feud'){ ch.stage=0; const a=allById.get(ch.aId); if(!a||a.dead){const g=genFeud(campaign.history);if(g)Object.assign(ch,g);} const A=allById.get(ch.aId); if(A){ch.mark=[(A.x/TILE)|0,(A.y/TILE)|0];emote(A,'💢');} else { advanceChapter(); return; } }
  else if(ch.k==='bloom'){ ch.mark=[ch.spot[0],ch.spot[1]]; }
  else if(ch.k==='hunt'||ch.k==='guard'){ ch.packN=Math.min(10,2+diff); ch._pack=spawnHuntPack(ch.spot[0],ch.spot[1],ch.packN); if(!ch._pack.length){ ch.k='reach'; ch.place={x:ch.spot[0],y:ch.spot[1],name:ch.loc||ch.bName||'the place'}; ch.mark=[ch.spot[0],ch.spot[1]]; } else ch.mark=[ch.spot[0],ch.spot[1]]; }
- else if(ch.k==='dungeon'){ let d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed); if(!d)d=pickStoryDungeon(); if(d){ch.dungeonId=d.id;ch.dunName=d.name;ch.mark=[d.x,d.y];ch._descended=false;} else { advanceChapter(); return; } }
+ else if(ch.k==='dungeon'){ let d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed); if(!d)d=pickStoryDungeon(); if(d){ch.dungeonId=d.id;ch.dunName=d.name;ch.mark=[d.x,d.y];ch._descended=false;ch._cleansed=false;
+   // hand the objective down into the dungeon: the overworld quest is fulfilled by
+   // reaching its deepest floor and putting the heart to rest (which cleanses it)
+   for(const dd of dungeons)dd.storyObjective=null;
+   d.storyObjective={label:'Wound '+((campaign&&campaign.villain)||'the enemy'), chapterIdx:campaign.idx, dungeonId:d.id};
+  } else { advanceChapter(); return; } }
  else if(ch.k==='gather'){ ch.need=Math.min(48,6+diff*3); ch.slayBase=heroStone; }
  else if(ch.k==='escort'){ ch.stage=0; const p=allById.get(ch.targetId); if(!p||p.dead){const g=genEscort(campaign.history);if(g)Object.assign(ch,g);} const P=allById.get(ch.targetId); if(P){ch.mark=[(P.x/TILE)|0,(P.y/TILE)|0];emote(P,'🆘');} else { advanceChapter(); return; } }
  else if(ch.k==='beast'){ ch._beast=spawnBeast(ch.beastName,ch.spot); if(!ch._beast){ advanceChapter(); return; } ch.mark=[(ch._beast.x/TILE)|0,(ch._beast.y/TILE)|0]; }
@@ -7915,7 +7920,7 @@ function campaignTick(dt){
  else if(ch.k==='bloom'){ if(ch.mark&&dist2(hero.x,hero.y,ch.mark[0]*TILE+TILE/2,ch.mark[1]*TILE+TILE/2)<(2.8*TILE)**2){ bloomGroveAt(ch.mark[0],ch.mark[1]); toast('🌱 The green rushes back into the barren ground.'); done=true; } }
  else if(ch.k==='hunt'||ch.k==='guard'){ let alive=0; for(const m of ch._pack)if(monsters.indexOf(m)>=0)alive++; ch.prog=ch.packN-alive; if(alive===0)done=true; }
  else if(ch.k==='gather'){ ch.prog=Math.max(0,heroStone-ch.slayBase); if(ch.prog>=ch.need)done=true; }
- else if(ch.k==='dungeon'){ if(ch._descended)done=true; }
+ else if(ch.k==='dungeon'){ const td=dungeons.find(x=>x.id===ch.dungeonId); if(ch._cleansed||(td&&td.cleansed))done=true; }
  else if(ch.k==='escort'){
   const p=allById.get(ch.targetId);
   if(!p||p.dead){ toast('You lost the one you meant to guide.'); done=true; }
@@ -8149,7 +8154,9 @@ function returnFromDungeon(results){
   toast('🦾 augments installed: '+augs.length);
  }
  if(results.cleansed&&d&&!d.cleansed){
-  d.cleansed=true;d.danger=0.1;
+  d.cleansed=true;d.danger=0.1;d.storyObjective=null;
+  // a story dungeon put to rest advances the campaign chapter
+  if(campaign&&!campaign.done){const ch=campaign.chapters[campaign.idx];if(ch&&ch.k==='dungeon'&&ch.dungeonId===d.id)ch._cleansed=true;}
   Hero.cleansed++;Hero.maxHp++;Hero.hp=Hero.maxHp;
   tale([],'⭐ '+d.name+' has been put to rest. The Sage refuted its final argument, and the ground over it grows sweet. The garden will sleep easier.',true);
   toast('⭐ '+d.name+' put to rest · +1 max ♥');
