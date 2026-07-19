@@ -50,6 +50,18 @@ const diskCache = {};
 function applyWorldPalette(seedStr){
   const rng = mulberry32(hashSeed(seedStr)^0xC0FFEE);
   T.seed = 1000 + Math.floor(rng()*900000);
+  // BORROW THE SURFACE: the Understory now renders in the very same ground & rock
+  // palette + texture style as the world above, so it's drawn by the same graphics
+  // (was: its own dim, "drowned meadow" palette derived per floor).
+  const skin = (typeof Surface!=='undefined' && Surface.skin) ? Surface.skin() : null;
+  if(skin && skin.grass && skin.dirt){
+    T.grassColor = skin.grass;
+    T.dirtColor  = skin.dirt;
+    T.style = TileGen.deriveStyle(skin.styleSeed || seedStr);
+    T.borrowedSkin = true;
+    renderTileset();
+    return;
+  }
   const hue = rng();
   const grassS = 0.16+rng()*0.22, grassL = 0.20+rng()*0.11;   // drowned meadow
   T.grassColor = hslToHex(hue, grassS, grassL);
@@ -58,6 +70,7 @@ function applyWorldPalette(seedStr){
   // each floor gets its own TEXTURE STYLE (grain/density/treatment/edge), not
   // just a new hue — so regenerated floors read as genuinely different places
   T.style = TileGen.deriveStyle(seedStr);
+  T.borrowedSkin = false;
   renderTileset();
 }
 function diskOffsets(r){
@@ -1536,7 +1549,9 @@ function addLight(wx0,wy0,r,inten){
 // treasure, blooms and portals — for pools of light in the murk
 function drawLighting(){
   if(!lightImg) initLight();
-  const amb=0.13 - Math.min(0.06, floorIdx*0.012);        // deeper floors are darker
+  // when the Understory borrows the surface skin it is lit like the surface too —
+  // near-daylight, only a soft falloff at the edges — so it reads as the same world.
+  const amb = T.borrowedSkin ? 0.9 : (0.13 - Math.min(0.06, floorIdx*0.012));   // deeper floors are darker
   lbuf.fill(amb<0.04?0.04:amb);
   addLight(player.x, player.y, 8.5*RES, 1.35);            // the Sage's lantern
   for(const e of enemies){
@@ -1551,7 +1566,7 @@ function drawLighting(){
   if(portalUp) addLight(portalUp.x,portalUp.y,2.6*RES,0.45);
   for(const n of npcs) addLight(n.x,n.y,3*RES,0.5);        // the Keeper keeps a light
   for(const s of structures){ const sx=(s.cx+s.w/2)*RES, sy=(s.cy+s.h/2)*RES; addLight(sx,sy,3.2*RES,0.45); }
-  const maxDark=0.9, data=lightImg.data;
+  const maxDark = T.borrowedSkin ? 0.5 : 0.9, data=lightImg.data;
   for(let i=0;i<COLS*ROWS;i++){ let dk=1-lbuf[i]; if(dk<0)dk=0; else if(dk>maxDark)dk=maxDark; data[i*4+3]=(dk*255)|0; }
   lightCtx.putImageData(lightImg,0,0);
   const sm=ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled=true;
@@ -1946,6 +1961,7 @@ return {
   // small debug/cheat surface — used by smoke tests and the curious
   debug:{
     get state(){return {questStage,questVariant,questKills,bloomsGot,floorIdx,cleansedRun,keeperName,final:isFinalFloor(),hasDown:!!portalDown}},
+    get skin(){return {borrowed:!!T.borrowedSkin, grass:T.grassColor, dirt:T.dirtColor}},
     get zoom(){return camZ}, set zoom(z){camZTarget=dclamp(z,ZMIN,ZMAX)},
     completeTask(){
       if(questStage!==1)return;
