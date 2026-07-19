@@ -747,13 +747,17 @@ const IDLE_LINES=[
   'I run nothing, and everything executes anyway. Troubling.',
 ];
 
-// the objective handed down from the overworld quest (falls back to a generic
-// "put it to rest" for a free-roam raid with no active story chapter)
-function objTitle(){
-  return (dInfo&&dInfo.ref&&dInfo.ref.storyObjective&&dInfo.ref.storyObjective.label)
-      || ('Put '+(dInfo?dInfo.name:'the Understory')+' to rest');
-}
+// a dungeon carries a QUEST only when the overworld quest system scripts one
+// (dInfo.ref.storyObjective). A free-roam descent has no quest at all — just a
+// raid: explore, fight, loot, leave.
+function hasObjective(){ return !!(dInfo && dInfo.ref && dInfo.ref.storyObjective && dInfo.ref.storyObjective.label); }
+function objTitle(){ return (hasObjective() && dInfo.ref.storyObjective.label) || ''; }
 function questLabel(){
+  if(!hasObjective()){
+    // no assigned quest — only navigation
+    return isFinalFloor() ? '◎ The deepest floor · ▲ take the way up to leave'
+                          : '▼ Raid the dark · ▲ way up to leave';
+  }
   if(isFinalFloor()){
     if(cleansedRun) return '⭐ '+objTitle()+' — take the way up ▲';
     if(boss)        return '☠ '+objTitle()+' — face the heart below';
@@ -816,16 +820,18 @@ function startFloor(){
   portalUp={x:us.x,y:us.y,t:Math.random()*6.28};
   portalDown=null;
   trees = trees.filter(t=>Math.hypot(t.x-portalUp.x,t.y-portalUp.y)>RES*1.5 && Math.hypot(t.x-player.x,t.y-player.y)>RES*1.5);
-  // the objective: on the deepest floor the heart (boss) waits; above it, the way
-  // down is open from the off, so the crawl is a straight descent to the bottom
-  if(isFinalFloor()) spawnBoss();
-  else spawnPortalDown(true);
+  // A SCRIPTED dungeon has an objective: the heart (boss) waits on the deepest
+  // floor. A free-roam raid has NO quest at all — no heart, just a way deeper on
+  // every floor (and the way up to leave whenever).
+  if(hasObjective() && isFinalFloor()) spawnBoss();
+  else if(!isFinalFloor()) spawnPortalDown(true);
+  // (free-roam final floor: no boss, no way down — it's simply the bottom)
   spawnTreasures();
   portalCd=1.5;
   spawnT=2.5;
   player.ifr=1.5;
   floater(player.x,player.y-24,floorName(),'#b08fff');
-  if(floorIdx===0) floater(player.x,player.y-40,objTitle().toUpperCase(),'#e8c065');
+  if(floorIdx===0 && hasObjective()) floater(player.x,player.y-40,objTitle().toUpperCase(),'#e8c065');
   updHud();
 }
 function spawnPortalDown(quiet){
@@ -1699,6 +1705,7 @@ function drawPortal(p,up){
   ctx.restore(); ctx.globalAlpha=1;
 }
 function compassTarget(){
+  if(!hasObjective()) return null;   // free-roam raid → no guide arrow, explore freely
   // the overworld objective, floor by floor: on the deepest floor point at the heart
   // (then the way up once it's put to rest); above it, point at the way down
   if(isFinalFloor()){
