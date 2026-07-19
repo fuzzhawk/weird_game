@@ -3037,6 +3037,9 @@ let onEnterDungeon=null;          // set by main.js
 let inDialog=false;
 const idx=(x,y)=>y*W+x;
 const inB=(x,y)=>x>=0&&y>=0&&x<W&&y<H;
+// the outskirts: the outer band of the map where Understory dungeon-mouths may open
+const OUTSKIRT_BAND=26;
+const isOutskirts=(x,y)=>Math.min(x,y,W-1-x,H-1-y)<=OUTSKIRT_BAND;
 const walkable=(x,y)=>inB(x,y)&&map[idx(x,y)]===0&&(!water||water[idx(x,y)]!==2);
 const cday=()=>Math.floor(simMin/DAY)+1;
 const tod=()=>(simMin%DAY)/DAY;
@@ -3833,11 +3836,14 @@ function genWorld(){
  }
  // Understory mouths — deep places far from the centre, against the bramble
  {
-  const cx=W/2,cy=H/2,want=ri(3,4);
+  const want=ri(3,4);
+  // dungeon-mouths only open on the OUTSKIRTS — the wild edges of the map, well away
+  // from where towns take root at the centre
   const cand=openTiles.filter(([x,y])=>{
    if(bld[idx(x,y)]>=0||nodeAt.has(idx(x,y)))return false;
+   if(!isOutskirts(x,y))return false;
    let wall=false;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&!walkable(x+dx,y+dy))wall=true;
-   return wall&&dist2(x,y,cx,cy)>34*34;
+   return wall;
   });
   shuffle(cand);
   const placed=[];
@@ -4282,42 +4288,43 @@ function makeAncientRuin(b){
 //   2 = ancient ruin: nature reclaiming it, but the rooms can still be walked
 //   3 = collapse: the floors pancake down into a heap of rubble (S_RUIN, sealed)
 function decayLabel(b){ return b.name||('the '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')); }
-function decayBuilding(b,stage){
+function decayBuilding(b,stage,quiet){
  if(!b||b.gone||b.tp==='grave')return;
- if(stage===1){
+ if(stage>=1){
   // dead but still standing: tiles stay solid (the tower doesn't vanish), owners cleared
-  b.ruined=true;b.ancient=true;b.decay=1;b.decaySince=simMin;b.emptySince=simMin;
+  b.ruined=true;b.ancient=true;b.decaySince=simMin;b.emptySince=simMin;
   for(const id of b.owners){const p=allById.get(id);if(p&&p.home===b)p.home=null}
   b.owners=[];
   if(b.tp==='biz'){const o=allById.get(b.builder);if(o&&o.business===b)o.business=null}
-  tale([],'The '+decayLabel(b)+' emptied out and went dark — its halls abandoned to flickering, gutted ruin. Something moves in the dead floors now.',true);
+ }
+ if(stage===1){
+  b.decay=1;
+  if(!quiet)tale([],'The '+decayLabel(b)+' emptied out and went dark — its halls abandoned to flickering, gutted ruin. Something moves in the dead floors now.',true);
  }else if(stage===2){
-  b.decay=2;b.decaySince=simMin;
-  tale([],'The wilds have found the abandoned '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')+' — vines through the shattered glass, moss over the wreck — though its rooms can still be walked.');
+  b.decay=2;
+  if(!quiet)tale([],'The wilds have found the abandoned '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')+' — vines through the shattered glass, moss over the wreck — though its rooms can still be walked.');
  }else if(stage===3){
-  b.decay=3;b.decaySince=simMin;
+  b.decay=3;
   for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++)if(bld[idx(x,y)]===b.i)setSolid(x,y,S_RUIN);
   if(interior&&interior.b===b)exitInterior();   // kick the player out if they were inside as it fell
-  tale([],'At last the old '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')+' gave way — its floors pancaking down into a heap of rubble.');
+  if(!quiet)tale([],'At last the old '+((BMETA[b.tp]&&BMETA[b.tp].label)||'tower')+' gave way — its floors pancaking down into a heap of rubble.');
  }
 }
-// a town whose people are all gone falls into ruin: its buildings become lasting
-// rubble and a raidable ruin-site opens at its heart (quests, the town's lost
-// treasure, and monsters that move into the empty streets)
+// a town whose people are all gone falls into ruin. Its LARGE buildings become
+// standing, enterable ruins (recently-derelict cyber shells or nature-reclaimed
+// ancient ones) — the playable crawl now lives inside them, not in a dungeon —
+// while its small dwellings tumble to rubble.
 function makeRuin(v){
  if(!v||cday()-v.founded<4)return null;                 // spare fledgling clusters
  const R2=((v.rad+6)*TILE)**2;
  const bs=buildings.filter(b=>!b.gone&&b.tp!=='grave'&&dist2(b.x*TILE,b.y*TILE,v.cx*TILE,v.cy*TILE)<R2);
  if(bs.length<3)return null;                             // too small to be a "city"
- for(const b of bs)makeAncientRuin(b);
- const c=nearOpen(Math.round(v.cx),Math.round(v.cy))||[Math.round(v.cx),Math.round(v.cy)];
- if(dungeonAt(c[0],c[1]))return null;
- const d=makeDungeon(c[0],c[1]);
- d.ruin=true; usedDun.delete(d.name); d.name='The Ruins of '+v.name;
- d.danger=rf(.3,.55); d.depth=ri(2,4); d.loot=rf(.95,1.3);
- for(let i=0;i<ri(1,3);i++)spawnMonster(d);              // something moves in
- tale([], v.name+' has fallen silent — its people gone, its lanes surrendered to the vines. Only the ruins remain, keeping the old town’s treasure… and something has moved into the empty streets.',true);
- return d;
+ for(const b of bs){
+  if(STAGED_TP[b.tp])decayBuilding(b,chance(.5)?1:2,true);   // a playable tower-ruin
+  else makeAncientRuin(b);                                    // small homes → rubble
+ }
+ tale([], v.name+' has fallen silent — its people gone, its lanes surrendered to the vines. Only the ruins remain now: gutted towers where the lights still flicker, and the wilds pouring in through the rest.',true);
+ return null;
 }
 // choose a fresh, open site for a new settlement, away from the old ruins
 function pickSettleSite(){
@@ -10325,25 +10332,43 @@ function seedHistory(){
 }
 // scatter the bones of towns that fell in the ages before — ruin-sites (with a
 // raidable dungeon and a scatter of rubble) that the campaign can hang lore on
+// helper: drop a finished, un-owned building of the given type at (x,y)
+function placeDoneBuilding(tp,x,y){
+ const[w,h]=SZ[tp];
+ const b={i:buildings.length,id:nextId++,tp,x,y,w,h,prog:NEED[tp],need:NEED[tp],done:true,gone:false,
+  owners:[],builder:null,forId:null,stock:{food:0,wood:0,stone:0},prosperity:0,sub:null,name:null,ref:null,emptySince:simMin,ruined:false,vid:null};
+ buildings.push(b);
+ for(let yy=b.y;yy<b.y+h;yy++)for(let xx=b.x;xx<b.x+w;xx++){bld[idx(xx,yy)]=b.i;setSolid(xx,yy,S_HOUSE);}
+ return b;
+}
+// the world remembers towers that fell before you came: it opens already dotted with
+// the RUINS OF LARGE BUILDINGS — some only recently abandoned (stage-1 cyber shells,
+// still lit by dying signs), some long ago (stage-2, nature reclaiming them). These
+// are standing, enterable, playable ruins — NOT dungeons.
 function seedAncientRuins(n){
+ const bigTypes=['apartment','warehouse','factory','highrise','arcology','venue'];
  for(let k=0;k<n;k++){
-  let s=null;
-  for(let t=0;t<36&&!s;t++){ const[x,y]=randOpenTile(); if(x<8||y<8||x>W-8||y>H-8)continue; if(dungeonAt(x,y)||nodeAt.has(idx(x,y)))continue;
-   let nearV=false; for(const v of villages)if(dist2(x,y,v.cx,v.cy)<(15*15)){nearV=true;break;} if(nearV)continue; s=[x,y]; }
-  if(!s)continue;
-  const d=makeDungeon(s[0],s[1]);
-  usedDun.delete(d.name); d.name='the Ruins of '+((Lore.active&&Lore.name(4,10))||pick(VIL_ADJ));
-  d.ruin=true; d.danger=rf(.35,.6); d.depth=ri(2,4); d.loot=rf(.9,1.3);
-  // the tumbled bones of the old town around the ruin-mouth
-  for(let i=0;i<ri(3,6);i++){
-   const tp=pick(['home','home','warehouse','apartment']); const[w,h]=SZ[tp];
-   const spot=findSpot(clamp(s[0]+ri(-4,4),2,W-3),clamp(s[1]+ri(-4,4),2,H-3),w,h,null); if(!spot)continue;
-   const b={i:buildings.length,id:nextId++,tp,x:spot[0],y:spot[1],w,h,prog:NEED[tp],need:NEED[tp],done:true,gone:false,
-    owners:[],builder:null,forId:null,stock:{food:0,wood:0,stone:0},prosperity:0,sub:null,name:null,ref:null,emptySince:simMin,ruined:false,vid:null};
-   buildings.push(b); for(let yy=b.y;yy<b.y+h;yy++)for(let xx=b.x;xx<b.x+w;xx++)bld[idx(xx,yy)]=b.i;
-   makeAncientRuin(b);
+  const stage = (k%2===0)?1:2;               // alternate so the world holds BOTH recent & ancient tower-ruins
+  const tp = pick(bigTypes), [w,h]=SZ[tp];
+  // an open plot away from any living town (findSpot reliably clears a footprint)
+  let spot=null;
+  for(let t=0;t<40&&!spot;t++){
+   const ax=ri(6,W-6), ay=ri(6,H-6);
+   if(villages.some(v=>dist2(ax,ay,v.cx,v.cy)<15*15))continue;
+   const s=findSpot(ax,ay,w,h,null);
+   if(s&&!villages.some(v=>dist2(s[0],s[1],v.cx,v.cy)<13*13))spot=s;
   }
-  if(chance(.6)){ for(let i=0;i<ri(1,2);i++)spawnMonster(d,[s[0],s[1]]); }   // things have moved in
+  if(!spot)continue;
+  const b=placeDoneBuilding(tp,spot[0],spot[1]);
+  decayBuilding(b,1,true);                    // recent-cyber (silent)
+  if(stage===2)decayBuilding(b,2,true);       // …weathered on into an ancient ruin
+  // a scatter of tumbled small homes around the fallen tower — the old district
+  for(let i=0;i<ri(1,3);i++){
+   const st=pick(['home','home','apartment']), [sw,sh]=SZ[st];
+   const sp=findSpot(clamp(spot[0]+ri(-5,5),2,W-3),clamp(spot[1]+ri(-5,5),2,H-3),sw,sh,null); if(!sp)continue;
+   const rb=placeDoneBuilding(st,sp[0],sp[1]);
+   makeAncientRuin(rb);                        // small dwellings just go to rubble
+  }
  }
 }
 function beginWarmup(days,onDone){
@@ -10408,7 +10433,7 @@ function endWarmup(){
  toast('⌛ '+yrs+' years have passed. You arrive in '+((v&&v.name)||'a weathered land')+'.','card');
  tale([],'And so, after '+yrs+' years of seasons, births, feuds and quiet triumphs, a wandering Sage crests the hills and walks down into the living world.',true);
  refreshChron();
- seedAncientRuins(ri(2,3));   // the world remembers towns that fell before you came
+ seedAncientRuins(ri(3,5));   // the world opens dotted with recent & ancient tower-ruins
  startCampaign();
  if(warmDone)warmDone();
 }
