@@ -5997,11 +5997,33 @@ function freeSpotInt(intr,rng){
  }
  return[1,1];
 }
-// a foe that prowls a ruined interior — a lighter cousin of the surface monsters
-function makeIntFoe(type,x,y){
- const M=MONSTERS[type]||MONSTERS.grub, hp=Math.max(6,Math.round(M.hp*0.55));
- return {type,x,y,tx:x,ty:y,hp,maxhp:hp,dmg:1,spd:14+M.spd*16,dir:0,animClock:R()*4,
-  atkCd:0,retarget:0,col:M.col,g:M.g,em:null};
+// baked-sprite cache for the themed interior foes (cyber constructs / ancient
+// revenants), keyed by Creature-Forge archetype
+let intFoeSprites={};
+const INTFOE_STAT={ drone:'grub',brood:'grub',mossling:'grub',crawler:'lurker',stalker:'lurker',
+  husk:'lurker',wraith:'lurker',sentinel:'horror',chassis:'horror',leviathan:'horror' };
+function intFoeSprite(arch){
+ if(arch in intFoeSprites)return intFoeSprites[arch];
+ let spr=null;
+ try{
+  const rng=U.mulberry32(U.hashStr('intfoe-'+arch));
+  const struct=CFHelp.ARCHETYPES[arch](rng);
+  const fam=CFHelp.ARCH_FAMILY[arch]||'basic';
+  const col = fam==='cyber' ? {hue:196,sat:56,lit:56,hue2:222,accent:26,hairHue:196,clothHue:200,metalHue:206}
+            : fam==='ancient'? {hue:108,sat:22,lit:40,hue2:78,accent:44,hairHue:108,clothHue:96,metalHue:120}
+            : {hue:0,sat:38,lit:48,hue2:20,accent:200};
+  const drawSize = (arch==='chassis'||arch==='leviathan')?56:44;
+  spr=CFHelp.bakeCreature({...struct,...col,seed:'intfoe-'+arch}, drawSize, ['walk','attack']);
+ }catch(e){ spr=null; }
+ intFoeSprites[arch]=spr; return spr;
+}
+// a foe that prowls a ruined interior — a lighter cousin of the surface monsters,
+// wearing a Creature-Forge sprite themed to the ruin (cyber vs ancient)
+function makeIntFoe(arch,x,y){
+ const statType=INTFOE_STAT[arch]||'grub', M=MONSTERS[statType]||MONSTERS.grub;
+ const hp=Math.max(6,Math.round(M.hp*0.55));
+ return {arch,type:statType,x,y,tx:x,ty:y,hp,maxhp:hp,dmg:1,spd:14+M.spd*16,dir:0,dirIdx:0,animClock:R()*4,
+  atkCd:0,retarget:0,col:M.col,g:M.g,em:null,sprite:intFoeSprite(arch)};
 }
 function makeInterior(b){
  // big civic buildings & towers open into deep, multi-room floors you can wander
@@ -6051,11 +6073,11 @@ function makeInterior(b){
   const nTrap=cyber?(4+((rng()*3)|0)):(2+((rng()*2)|0));
   for(let k=0;k<nTrap;k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2||(s[0]===dcx||s[0]===dcx-1))continue;
    intr.traps.push({x:s[0],y:s[1],kind:cyber?'spike':'thorn',ph:rng()*3,cd:0}); }
-  // things that have moved into the halls
-  const foeKinds = cyber?['lurker','horror','grub','lurker']:['grub','grub','lurker'];
+  // things that have moved into the halls — cyber constructs vs ancient revenants
+  const foePool = cyber?['drone','sentinel','chassis','stalker','drone']:['husk','wraith','mossling','crawler','mossling'];
   const nFoe=cyber?(2+((rng()*3)|0)):(1+((rng()*2)|0));
   for(let k=0;k<nFoe;k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2)continue;
-   intr.foes.push(makeIntFoe(rpick(foeKinds), s[0]*TILE+TILE/2, s[1]*TILE+TILE/2)); }
+   intr.foes.push(makeIntFoe(rpick(foePool), s[0]*TILE+TILE/2, s[1]*TILE+TILE/2)); }
   // loot spilled through the wreck to reward the crawl
   const nLoot=2+((rng()*3)|0);
   for(let k=0;k<nLoot;k++){ const s=freeSpotInt(intr,rng);
@@ -6403,13 +6425,17 @@ function drawFurniture(c,f){
 function drawIntFoe(c,f,t){
  const px=f.x,py=f.y;
  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
- c.drawImage(GLOW_RED,px-14,py-14,28,28);c.globalCompositeOperation=go;
+ c.drawImage(GLOW_RED,px-15,py-15,30,30);c.globalCompositeOperation=go;
  c.fillStyle='rgba(0,0,0,0.4)';c.beginPath();c.ellipse(px,py+2,7,3,0,0,7);c.fill();
- const bob=Math.sin(t*0.02+f.animClock)*1.2;
- c.fillStyle=f.col||'#a23a5a';c.beginPath();c.ellipse(px,py-3+bob,7,6,0,0,7);c.fill();
- c.fillStyle='#ffe14a';c.fillRect(px-3,py-5+bob,2,2);c.fillRect(px+1,py-5+bob,2,2);
- if(f.hp<f.maxhp){c.fillStyle='#1b1626';c.fillRect(px-8,py-15,16,2);c.fillStyle='#d24a5a';c.fillRect(px-8,py-15,16*clamp(f.hp/f.maxhp,0,1),2);}
- if(f.em&&f.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(f.em.g,px,py-18);}
+ if(f.sprite){
+  CFHelp.drawCreatureSprite(c,f.sprite,px,py+3,f.dir||0,(f.atkCd>0.72&&f.sprite.FRAMES.attack)?'attack':'walk',f.animClock);
+ }else{
+  const bob=Math.sin(t*0.02+f.animClock)*1.2;
+  c.fillStyle=f.col||'#a23a5a';c.beginPath();c.ellipse(px,py-3+bob,7,6,0,0,7);c.fill();
+  c.fillStyle='#ffe14a';c.fillRect(px-3,py-5+bob,2,2);c.fillRect(px+1,py-5+bob,2,2);
+ }
+ if(f.hp<f.maxhp){c.fillStyle='#1b1626';c.fillRect(px-9,py-18,18,2);c.fillStyle='#d24a5a';c.fillRect(px-9,py-18,18*clamp(f.hp/f.maxhp,0,1),2);}
+ if(f.em&&f.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(f.em.g,px,py-20);}
 }
 function drawInterior(t){
  const intr=interior;
@@ -8333,7 +8359,7 @@ return {
   forceArcology:()=>{const v=villages.find(x=>villageMembers(x).length)||villages[0];if(!v)return null;v.dev=Math.max(v.dev||0,4);v.stock.parts=(v.stock.parts||0)+COST.arcology.parts;const bp=villageMembers(v).find(p=>p.age>=16);if(!bp)return null;const ok=startBuild(bp,'arcology',null,v);if(ok){const b=buildings[buildings.length-1];b.prog=b.need;completeBuild(b);return b.id;}return null;},
   slash:(ang)=>{heroSlash(ang==null?hero.face||0:ang);return heroSlashes.length;},
   intState:()=>interior?{decay:interior.decay||0,foes:interior.foes?interior.foes.length:0,traps:interior.traps?interior.traps.length:0,loot:interior.loot?interior.loot.length:0,hp:Hero.hp,down:!!hero.down,gold:heroGold,gems:heroGems}:null,
-  intFoes:()=>interior&&interior.foes?interior.foes.map(f=>({x:(f.x/TILE)|0,y:(f.y/TILE)|0,hp:f.hp})):null,
+  intFoes:()=>interior&&interior.foes?interior.foes.map(f=>({x:(f.x/TILE)|0,y:(f.y/TILE)|0,hp:f.hp,arch:f.arch,hasSprite:!!f.sprite})):null,
   warpInt:(tx,ty)=>{if(!interior)return null;hero.x=tx*TILE+TILE/2;hero.y=ty*TILE+TILE/2;return {x:(hero.x/TILE)|0,y:(hero.y/TILE)|0};},
   decayedBuildings:()=>buildings.filter(b=>!b.gone&&b.decay).map(b=>({id:b.id,tp:b.tp,decay:b.decay})),
   decayStage:(id)=>{const b=buildings.find(x=>x.id===id);return b?(b.decay||0):null;},

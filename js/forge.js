@@ -711,7 +711,116 @@ const CFHelp = (function(){
       crest: rng()<0.5, snout: pick(rng,[0,2,3.5]),
       attackStyle: pick(rng,['slash','claw','cast']), walkFrames:6, outline:true, belt:false,
     }),
+    /* ---- 10 more enemy types: general beasts, cyber constructs, ancient revenants ---- */
+    // low, wide, skittering bug — a floor-hugging swarm threat
+    crawler: (rng)=>({ size:48,
+      bodyW:5.4, bodyH:4.0, taper:-.1, bodyRound:.72, headSize:-1.0, headRound:.7,
+      earType:'none', hornType: pick(rng,['none','single']), hornSize:2.5,
+      tailType: pick(rng,['stub','spike']), tailSize:4,
+      armLen:3.5, armThick:1.4, handSize:1.6, legLen:4, legThick:1.6, stance:3, footSize:2.2,
+      cloth:'none', shoes:false, chest:'none', helmet:'none', hairType:'none',
+      tex:'scales', texAmt:.6, spots:true, spikes: pick(rng,['none','back']),
+      snout:2, attackStyle:'claw', walkFrames:6, outline:true, belt:false, belly:true,
+    }),
+    // tall lean predator that stalks and lunges
+    stalker: (rng)=>({ size:48,
+      bodyW:3.0, bodyH:7.5, taper:-.2, bodyRound:.6, headSize:-0.4, headRound:.7,
+      earType:'pointed', earSize:4, hornType:'none',
+      tailType:'long', tailSize:7,
+      armLen:5.5, armThick:1.3, handSize:1.9, legLen:7, legThick:1.5, stance:2, footSize:2.2,
+      cloth:'none', shoes:false, chest:'none', helmet:'none', hairType:'none',
+      tex: pick(rng,['fur','dither']), texAmt:.6, stripes:true, spikes:'back',
+      snout: pick(rng,[2,3.5]), attackStyle:'claw', walkFrames:6, outline:true, belt:false,
+    }),
+    // tiny spiny hatchling — comes in numbers
+    brood: (rng)=>({ size:44,
+      bodyW:3.8, bodyH:3.4, taper:-.1, bodyRound:.78, headSize:-1.1, headRound:.8,
+      earType:'none', hornType:'none', tailType:'spike', tailSize:5,
+      armLen:3, legLen:4.5, legThick:1.3, footSize:1.8,
+      cloth:'none', shoes:false, chest:'none', helmet:'none', hairType:'none',
+      tex:'scales', texAmt:.55, spots:true, spikes: pick(rng,['none','back']),
+      snout:1.5, attackStyle:'stab', walkFrames:4, outline:true, belt:false, belly:true,
+    }),
+    // a huge serpentine bruiser, crested and long-tailed
+    leviathan: (rng)=>({ size:64,
+      bodyW:4.6, bodyH:9.5, taper:-.25, bodyRound:.5, headSize:0.1, headRound:.68,
+      earType:'fin', earSize:4, hornType: pick(rng,['curved','antler']), hornSize:5,
+      tailType:'long', tailSize:9,
+      armLen:4.5, armThick:1.6, handSize:1.8, legLen:5.5, legThick:1.9, stance:2.5, footSize:2.6,
+      cloth:'none', shoes:false, chest:'none', helmet:'none', hairType:'none',
+      tex:'scales', texAmt:.7, stripes:true, spikes:'both', crest: rng()<0.6,
+      snout: pick(rng,[3.5,5]), attackStyle: pick(rng,['claw','slash']), walkFrames:6, outline:true, belt:false,
+    }),
+    // CYBER: a hovering recon drone — antennae, chrome, casts
+    drone: (rng)=>({ size:48,
+      bodyW:3.4, bodyH:3.4, taper:0, bodyRound:.85, headSize:-0.8, headRound:.85,
+      earType:'fin', earSize:4, hornType: pick(rng,['none','single']), hornSize:3,
+      tailType:'none',
+      armLen:4, armThick:1.2, handSize:1.5, legLen:3, legThick:1.4, footSize:1.6,
+      cloth:'none', shoes:false, chest:'none', helmet: pick(rng,['none','cap']),
+      gauntlets:true, hairType:'none',
+      tex:'dither', texAmt:.7, stripes:true, spikes:'none',
+      snout:0, attackStyle:'cast', walkFrames:6, outline:true, belt:false, belly:true, metalHue:200,
+    }),
+    // CYBER: an armoured sentry — full plate, antenna-horns, blade
+    sentinel: (rng)=>({ size:52,
+      bodyW:4.6, bodyH:8, taper:-.1, bodyRound:.55, headSize:0.0, headRound:.65,
+      earType:'none', hornType:'straight', hornSize:3.5,
+      tailType:'none',
+      armLen:4.5, armThick:1.8, handSize:2.0, legLen:6, legThick:2.2, stance:2.5, footSize:2.6,
+      cloth:'none', shoes:false, chest:'full', helmet:'full', pauldrons:true, gauntlets:true, boots:true,
+      hairType:'none', tex:'dither', texAmt:.6, spikes:'shoulders',
+      snout:0, attackStyle:'slash', walkFrames:6, outline:true, belt:false, metalHue:205,
+    }),
+    // CYBER: a hulking war-chassis — the manufactory's worst idea
+    chassis: (rng)=>({ size:64,
+      bodyW:6.0, bodyH:8.5, taper:-.05, bodyRound:.5, headSize:-0.3, headRound:.6,
+      earType:'fin', earSize:3, hornType: pick(rng,['straight','single']), hornSize:4,
+      tailType:'none',
+      armLen:5, armThick:2.2, handSize:2.4, legLen:5.5, legThick:2.6, stance:3, footSize:3,
+      cloth:'none', shoes:false, chest:'full', helmet:'full', pauldrons:true, gauntlets:true,
+      hairType:'none', tex:'dither', texAmt:.7, spikes:'both',
+      snout:0, attackStyle:'claw', walkFrames:6, outline:true, belt:false, metalHue:210,
+    }),
+    // ANCIENT: a gaunt overgrown revenant
+    husk: (rng)=>({ size:48,
+      bodyW:2.8, bodyH:7.5, taper:-.15, bodyRound:.62, headSize:-0.6, headRound:.68,
+      earType: pick(rng,['pointed','long']), earSize:3.5, hornType:'none',
+      tailType: pick(rng,['none','long']), tailSize:6,
+      armLen:5.5, armThick:1.3, handSize:1.8, legLen:6.5, legThick:1.5,
+      cloth: pick(rng,['none','robe']), shoes:false, chest:'none', helmet:'none', hairType: pick(rng,['none','long']),
+      tex:'fur', texAmt:.6, spots:true, crest: rng()<0.5, spikes: pick(rng,['none','back']),
+      snout: pick(rng,[0,2]), attackStyle: pick(rng,['claw','cast']), walkFrames:6, outline:true, belt:false,
+    }),
+    // ANCIENT: a tall pale drifting wraith
+    wraith: (rng)=>({ size:48,
+      bodyW:2.4, bodyH:8.5, taper:-.28, bodyRound:.58, headSize:-0.5, headRound:.72,
+      earType:'fin', earSize:4, hornType: pick(rng,['none','curved']), hornSize:4,
+      tailType:'fluff', tailSize:8,
+      armLen:5.5, armThick:1.1, handSize:1.6, legLen:6, legThick:1.2,
+      cloth:'none', shoes:false, chest:'none', helmet:'none', hairType:'none',
+      tex:'dither', texAmt:.5, stripes:true, spikes:'none', crest: rng()<0.6,
+      snout:0, attackStyle:'cast', walkFrames:6, outline:true, belt:false,
+    }),
+    // ANCIENT: a small mossy overgrown critter
+    mossling: (rng)=>({ size:44,
+      bodyW:4.2, bodyH:4.5, taper:-.12, bodyRound:.75, headSize:-0.9, headRound:.76,
+      earType: pick(rng,['round','pointed']), earSize:3, hornType: pick(rng,['none','antler']), hornSize:3.5,
+      tailType: pick(rng,['fluff','stub']), tailSize:5,
+      armLen:3.5, legLen:5, legThick:1.6, footSize:2,
+      cloth:'none', shoes:false, chest:'none', helmet:'none', hairType:'none',
+      tex:'fur', texAmt:.7, spots:true, spikes: pick(rng,['none','back']),
+      snout: pick(rng,[1.5,3]), attackStyle:'claw', walkFrames:4, outline:true, belt:false, belly:true,
+    }),
   };
+  // family tags so consumers can pick themed rosters (interiors / dungeon variety)
+  const ARCH_FAMILY = {
+    slime:'basic', wisp:'basic', brute:'basic', boss:'boss', player:'player',
+    crawler:'beast', stalker:'beast', brood:'swarm', leviathan:'beast',
+    drone:'cyber', sentinel:'cyber', chassis:'cyber',
+    husk:'ancient', wraith:'ancient', mossling:'ancient',
+  };
+  function archetypesByFamily(fam){ return Object.keys(ARCH_FAMILY).filter(k=>ARCH_FAMILY[k]===fam); }
 
   // a surface villager: soft colours, everyday clothes, human-ish proportions
   function villagerParams(lookSeed, opts){
@@ -737,5 +846,5 @@ const CFHelp = (function(){
     if(opts.elder){ P.hairHue=40; P.hairType=pick(rng,['long','bowl','tuft','topknot']); P.cloth='robe'; }
     return P;
   }
-  return {angToDir, bakeCreature, drawCreatureSprite, ARCHETYPES, villagerParams, pick};
+  return {angToDir, bakeCreature, drawCreatureSprite, ARCHETYPES, ARCH_FAMILY, archetypesByFamily, villagerParams, pick};
 })();

@@ -241,8 +241,22 @@ function groveHues(){
   const [dr,dg,db]=hexToRgb(T.dirtColor);  const [dh]=rgbToHsl(dr,dg,db);
   return { grass: gh*360, dirt: dh*360 };
 }
-function monsterPalette(rng, kind){
+function monsterPalette(rng, kind, fam){
   const {grass, dirt} = groveHues();
+  // CYBER constructs read chrome-and-neon; ANCIENT revenants read mossy/bleached;
+  // everything else leans off the grove's own hue for variety per floor
+  if(fam==='cyber'){
+    const hue = 185 + rng()*45;   // cyan → blue
+    return { hue:Math.round(hue), sat:Math.round(46+rng()*22), lit:Math.round(52+rng()*14),
+      hue2:Math.round((hue+30)%360), accent:Math.round((hue+180)%360),
+      hairHue:Math.round(hue), clothHue:Math.round(hue), metalHue:Math.round(200+rng()*20) };
+  }
+  if(fam==='ancient'){
+    const hue = ((grass + (rng()<.5?-18:18))%360+360)%360;
+    return { hue:Math.round(hue), sat:Math.round(16+rng()*16), lit:Math.round(38+rng()*14),
+      hue2:Math.round(((hue+ (rng()<.5?30:-30))%360+360)%360), accent:Math.round((dirt+40)%360),
+      hairHue:Math.round(hue), clothHue:Math.round(((dirt+30)%360)), metalHue:Math.round(((grass+180)%360)) };
+  }
   const leanByKind = {
     slime: [ -25, 25, 40 ],
     wisp:  [ 150, 170, 200 ],
@@ -265,6 +279,18 @@ function monsterPalette(rng, kind){
     metalHue: Math.round(((grass+200)%360)),
   };
 }
+// each DUNGEON draws a stable roster from the archetype pool (seeded by its id),
+// so different dungeons field different enemy shapes in the same four combat slots
+const SLOT_POOL = {
+  slime: ['slime','crawler','brood','mossling'],
+  wisp:  ['wisp','stalker','husk','wraith','drone'],
+  brute: ['brute','leviathan','sentinel','chassis'],
+};
+function dungeonRoster(){
+  const rng = CF.mulberry32(hashSeed(baseSeed()+'/roster')^0x515717);
+  const p = a => a[(rng()*a.length)|0];
+  return { slime:p(SLOT_POOL.slime), wisp:p(SLOT_POOL.wisp), brute:p(SLOT_POOL.brute), boss:'boss', player:'player' };
+}
 function playerPalette(rng){
   const {grass} = groveHues();
   const hue = ((grass+180 + (rng()*40-20))%360+360)%360;
@@ -277,20 +303,24 @@ function playerPalette(rng){
 }
 let CREATURES = null;
 function generateCreatures(seedStr){
-  const drawSizes = { slime:48, wisp:48, brute:48, boss:96, player:48 };
+  const drawSizes = { slime:48, wisp:48, brute:52, boss:96, player:48 };
+  const roster = dungeonRoster();               // which archetype fills each combat slot
   const out = {};
-  for(const kind of ['player','slime','wisp','brute','boss']){
+  for(const slot of ['player','slime','wisp','brute','boss']){
+    const arch = roster[slot] || slot;
+    const fam = CFHelp.ARCH_FAMILY[arch] || 'basic';
     // the player's SHAPE follows the Hero between worlds; only the colours
-    // re-derive per floor so the Sage always pops out of the murk
-    const structRng = kind==='player'
+    // re-derive per floor so the Sage always pops out of the murk. The monster
+    // SHAPE follows the dungeon's roster (stable per dungeon); colours per floor.
+    const structRng = slot==='player'
       ? CF.mulberry32(hashSeed(Hero.lookSeed)^0xC0DE)
-      : CF.mulberry32(hashSeed(seedStr+'/'+kind)^0xC0DE);
-    const colRng = CF.mulberry32(hashSeed(seedStr+'/'+kind+'/col')^0x9A11);
-    const struct = CFHelp.ARCHETYPES[kind](structRng);
-    const cols = kind==='player' ? playerPalette(colRng) : monsterPalette(colRng, kind);
-    const params = { ...struct, ...cols, seed: seedStr+'-'+kind };
-    out[kind] = CFHelp.bakeCreature(params, drawSizes[kind]);
-    out[kind].kind = kind;
+      : CF.mulberry32(hashSeed(baseSeed()+'/'+slot+'/'+arch)^0xC0DE);
+    const colRng = CF.mulberry32(hashSeed(seedStr+'/'+slot+'/col')^0x9A11);
+    const struct = (CFHelp.ARCHETYPES[arch]||CFHelp.ARCHETYPES[slot])(structRng);
+    const cols = slot==='player' ? playerPalette(colRng) : monsterPalette(colRng, slot, fam);
+    const params = { ...struct, ...cols, seed: seedStr+'-'+slot };
+    out[slot] = CFHelp.bakeCreature(params, drawSizes[slot]);
+    out[slot].kind = slot; out[slot].arch = arch; out[slot].fam = fam;
   }
   CREATURES = out;
   return out;
@@ -1921,6 +1951,7 @@ return {
   debug:{
     get state(){return {floorIdx,cleansedRun,objective:objTitle(),final:isFinalFloor(),hasDown:!!portalDown,hasBoss:!!boss,keeper:false}},
     get skin(){return {borrowed:!!T.borrowedSkin, grass:T.grassColor, dirt:T.dirtColor}},
+    get roster(){return CREATURES?{slime:CREATURES.slime.arch,wisp:CREATURES.wisp.arch,brute:CREATURES.brute.arch,boss:CREATURES.boss.arch}:null},
     get zoom(){return camZ}, set zoom(z){camZTarget=dclamp(z,ZMIN,ZMAX)},
     completeTask(){   // clear the objective: slay the heart on the deepest floor, else cleanse
       if(boss){boss.hp=0;boss.dead=true;onKill(boss);}
