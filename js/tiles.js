@@ -309,11 +309,45 @@ function makeWater(opts){
   return out;   // out[variant][frame] → res×res canvas
 }
 
+/* ---------- INTERIOR MATERIALS ----------
+   New tile types for building interiors — drawn by the SAME engine (detail()
+   treatments) as the surface, but in indoor materials (planks, tile, concrete,
+   metal, carpet, chrome) instead of grass & rock. Each material carries a floor
+   and a wall variant; a few are "ruin" materials for degraded interiors. */
+function mkMat(base,light,dark,treat,ts,td,sx,sy){
+  return { base:hexToRgb(base), light:hexToRgb(light), dark:hexToRgb(dark),
+    treat, ts:ts||4, td:(td==null?0.4:td), sx:(sx==null?0.6:sx), sy:(sy==null?0.6:sy) };
+}
+const INTERIOR_MATS = {
+  // material: {floor, wall}
+  wood:    { floor:mkMat('#7a5a36','#916e46','#5b4227','striate',2.1,0.5,0.08,1.0), wall:mkMat('#5c4931','#6f593c','#40311f','striate',2.4,0.34,0.08,1.0) },
+  tile:    { floor:mkMat('#6b6474','#827a8c','#4b4552','checker',4,0.4),            wall:mkMat('#4a4553','#5b5566','#332f3a','speckle',3,0.3) },
+  concrete:{ floor:mkMat('#5d5d63','#6f6f76','#43434b','mottle',5,0.4),             wall:mkMat('#4b4b53','#5b5b63','#35353d','cracked',5,0.42) },
+  metal:   { floor:mkMat('#4f535b','#666c76','#373b43','woven',2.6,0.5),            wall:mkMat('#3f444d','#575d67','#2b2f37','striate',3,0.4,1.0,0.08) },
+  carpet:  { floor:mkMat('#5b3c49','#6f4b59','#442b35','speckle',4,0.34),           wall:mkMat('#3b3046','#4b3e56','#292136','mottle',4,0.3) },
+  chrome:  { floor:mkMat('#4a5867','#6c8092','#333f4b','gradient',6,0.4),           wall:mkMat('#3a4450','#586675','#262d35','striate',4,0.3,0.18,1.0) },
+  // ruin variants
+  derelict:{ floor:mkMat('#33383f','#454c55','#22262c','cracked',5,0.5),            wall:mkMat('#2b3038','#3c434d','#1b1f25','striate',3.4,0.42,0.9,0.12) },
+  overgrown:{floor:mkMat('#4a5a3a','#5f7448','#33422a','mottle',4.2,0.44),          wall:mkMat('#3a4a30','#4c5e3e','#28331f','pebbled',4,0.4) },
+};
+const INTERIOR_TP_MAT = { home:'wood', shelter:'wood', biz:'tile', warehouse:'concrete',
+  factory:'metal', venue:'carpet', highrise:'chrome', apartment:'tile', arcology:'chrome', grave:'wood' };
+function matTexel(m, x, y, seed){
+  let col=m.base;
+  const d=detail(m.treat, x, y, seed, m.ts, m.td, m.sx, m.sy);
+  if(d<0)col=m.dark; else if(d>0)col=m.light;
+  return col;
+}
+function interiorMatFor(tp){ return INTERIOR_TP_MAT[tp]||'wood'; }
+function interiorFloorTexel(matName, x, y, seed){ const M=INTERIOR_MATS[matName]||INTERIOR_MATS.wood; return matTexel(M.floor,x,y,seed); }
+function interiorWallTexel(matName, x, y, seed){ const M=INTERIOR_MATS[matName]||INTERIOR_MATS.wood; return matTexel(M.wall,x,y,seed); }
+
 return {
   mulberry32, vnoise, ihash, mix,
   diskOffsets, cornersFromIndex, cornerIndex, cellCorners, fieldCornerIndex,
   computeVertexGrid, generateCAField, sampleQuadrant, roundedFieldMask, edgeMask,
   makePalettes, deriveStyle, STYLE_NAMES, EDGE_NAMES, paintTile, paintCliff, makeTileset,
   fieldTexel, rockTexel, surfaceTexel, waterPalette, makeWater,
+  INTERIOR_MATS, interiorMatFor, interiorFloorTexel, interiorWallTexel,
 };
 })();

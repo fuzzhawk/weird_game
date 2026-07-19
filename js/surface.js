@@ -4757,29 +4757,28 @@ function paintCellTextureTo(c,x,y,solidMask,pals,style){
  c.putImageData(img,x*TILE,y*TILE);
 }
 function paintCellTexture(c,x,y,solidMask){ paintCellTextureTo(c,x,y,solidMask,surfPals,surfStyle); }
-// paint one full cell of bramble-rock texture (used for interior walls, so an
-// interior reads with the very same ground & rock the overworld is drawn from)
-function paintRockCellTo(c,x,y,pals,style){
- const img=c.createImageData(TILE,TILE),data=img.data;
- for(let ly=0;ly<TILE;ly++)for(let lx=0;lx<TILE;lx++){
-  const col=TileGen.rockTexel(pals.rock,x*TILE+lx,y*TILE+ly,surfSeedN,style);
-  const p=(ly*TILE+lx)*4;data[p]=col[0];data[p+1]=col[1];data[p+2]=col[2];data[p+3]=255;
- }
- c.putImageData(img,x*TILE,y*TILE);
-}
-// bake an interior's floor+wall background ONCE using the overworld's own TileGen
-// ground/rock texture, so stepping inside doesn't switch to a different-looking
-// renderer — walls become the surface's bramble-rock, floors its trodden soil
+// bake an interior's floor+wall background ONCE from TileGen's INTERIOR tile
+// materials — the same texture engine as the overworld, but in indoor materials
+// (planks, tile, concrete, metal, carpet, chrome) chosen per building type, with
+// derelict/overgrown variants for degraded ruins.
 function bakeInteriorBg(intr){
- if(!surfPals||!surfStyle)return;   // world not textured yet → fall back to flat fills
- const pals=surfPals,style=surfStyle;
- const cv=document.createElement('canvas');cv.width=intr.gw*TILE;cv.height=intr.gh*TILE;
+ const b=intr.b, decay=intr.decay||0;
+ const mat = decay===1?'derelict' : decay===2?'overgrown' : TileGen.interiorMatFor(b.tp);
+ const Wpx=intr.gw*TILE, Hpx=intr.gh*TILE;
+ const cv=document.createElement('canvas');cv.width=Wpx;cv.height=Hpx;
  const c=cv.getContext('2d');c.imageSmoothingEnabled=false;
- for(let y=0;y<intr.gh;y++)for(let x=0;x<intr.gw;x++){
-  if(intr.wallMask&&intr.wallMask[intr.si(x,y)])paintRockCellTo(c,x,y,pals,style);
-  else paintCellTextureTo(c,x,y,null,pals,style);
+ const img=c.createImageData(Wpx,Hpx),data=img.data, seed=(b.id||1);
+ for(let ty=0;ty<intr.gh;ty++)for(let tx=0;tx<intr.gw;tx++){
+  const wall=intr.wallMask&&intr.wallMask[intr.si(tx,ty)];
+  for(let ly=0;ly<TILE;ly++)for(let lx=0;lx<TILE;lx++){
+   const gx=tx*TILE+lx, gy=ty*TILE+ly;
+   const col = wall ? TileGen.interiorWallTexel(mat,gx,gy,seed) : TileGen.interiorFloorTexel(mat,gx,gy,seed);
+   const p=(gy*Wpx+gx)*4; data[p]=col[0];data[p+1]=col[1];data[p+2]=col[2];data[p+3]=255;
+  }
  }
+ c.putImageData(img,0,0);
  intr.bg=cv;
+ intr.mat=mat;
 }
 function paintFloorTile(c,x,y){
  if(surfPals){paintCellTexture(c,x,y,null);return;}
@@ -6431,8 +6430,8 @@ function drawInterior(t){
   for(let y=0;y<intr.gh;y++)for(let x=0;x<intr.gw;x++){
    if(intr.wallMask&&intr.wallMask[intr.si(x,y)]){ctx.fillStyle='rgba(255,255,255,0.06)';ctx.fillRect(x*TILE,y*TILE,TILE,2);}
   }
-  if(intr.decay===1){ctx.fillStyle='rgba(20,26,44,0.42)';ctx.fillRect(0,0,wpx,wph);}        // gutted-cyber gloom
-  else if(intr.decay===2){ctx.fillStyle='rgba(30,58,26,0.28)';ctx.fillRect(0,0,wpx,wph);}   // overgrown green wash
+  if(intr.decay===1){ctx.fillStyle='rgba(18,24,42,0.22)';ctx.fillRect(0,0,wpx,wph);}        // a touch of gutted-cyber gloom
+  else if(intr.decay===2){ctx.fillStyle='rgba(30,58,26,0.12)';ctx.fillRect(0,0,wpx,wph);}   // faint overgrown wash
  }else{
   // fallback (world texture not ready): the old flat floor + wall fills
   for(let y=0;y<intr.gh;y++)for(let x=0;x<intr.gw;x++){

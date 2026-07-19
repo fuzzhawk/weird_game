@@ -1527,13 +1527,18 @@ function drawTerrain(){
   }
 }
 /* ---------- per-tile atmospheric lighting ---------- */
-let lightCv=null,lightCtx=null,lightImg=null,lbuf=null;
+let lightCv=null,lightCtx=null,lightImg=null,lbuf=null,lightBorrowed=null;
 function initLight(){
   lightCv=document.createElement('canvas'); lightCv.width=COLS; lightCv.height=ROWS;
   lightCtx=lightCv.getContext('2d'); lightImg=lightCtx.createImageData(COLS,ROWS);
   lbuf=new Float32Array(COLS*ROWS);
   const d=lightImg.data;
-  for(let i=0;i<COLS*ROWS;i++){ const p=i*4; d[p]=4; d[p+1]=8; d[p+2]=16; }  // deep murk tint
+  // the SHADOW colour: when the Understory borrows the surface skin its shadows are
+  // a soft cool dusk (so the bright green tiles read like a sunless grove), not the
+  // old near-black "drowned" murk
+  const tint = T.borrowedSkin ? [14,20,24] : [4,8,16];
+  for(let i=0;i<COLS*ROWS;i++){ const p=i*4; d[p]=tint[0]; d[p+1]=tint[1]; d[p+2]=tint[2]; }
+  lightBorrowed=!!T.borrowedSkin;
 }
 function addLight(wx0,wy0,r,inten){
   const cxp=wx0/RES, cyp=wy0/RES, rc=r/RES, r2=rc*rc;
@@ -1548,12 +1553,15 @@ function addLight(wx0,wy0,r,inten){
 // darkness overlay carved by light sources — the Sage's lantern, glowing foes,
 // treasure, blooms and portals — for pools of light in the murk
 function drawLighting(){
-  if(!lightImg) initLight();
-  // when the Understory borrows the surface skin it is lit like the surface too —
-  // near-daylight, only a soft falloff at the edges — so it reads as the same world.
-  const amb = T.borrowedSkin ? 0.9 : (0.13 - Math.min(0.06, floorIdx*0.012));   // deeper floors are darker
+  const borrowed=!!T.borrowedSkin;
+  if(!lightImg || lightBorrowed!==borrowed) initLight();   // re-tint if the skin mode changed
+  // A surface-skinned Understory is lit like a shaded grove: a moody-but-readable
+  // ambient with warm pools of light around the Sage & the glowing things, and a
+  // soft dusk at the edges — deep enough to feel underground, bright enough to show
+  // off the surface tiles. (A non-borrowed floor keeps the old near-dark murk.)
+  const amb = borrowed ? (0.60 - Math.min(0.10, floorIdx*0.02)) : (0.13 - Math.min(0.06, floorIdx*0.012));
   lbuf.fill(amb<0.04?0.04:amb);
-  addLight(player.x, player.y, 8.5*RES, 1.35);            // the Sage's lantern
+  addLight(player.x, player.y, (borrowed?10:8.5)*RES, borrowed?1.15:1.35);   // the Sage's lantern
   for(const e of enemies){
     if(e.dead) continue;
     if(e.wisp) addLight(e.x,e.y,3.4*RES,0.75);
@@ -1566,14 +1574,14 @@ function drawLighting(){
   if(portalUp) addLight(portalUp.x,portalUp.y,2.6*RES,0.45);
   for(const n of npcs) addLight(n.x,n.y,3*RES,0.5);        // the Keeper keeps a light
   for(const s of structures){ const sx=(s.cx+s.w/2)*RES, sy=(s.cy+s.h/2)*RES; addLight(sx,sy,3.2*RES,0.45); }
-  const maxDark = T.borrowedSkin ? 0.5 : 0.9, data=lightImg.data;
+  const maxDark = borrowed ? 0.62 : 0.9, data=lightImg.data;
   for(let i=0;i<COLS*ROWS;i++){ let dk=1-lbuf[i]; if(dk<0)dk=0; else if(dk>maxDark)dk=maxDark; data[i*4+3]=(dk*255)|0; }
   lightCtx.putImageData(lightImg,0,0);
   const sm=ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled=true;
   ctx.drawImage(lightCv,0,0,COLS,ROWS,0,0,WORLD_W,WORLD_H);   // soft-scaled over the world
-  // a faint warm bloom from the lantern
+  // a warm bloom from the lantern (a little stronger in the sunless grove)
   const g=ctx.createRadialGradient(player.x,player.y,4,player.x,player.y,7*RES);
-  g.addColorStop(0,'rgba(255,214,150,0.10)'); g.addColorStop(1,'rgba(255,214,150,0)');
+  g.addColorStop(0,T.borrowedSkin?'rgba(255,220,160,0.16)':'rgba(255,214,150,0.10)'); g.addColorStop(1,'rgba(255,214,150,0)');
   const go=ctx.globalCompositeOperation; ctx.globalCompositeOperation='lighter';
   ctx.fillStyle=g; ctx.fillRect(player.x-7*RES,player.y-7*RES,14*RES,14*RES);
   ctx.globalCompositeOperation=go;
