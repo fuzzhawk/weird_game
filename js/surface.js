@@ -7321,6 +7321,7 @@ function selectPerson(p){
  $('logPanel').classList.add('hidden');
  renderPanelFull(p);
 }
+{const sg=$('charselSage');if(sg)sg.onclick=()=>chooseCharacter(null);}
 $('charClose').onclick=()=>{selected=null;follow=false;$('charPanel').classList.add('hidden')};
 $('followBtn').onclick=()=>{follow=!follow;$('followBtn').style.opacity=follow?'1':'.55';toast(follow?'Following '+(selected?selected.name:''):'Camera returns to the Sage')};
 $('logBtn').onclick=()=>{
@@ -7418,7 +7419,10 @@ $('newBtn').onclick=()=>{
  }
 };
 function reseed(newSeed,theme,params){
- warming=false; const wov=$('warm'); if(wov)wov.classList.add('hidden');
+ warming=false; bakePhase=false; selecting=false;
+ {const wov=$('warm'); if(wov)wov.classList.add('hidden');}
+ {const cs=$('charsel'); if(cs)cs.classList.add('hidden');}
+ Hero.name='the Sage'; Hero.pc=null;   // each world lets the player choose a new life
  campaign=null; closeStoryCard(); {const sb=$('story');if(sb)sb.classList.add('hidden');}
  seed=(newSeed===undefined)?((Math.random()*2**31)|0):newSeed;
  if(theme)worldTheme=theme;
@@ -7536,21 +7540,171 @@ function endWarmup(){
   live=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length);
  }
  const v=live[0];
- if(v){
-  const s=nearOpen(Math.round(v.cx),Math.round(v.cy));
-  if(s){hero.x=hero.spawnX=s[0]*TILE+TILE/2;hero.y=hero.spawnY=s[1]*TILE+TILE/2;hero.down=false;hero.ifr=2;Hero.hp=Hero.maxHp;}
-  cam.x=hero.x;cam.y=hero.y;cam.z=1.8;
- }
+ // provisional camera on the main town while the world finishes waking
+ if(v){ const s=nearOpen(Math.round(v.cx),Math.round(v.cy))||[Math.round(v.cx),Math.round(v.cy)];
+  hero.x=hero.spawnX=s[0]*TILE+TILE/2;hero.y=hero.spawnY=s[1]*TILE+TILE/2;cam.x=hero.x;cam.y=hero.y;cam.z=1.8; }
  dayMark=cday();
- const ov=$('warm'); if(ov){ov.classList.add('hidden');}
- const yrs=warmYears;
- toast('⌛ '+yrs+' years have passed. You arrive in '+((v&&v.name)||'a weathered land')+'.','card');
- tale([],'And so, after '+yrs+' years of seasons, births, feuds and quiet triumphs, a wandering Sage crests the hills and walks down into the living world.',true);
- refreshChron();
  seedAncientRuins(ri(3,5));   // the world opens dotted with recent & ancient tower-ruins
+ refreshChron();
+ // don't reveal the world yet: first finish baking every sprite (so we drop into a
+ // fully-loaded world), then let the player choose whom to become.
+ beginBakePhase();
+}
+// ---- final loading gate: drain the whole sprite bake queue behind the overlay ----
+let bakePhase=false, bakeTotal=0;
+function beginBakePhase(){
+ bakePhase=true;
+ // prime bakes for everyone currently on the map so the queue reflects the true count
+ for(const p of people)if(!p.dead&&!p.sprite)queuePersonBake(p);
+ bakeTotal=Math.max(1,bakeQueue.length);
+ const ov=$('warm'); if(ov)ov.classList.remove('hidden');
+ if($('warmYear'))$('warmYear').textContent='the world wakes…';
+ if($('warmLine'))$('warmLine').textContent='every soul takes shape…';
+ if($('warmHint'))$('warmHint').textContent='painting the living world…';
+ if($('warmBar'))$('warmBar').style.width='0%';
+}
+function bakeDrainStep(){
+ const deadline=performance.now()+12;
+ while(bakeQueue.length&&performance.now()<deadline)processBakeQueue();
+ const prog=clamp(1-bakeQueue.length/bakeTotal,0,1);
+ if($('warmBar'))$('warmBar').style.width=(prog*100).toFixed(1)+'%';
+ if(!bakeQueue.length){ bakePhase=false; openCharSelect(); }
+}
+// arrive in the world, either as the chosen soul or as a wandering Sage
+function finishDropIn(){
+ let home=Hero.pc?villages.find(v=>v.id===Hero.pc.vid):null;
+ if(!home)home=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length)[0];
+ const v=home;
+ if(v && !Hero.pc){   // a Sage arrives at the town square; a chosen soul is already placed at their home
+  const s=nearOpen(Math.round(v.cx),Math.round(v.cy));
+  if(s){hero.x=hero.spawnX=s[0]*TILE+TILE/2;hero.y=hero.spawnY=s[1]*TILE+TILE/2;}
+ }
+ hero.down=false;hero.ifr=2;Hero.hp=Hero.maxHp;
+ cam.x=hero.x;cam.y=hero.y;cam.z=1.8;
+ dayMark=cday();
+ const yrs=warmYears;
+ if(Hero.pc){
+  toast('⌛ '+yrs+' years have passed. You take up the life of '+Hero.name+'.','card');
+  tale([],'And so, after '+yrs+' years of seasons, you awaken as '+Hero.name+' of '+Hero.pc.villageName+' — and find a shadow has crept over the land you call home.',true);
+ }else{
+  toast('⌛ '+yrs+' years have passed. You arrive in '+((v&&v.name)||'a weathered land')+'.','card');
+  tale([],'And so, after '+yrs+' years of seasons, births, feuds and quiet triumphs, a wandering Sage crests the hills and walks down into the living world.',true);
+ }
  startCampaign();
  if(warmDone)warmDone();
 }
+
+/* ================= character select: choose a soul to become ================= */
+let selecting=false, pcCandidates=[];
+function pcScore(p){
+ let s=0;
+ if(p.home&&!p.home.gone)s+=3;
+ if(p.business&&!p.business.gone)s+=2;
+ if(p.partner&&allById.get(p.partner))s+=2;
+ s+=Math.min(4,knownRels(p).length);
+ if(p.vid!=null){const v=villages.find(x=>x.id===p.vid);if(v)s+=Math.min(3,(villageMembers(v).length/4)|0);}
+ if(p.traits.includes('ambitious')||p.traits.includes('brave')||p.traits.includes('creative'))s+=1;
+ return s;
+}
+function pickPCCandidates(){
+ const pool=people.filter(p=>!p.dead&&!p.inDungeon&&p.age>=16&&p.sprite);
+ pool.sort((a,b)=>pcScore(b)-pcScore(a));
+ // take a diverse top slice, but keep at least one from each major village if we can
+ const chosen=[], seenVil=new Set();
+ for(const p of pool){ if(chosen.length>=8)break; const key=p.vid==null?'wild':p.vid;
+  if(chosen.length<5||!seenVil.has(key)){chosen.push(p);seenVil.add(key);} }
+ for(const p of pool){ if(chosen.length>=8)break; if(!chosen.includes(p))chosen.push(p); }
+ return chosen;
+}
+function pcRoleLine(p){
+ const v=villages.find(x=>x.id===p.vid);
+ const bits=[];
+ if(v&&v.leader===p.id)bits.push('leads '+v.name);
+ else if(v)bits.push('of '+v.name);
+ if(p.business&&!p.business.gone)bits.push('keeps '+(p.business.name||'a shop'));
+ if(p.partner&&allById.get(p.partner)&&!allById.get(p.partner).dead)bits.push('wed to '+allById.get(p.partner).name);
+ const kids=(p.kids||[]).map(id=>allById.get(id)).filter(k=>k&&!k.dead);
+ if(kids.length)bits.push(kids.length+(kids.length>1?' children':' child'));
+ return bits.slice(0,3).join(' · ')||'a free soul';
+}
+function openCharSelect(){
+ selecting=true;
+ pcCandidates=pickPCCandidates();
+ const wrap=$('charselList');
+ if(wrap){
+  wrap.innerHTML='';
+  for(const p of pcCandidates){
+   const card=document.createElement('div');card.className='charCard';
+   const cv=document.createElement('canvas');cv.width=cv.height=64;cv.className='charPort';
+   const cc=cv.getContext('2d');
+   try{ if(p.sprite)CFHelp.drawCreatureSprite(cc,p.sprite,32,44,0,'walk',0); }catch(e){}
+   const info=document.createElement('div');info.className='charInfo';
+   info.innerHTML='<div class="charName">'+p.name+'</div>'+
+    '<div class="charMeta">'+Math.floor(p.age)+' summers · '+traitPhrase(p)+'</div>'+
+    '<div class="charRole">'+pcRoleLine(p)+'</div>';
+   card.appendChild(cv);card.appendChild(info);
+   card.onclick=()=>chooseCharacter(p.id);
+   wrap.appendChild(card);
+  }
+ }
+ {const w=$('warm');if(w)w.classList.add('hidden');}
+ {const cs=$('charsel');if(cs)cs.classList.remove('hidden');}
+}
+function chooseCharacter(id){
+ if(!selecting)return null;
+ selecting=false;
+ {const cs=$('charsel');if(cs)cs.classList.add('hidden');}
+ const p=(id!=null)?allById.get(id):null;
+ if(p&&!p.dead)becomePlayer(p);
+ else { Hero.name='the Sage'; Hero.pc=null; finishDropIn(); }   // wander as a stranger
+ return Hero.name;
+}
+// take over an NPC's life: adopt their look & name, inherit their world, then
+// remove the original so there is only one of them — you.
+function becomePlayer(p){
+ const v=villages.find(x=>x.id===p.vid);
+ const rels=knownRels(p).slice().sort((a,b)=>a[1].a-b[1].a);   // worst affinity first
+ const rival=rels.length&&rels[0][1].a<-15?rels[0][0]:null;
+ const partner=p.partner?allById.get(p.partner):null;
+ const biz=(p.business&&!p.business.gone)?p.business:null;
+ const kids=(p.kids||[]).map(id=>allById.get(id)).filter(k=>k&&!k.dead);
+ Hero.name=p.name;
+ Hero.lookSeed=p.lookSeed;
+ Hero.pc={
+  name:p.name, traits:p.traits.slice(), vid:p.vid, villageName:(v&&v.name)||'the town',
+  homeId:(p.home&&!p.home.gone)?p.home.id:null,
+  partnerId:(partner&&!partner.dead)?partner.id:null, partnerName:(partner&&!partner.dead)?partner.name:null,
+  rivalId:rival?rival.id:null, rivalName:rival?rival.name:null,
+  bizId:biz?biz.id:null, bizName:biz?(biz.name||'their trade'):null,
+  goal:p.goal||null, kidNames:kids.map(k=>k.name),
+ };
+ hero.sprite=p.sprite;   // the player now wears the chosen soul's face
+ // spawn at their home (or where they were standing)
+ let sx=p.x, sy=p.y;
+ if(p.home&&!p.home.gone){ const ht=homeTile(p.home); const s=nearOpen(ht[0],ht[1]); if(s){sx=s[0]*TILE+TILE/2;sy=s[1]*TILE+TILE/2;} }
+ removePersonSilently(p);
+ hero.x=hero.spawnX=sx; hero.y=hero.spawnY=sy;
+ finishDropIn();
+}
+// pull a person cleanly out of the world (no grave, no death-tale): the player IS them now
+function removePersonSilently(p){
+ for(const o of people){ if(o===p)continue;
+  if(o.rel&&o.rel[p.id])delete o.rel[p.id];
+  if(o.partner===p.id){o.partner=null;o.married=false;}
+  if(o.courting===p.id)o.courting=null;
+  if(o.parents&&o.parents.includes(p.id))o.parents=o.parents.filter(id=>id!==p.id);
+  if(o.kids&&o.kids.includes(p.id))o.kids=o.kids.filter(id=>id!==p.id);
+  if(o.fighting===p)o.fighting=null;
+ }
+ for(const m of monsters){ if(m.target===p)m.target=null; }
+ if(p.home&&p.home.owners)p.home.owners=p.home.owners.filter(id=>id!==p.id);
+ for(const v of villages){ if(v.leader===p.id){ const m=villageMembers(v).filter(q=>q!==p); v.leader=m.length?m[0].id:null; } }
+ if(selected===p)selected=null;
+ const i=people.indexOf(p); if(i>=0)people.splice(i,1);
+ allById.delete(p.id);
+ p.dead=true; p.removed=true;   // neutralise any lingering references
+}
+function traitList(keys){ return (keys||[]).map(t=>TRAITS[t]?TRAITS[t].a:t).join(' and ')||'a soul'; }
 
 /* ================= the Story: a procedural, escalating RPG campaign =================
    On arriving in the aged world, an intelligent director reads its living state —
@@ -7569,15 +7723,55 @@ function roman(n){ const M=['','I','II','III','IV','V','VI','VII','VIII','IX','X
 const VILLAIN_RANK=['','Greater ','Elder ','Dread ','World-Ending '];
 function homeVillage(){ return (campaign&&campaign.home)?villages.find(v=>v.id===campaign.home):villages[0]; }
 function startCampaign(){
- const home=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length)[0];
+ const pc=Hero.pc||null;
+ // a chosen soul's own village anchors the saga; a wandering Sage defends the largest town
+ let home=pc?villages.find(v=>v.id===pc.vid):null;
+ if(!home)home=villages.slice().sort((a,b)=>villageMembers(b).length-villageMembers(a).length)[0];
  const[vName,vDesc]=villainFor();
  campaign={ title:(Lore.active?('The '+Lore.name(4,10)+' Saga'):'A Wandering Saga'),
    villain:vName, villainDesc:vDesc, home:home?home.id:null, idx:0, chapters:[], done:false, boss:null,
-   act:1, tier:0, cleared:0, history:captureHistory() };
+   act:1, tier:0, cleared:0, pc, history:captureHistory() };
  buildChapters();
  const ev=campaign.history.events.length?(' In the old tales it is written: “'+campaign.history.events[0]+'”'):'';
- tale([], '📖 '+campaign.title+' begins. A shadow gathers over '+((home&&home.name)||'the land')+' — folk name it '+vName+', '+vDesc+' — and only a wanderer can stand against it.'+ev,true);
+ if(pc){
+  tale([], '📖 '+campaign.title+' begins. You are '+pc.name+', '+traitList(pc.traits)+' of '+((home&&home.name)||'the land')+'. A shadow gathers — folk name it '+vName+', '+vDesc+' — and the burden of standing against it has fallen to you.'+ev,true);
+ }else{
+  tale([], '📖 '+campaign.title+' begins. A shadow gathers over '+((home&&home.name)||'the land')+' — folk name it '+vName+', '+vDesc+' — and only a wanderer can stand against it.'+ev,true);
+ }
  activateChapter();
+}
+// personal opening chapters when the player has taken over a soul's life
+function roleChapters(){
+ const pc=campaign.pc; if(!pc)return [];
+ const out=[];
+ const hv=homeVillage();
+ out.push({k:'reach', role:true,
+  place:{x:Math.round((hv&&hv.cx)||W/2),y:Math.round((hv&&hv.cy)||H/2),name:pc.villageName},
+  title:'Homecoming',
+  intro:'You have worn another road too long. Return to '+pc.villageName+' and take up the life of '+pc.name+' once more — its folk have need of you now.',
+  desc:'Return home to '+pc.villageName+'.'});
+ const partner=pc.partnerId?allById.get(pc.partnerId):null;
+ if(partner&&!partner.dead){
+  out.push({k:'npc', role:true, targetId:pc.partnerId, figName:pc.partnerName, figRole:'your beloved',
+   title:'Your Beloved '+pc.partnerName,
+   intro:pc.partnerName+' has kept the hearth through the long dark, half-fearing you would never come back. Go to them, and let them see you whole.',
+   desc:'Reunite with '+pc.partnerName+'.'});
+ }
+ const rival=pc.rivalId?allById.get(pc.rivalId):null;
+ if(rival&&!rival.dead){
+  out.push({k:'npc', role:true, targetId:pc.rivalId, figName:pc.rivalName, figRole:'an old rival',
+   title:'Old Grudges',
+   intro:'You and '+pc.rivalName+' parted as enemies, years ago. With '+campaign.villain+' abroad, '+pc.villageName+' cannot afford your feud. Seek '+pc.rivalName+' out and make your peace.',
+   desc:'Make peace with '+pc.rivalName+'.'});
+ } else if(pc.bizId){
+  const b=buildings.find(x=>x.id===pc.bizId&&!x.gone);
+  if(b) out.push({k:'reach', role:true,
+   place:{x:b.x+((b.w/2)|0),y:b.y+b.h+1,name:pc.bizName},
+   title:'Back to the Trade',
+   intro:'Your livelihood — '+pc.bizName+' — has stood shuttered since you went away. Return to it and throw its doors open again.',
+   desc:'Take up your trade at '+pc.bizName+'.'});
+ }
+ return out.slice(0,3);
 }
 // read the aged world's living state into a body of "history" the quests draw on
 function captureHistory(){
@@ -7833,12 +8027,16 @@ function genBoss(H){
 function buildChapters(){
  const H=campaign.history;
  const chs=[];
- chs.push(genReach(H)||genGather(H));
+ // when the player has taken over a soul, the saga opens with their own life:
+ // coming home, and mending the ties they left behind
+ const roles=campaign.pc?roleChapters():[];
+ if(roles.length)for(const r of roles)chs.push(r);
+ else chs.push(genReach(H)||genGather(H));
  const gens=[genNpc,genHunt,genDungeon,genGather,genFeud,genBloom,genGuard,
    genEscort,genBeast,genTame,genRelic,genTribute,genVigil,genTrade,genRite,genPilgrimage,genChampion];
  shuffle(gens);
  // sagas grow longer as the acts climb (more mid-chapters, capped)
- let lastK=chs[0].k, added=0, want=Math.min(9, ri(4,6)+Math.min(4,(campaign.act||1)-1));
+ let lastK=chs[chs.length-1].k, added=0, want=Math.min(9, ri(4,6)+Math.min(4,(campaign.act||1)-1));
  for(const g of gens){ if(added>=want)break; const c=g(H); if(!c||c.k===lastK)continue; chs.push(c); lastK=c.k; added++; }
  // later acts field a rival champion before the finale
  if((campaign.act||1)>=2 && !chs.some(c=>c.k==='champion')){ const ch=genChampion(H); if(ch)chs.splice(chs.length,0,ch); }
@@ -8082,6 +8280,8 @@ function closeStoryCard(){ const el=$('storyCard'); if(!el)return; el.classList.
 let last=performance.now(),acc=0,uiT=0;
 function frame(t){
  if(warming){ warmupStep(t); last=t; return; }
+ if(bakePhase){ bakeDrainStep(); last=t; return; }   // finish every sprite behind the overlay
+ if(selecting){ last=t; return; }                     // frozen while the player chooses a soul
  const f0=performance.now();
  const rdt=Math.min(0.1,(t-last)/1000);last=t;
  const sp=SPEEDS[speedIdx];
@@ -8118,7 +8318,7 @@ function frame(t){
   {const sn=seasonNow();$('clock').textContent=sn.glyph+' Day '+cday();}
   $('era').textContent=(surfEra?surfEra.name:phase());
   $('pop').textContent='👥 '+people.length+(animals.length?' · 🐾'+animals.length:'')+(monsters.length?' · 👹'+monsters.length:'')+(heroGold?' · 🪙'+heroGold:'')+(heroGems?' · 💎'+heroGems:'')+(heroStone?' · 🪨'+heroStone:'');
-  $('hearts').textContent=speedIdx>=2?'🧘 the Sage meditates':heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
+  $('hearts').textContent=speedIdx>=2?('🧘 '+(Hero.pc?Hero.name+' rests':'the Sage meditates')):heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
   // stamina bar + action buttons only in surface real-time play
   {const show=!interior&&!cine&&speedIdx<=1&&!hero.down;
    const sw=$('staminaWrap'),sb=$('staminaBar'),acts=$('sActs');
@@ -8316,6 +8516,13 @@ return {
   rerollTiles:()=>{tileSalt=(Math.random()*1e6)|0;buildTerrainLayer();repaintDynAll();toast('The ground reconsiders its texture. ('+surfStyle.name+' · '+surfStyle.edge+' edge)')},
   rerollFolk:()=>{for(const p of people){p.lookSeed='folk-'+p.id+'-'+((Math.random()*1e9)|0);queuePersonBake(p)}toast('Everyone wakes up feeling like someone slightly else.')},
   rerollHero:()=>{Hero.lookSeed='sage-'+((Math.random()*1e9)|0);queueHeroBake();toast('The Sage is reborn mid-stride.')},
+  // character-select hooks
+  loadingState:()=>({warming,bakePhase,selecting,bakeLeft:bakeQueue.length}),
+  charSelecting:()=>selecting,
+  charCandidates:()=>selecting?pcCandidates.map(p=>({id:p.id,name:p.name,age:Math.floor(p.age),traits:p.traits.slice(),role:pcRoleLine(p),vid:p.vid})):[],
+  chooseCharacter:(id)=>chooseCharacter(id),
+  playerChar:()=>Hero.pc?{name:Hero.name,villageName:Hero.pc.villageName,traits:Hero.pc.traits,partnerName:Hero.pc.partnerName,rivalName:Hero.pc.rivalName,bizName:Hero.pc.bizName}:null,
+  personById:(id)=>{const p=allById.get(id);return p?{alive:!p.dead,removed:!!p.removed,name:p.name}:{alive:false,gone:true};},
   rerollMonsters:()=>{queueMonsterBakes();toast('The things below molt into new shapes.')},
   rerollBuildings:()=>{if(typeof BuildingForge==='undefined')return null;buildStyle=BuildingForge.worldStyle('reroll-'+((Math.random()*1e9)|0));bldSprites={};toast('The town is rebuilt in a new style.');return buildStyle.wallMat+'/'+buildStyle.roofShapes.join('+');},
   buildingStyle:()=>buildStyle?{wallMat:buildStyle.wallMat,roofShapes:buildStyle.roofShapes.slice(),roofHue:Math.round(buildStyle.roofHue),wallHue:Math.round(buildStyle.wallHue),thatch:buildStyle.thatch}:null,
