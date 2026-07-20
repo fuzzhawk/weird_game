@@ -137,7 +137,7 @@ function renderSelected(){
   }
 }
 function init(){
-  $('edBtn').onclick=()=>setOpen(!open);
+  {const eb=$('edBtn'); if(eb)eb.onclick=()=>setOpen(!open);}   // opened from the HUD sim menu now
   $('edClose').onclick=()=>setOpen(false);
   $('edScrim').onclick=()=>setOpen(false);
   // --- world group ---

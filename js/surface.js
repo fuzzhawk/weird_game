@@ -19,7 +19,7 @@ const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[
 
 /* ================= config ================= */
 const W=112,H=112,TILE=16,DAY=1440,RATE=12,WALK=2.15;
-const SPEEDS=[0,1,16,500];
+const SPEEDS=[0,1,50,1000];
 const COST={shelter:{wood:5},home:{wood:10,stone:6},biz:{wood:12,stone:8},
  apartment:{wood:22,stone:16},warehouse:{wood:20,stone:14},park:{wood:8,stone:2},
  venue:{wood:26,stone:20},factory:{wood:24,stone:24},highrise:{wood:42,stone:44},
@@ -301,12 +301,50 @@ function tale(ps,text,major){
  }
  if(major&&ps.includes(selected))toast(text);
 }
-function toast(text,cls){
- const t=document.createElement('div');t.className='toast'+(cls?' '+cls:'');t.textContent=text;
- const box=$('toasts');box.appendChild(t);
- while(box.children.length>4)box.removeChild(box.firstChild);
- setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .6s'},4200);
- setTimeout(()=>{if(t.parentNode)t.parentNode.removeChild(t)},5000);
+// all pop-up messages now scroll through the retro HUD console
+const consoleBuf=[];
+function pushConsole(text,major){
+ if(text==null||text==='')return;
+ consoleBuf.push({text:String(text),major:!!major});
+ if(consoleBuf.length>80)consoleBuf.splice(0,consoleBuf.length-80);
+ renderConsole();
+}
+function renderConsole(){
+ const box=$('consoleLines'); if(!box)return;
+ const last=consoleBuf.slice(-4);
+ box.innerHTML='';
+ for(const l of last){const d=document.createElement('div');d.className='cln'+(l.major?' maj':'');d.textContent='› '+l.text;box.appendChild(d);}
+}
+function toast(text,cls){ pushConsole(text, cls==='card'); }
+// ---- classic HUD: portrait, stats, day ----
+let _hudPortCtx=null;
+function drawHudPortrait(){
+ const cv=$('hudPort'); if(!cv)return;
+ if(!_hudPortCtx)_hudPortCtx=cv.getContext('2d');
+ const c=_hudPortCtx, S=cv.width; c.clearRect(0,0,cv.width,cv.height);
+ c.imageSmoothingEnabled=false;
+ const img=hero.sprite&&hero.sprite.FRAMES&&hero.sprite.FRAMES.walk&&hero.sprite.FRAMES.walk[0]&&hero.sprite.FRAMES.walk[0][0];
+ if(img){
+  // zoom into the upper body so it reads as a head-and-shoulders portrait
+  const dw=S*1.55, dh=S*1.55, dx=(S-dw)/2, dy=-dh*0.10;
+  c.drawImage(img,dx,dy,dw,dh);
+ }else{
+  c.fillStyle='#8fb08a';c.font='34px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText('🙂',S/2,S/2);
+ }
+}
+function updateHud(){
+ const nm=$('hudName'); if(nm)nm.textContent=Hero.name||'the Sage';
+ const hh=$('hudHearts'); if(hh)hh.textContent=(speedIdx>=2)?'🧘 resting…':heroHearts();
+ const rs=$('hudRes'); if(rs){
+  const bits=['lv '+Hero.level];
+  if(Hero.relics.length)bits.push('🔩'+Hero.relics.length);
+  if(heroGold)bits.push('🪙'+heroGold);
+  if(heroGems)bits.push('💎'+heroGems);
+  if(heroStone)bits.push('🪨'+heroStone);
+  rs.textContent=bits.join(' · ');
+ }
+ const dy=$('hudDay'); if(dy){const sn=seasonNow();dy.textContent=sn.glyph+' Day '+cday()+' · 👥'+people.length;}
+ drawHudPortrait();
 }
 function emote(p,g){p.em={g,until:performance.now()+2200}}
 function buff(p,k,v,days,tag){p.buffs.push({k,v,until:simMin+days*DAY,tag})}
@@ -7324,27 +7362,23 @@ function selectPerson(p){
 {const sg=$('charselSage');if(sg)sg.onclick=()=>chooseCharacter(null);}
 $('charClose').onclick=()=>{selected=null;follow=false;$('charPanel').classList.add('hidden')};
 $('followBtn').onclick=()=>{follow=!follow;$('followBtn').style.opacity=follow?'1':'.55';toast(follow?'Following '+(selected?selected.name:''):'Camera returns to the Sage')};
-$('logBtn').onclick=()=>{
- const lp=$('logPanel');
- if(lp.classList.contains('hidden')){refreshChron();lp.classList.remove('hidden');$('charPanel').classList.add('hidden');selected=null}
- else lp.classList.add('hidden');
-};
 $('logClose').onclick=()=>$('logPanel').classList.add('hidden');
-$('questBtn').onclick=()=>{
- const qp=$('questPanel');
- if(qp.classList.contains('hidden')){renderQuests();qp.classList.remove('hidden');$('charPanel').classList.add('hidden');$('logPanel').classList.add('hidden');selected=null}
- else qp.classList.add('hidden');
-};
 $('questClose').onclick=()=>$('questPanel').classList.add('hidden');
 $('qAccept').onclick=e=>{e.stopPropagation();const q=pendingQuest;pendingQuest=null;acceptQuest(q);closeDialog()};
 $('qDecline').onclick=e=>{e.stopPropagation();const q=pendingQuest;pendingQuest=null;declineQuest(q);closeDialog()};
 $('iClose').onclick=closeInspect;
 function setSpeed(idx2){
  speedIdx=idx2;
- document.querySelectorAll('#sui .sp button').forEach(x=>x.classList.toggle('on',+x.dataset.s===idx2));
+ document.querySelectorAll('#hudMenu .spd').forEach(x=>x.classList.toggle('on',+x.dataset.s===idx2));
  document.querySelectorAll('#sui .cspd button').forEach(x=>x.classList.toggle('on',+x.dataset.s===idx2));
 }
-document.querySelectorAll('#sui .sp button,#sui .cspd button').forEach(b=>{b.onclick=()=>setSpeed(+b.dataset.s)});
+document.querySelectorAll('#hudMenu .spd,#sui .cspd button').forEach(b=>{b.onclick=()=>setSpeed(+b.dataset.s)});
+// HUD sim menu: toggle the pop-out, and open the Gardener's Bench (forge + full sim controls)
+{const mb=$('hudMenuBtn'),mm=$('hudMenu');
+ if(mb&&mm){mb.onclick=()=>{const open=mm.classList.toggle('hidden')===false;mb.classList.toggle('on',open);};}
+ const fb=$('hudForgeBtn');
+ if(fb)fb.onclick=()=>{ if(mm)mm.classList.add('hidden'); if(mb)mb.classList.remove('on'); if(typeof Editor!=='undefined')Editor.setOpen(true); };
+}
 $('sTalkBtn').onclick=()=>startTalk(talkTarget);
 $('sEnterBtn').onclick=()=>{if(interior)exitInterior();else if(enterTarget)enterInterior(enterTarget)};
 $('sDescendBtn').onclick=()=>{if(descendTarget&&onEnterDungeon){campaignNoteDescend(descendTarget);onEnterDungeon(descendTarget)}};
@@ -7408,16 +7442,7 @@ $('cineBtn').onclick=()=>enterCine(selected);
 $('cinExit').onclick=exitCine;
 $('cinPrev').onclick=()=>cineCycle(-1);
 $('cinNext').onclick=()=>cineCycle(1);
-let newArm=0;
-$('newBtn').onclick=()=>{
- if(performance.now()-newArm<3000){
-  reseed();
-  newArm=0;
- }else{
-  newArm=performance.now();
-  toast('Tap ↻ again to let this garden go');
- }
-};
+// (new-world is reached through the Forge / Gardener's Bench now)
 function reseed(newSeed,theme,params){
  warming=false; bakePhase=false; selecting=false;
  {const wov=$('warm'); if(wov)wov.classList.add('hidden');}
@@ -8266,13 +8291,9 @@ function updateStoryBanner(){
 // a cinematic chapter card that fades in over the world, then out (tap to dismiss)
 let storyCardT=null;
 function storyCard(title,body){
- const el=$('storyCard'); if(!el)return;
- $('storyCardTitle').textContent=title;
- $('storyCardBody').textContent=body;
- el.classList.remove('hidden');
- requestAnimationFrame(()=>el.classList.add('show'));
- if(storyCardT)clearTimeout(storyCardT);
- storyCardT=setTimeout(closeStoryCard,7000);
+ // chapters now announce themselves through the console, not a screen overlay
+ pushConsole(title,true);
+ if(body)pushConsole(body,true);
 }
 function closeStoryCard(){ const el=$('storyCard'); if(!el)return; el.classList.remove('show'); setTimeout(()=>el.classList.add('hidden'),450); if(storyCardT){clearTimeout(storyCardT);storyCardT=null;} }
 
@@ -8315,10 +8336,7 @@ function frame(t){
  draw(t);
  if(t-uiT>(cine?260:450)){
   uiT=t;
-  {const sn=seasonNow();$('clock').textContent=sn.glyph+' Day '+cday();}
-  $('era').textContent=(surfEra?surfEra.name:phase());
-  $('pop').textContent='👥 '+people.length+(animals.length?' · 🐾'+animals.length:'')+(monsters.length?' · 👹'+monsters.length:'')+(heroGold?' · 🪙'+heroGold:'')+(heroGems?' · 💎'+heroGems:'')+(heroStone?' · 🪨'+heroStone:'');
-  $('hearts').textContent=speedIdx>=2?('🧘 '+(Hero.pc?Hero.name+' rests':'the Sage meditates')):heroHearts()+'  ·  lv '+Hero.level+(Hero.relics.length?'  ·  🔩'+Hero.relics.length:'');
+  updateHud();
   // stamina bar + action buttons only in surface real-time play
   {const show=!interior&&!cine&&speedIdx<=1&&!hero.down;
    const sw=$('staminaWrap'),sb=$('staminaBar'),acts=$('sActs');
