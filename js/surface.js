@@ -94,7 +94,7 @@ let farmTiles=new Set();
 let farmAband=new Map();     // tile→days a farm plot has gone untended by any living town
 let region,regionsDirty=true;
 let people=[],allById=new Map(),buildings=[];
-let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[],quests=[],vehicles=[];
+let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[],quests=[];
 let flockSeq=1;
 let civFallen=false,expeditionDay=0;   // settlements can die out; an expedition reseeds a new town
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
@@ -843,7 +843,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;heroGold=0;heroGems=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];vehicles=[];farmAband=new Map();cityLinks=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];farmAband=new Map();cityLinks=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -1203,26 +1203,40 @@ const BIZKINDS=[['teahouse','🍵','a contemplative tea-and-tincture bar'],['pre
 const BIZ_ADJ=['Pondering','Verdant','Crooked','Patient','Velvet','Wandering','Tangled','Silver','Grinning','Quiet','Second','Peculiar'];
 const BIZ_NOUN=['Radish','Trellis','Axiom','Fern','Bumblebee','Root','Petal','Paradox','Nettle','Kettle','Bough','Marrow'];
 function homeTile(b){return[b.x+((b.w/2)|0),b.y+((b.h/2)|0)]}
+// city layout: keep open streets between lots and line buildings up on a shared
+// lattice so a town reads as walkable blocks rather than a random cluster
+const CITY_GAP=2;      // empty tiles kept clear around each lot → streets & breathing room
+const GRID_PITCH=5;    // lot lattice: buildings snap their corner to world multiples of this
+// snap to the ABSOLUTE world lattice (not the claim), so a growing claim can't
+// drift the grid — every lot in every town lines up on the same rows & columns
+function snapGrid(v){return Math.round(v/GRID_PITCH)*GRID_PITCH;}
+function spotClear(bx,by,w,h,gap,bounds){
+ if(bounds&&(bx<bounds.x0+1||by<bounds.y0+1||bx+w>bounds.x1||by+h>bounds.y1))return false;
+ for(let y=by-gap;y<by+h+gap;y++)for(let x=bx-gap;x<bx+w+gap;x++){   // a clear moat of open tiles
+  if(!inB(x,y))return false;
+  if(bld[idx(x,y)]>=0)return false;
+ }
+ for(let y=by;y<by+h;y++)for(let x=bx;x<bx+w;x++){                    // buildable ground under the lot
+  if(!walkable(x,y)||nodeAt.has(idx(x,y))||dungeonAt(x,y)||struct[idx(x,y)]===S_WALL)return false;
+ }
+ return true;
+}
 function findSpot(cx,cy,w,h,bounds){
- for(let r=2;r<=22;r++){
-  const cand=[];
-  for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
-   if(Math.max(Math.abs(dx),Math.abs(dy))!==r)continue;
-   cand.push([cx+dx,cy+dy]);
-  }
-  shuffle(cand);
-  for(const[bx,by]of cand){
-   if(bounds&&(bx<bounds.x0+1||by<bounds.y0+1||bx+w>bounds.x1||by+h>bounds.y1))continue;
-   let ok=true;
-   for(let y=by-1;y<=by+h&&ok;y++)for(let x=bx-1;x<=bx+w&&ok;x++){
-    if(!inB(x,y)){ok=false;break}
-    if(bld[idx(x,y)]>=0)ok=false;
+ // widen search then relax: spaced+aligned → spaced → tight (so growth never stalls)
+ const passes=[{gap:CITY_GAP,snap:true},{gap:CITY_GAP,snap:false},{gap:1,snap:false}];
+ for(const cfg of passes){
+  const seen=new Set();
+  for(let r=2;r<=26;r++){
+   const cand=[];
+   for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){
+    if(Math.max(Math.abs(dx),Math.abs(dy))!==r)continue;
+    let bx=cx+dx,by=cy+dy;
+    if(cfg.snap){bx=snapGrid(bx);by=snapGrid(by);}
+    const key=bx+','+by;if(seen.has(key))continue;seen.add(key);
+    cand.push([bx,by]);
    }
-   if(!ok)continue;
-   for(let y=by;y<by+h&&ok;y++)for(let x=bx;x<bx+w&&ok;x++){
-    if(!walkable(x,y)||nodeAt.has(idx(x,y))||dungeonAt(x,y)||struct[idx(x,y)]===S_WALL)ok=false;
-   }
-   if(ok)return[bx,by];
+   shuffle(cand);
+   for(const[bx,by]of cand){ if(spotClear(bx,by,w,h,cfg.gap,bounds))return[bx,by]; }
   }
  }
  return bounds?findSpot(cx,cy,w,h,null):null;
@@ -2669,7 +2683,6 @@ function stepSim(dt){
  if(quests.length)updateQuests(dt);
  updateAnimals(dt);
  updateFlyers(dt);
- if(vehicles.length)updateVehicles(dt);
  if(WATER_ON)weatherTick(dt);
  ripenAll(dt);
  heroParkTick(dt);
@@ -3576,81 +3589,6 @@ function updateFlyers(dt){
  for(let i=flyers.length-1;i>=0;i--){const fl=flyers[i];if(fl.dead){flyers.splice(i,1);continue}updateFlyer(fl,dt)}
 }
 
-/* ================= vehicles: cars & aircraft off the factory line ================= */
-const VEHICLE_CAP=16, GROUND_SPD=2.6, AIR_SPD=3.4;
-const VEH_GROUND_COL=['#ff5a5a','#5affd0','#ffd05a','#9a7fff','#ff8fd0','#7fd0ff'];
-const VEH_AIR_COL=['#8fd0ff','#c78fff','#ff8fbf','#9affd0'];
-function factorySpawnVehicle(v,f){
- if(vehicles.length>=VEHICLE_CAP)return null;
- const air=chance(.4);
- const cx=f.x+f.w/2, cy=f.y+f.h/2;
- let sx,sy;
- if(air){ sx=cx; sy=cy; }
- else { const s=nearOpen(cx|0,cy|0); if(!s)return null; sx=s[0]+.5; sy=s[1]+.5; }
- const veh={kind:air?'air':'ground',x:sx*TILE,y:sy*TILE,ang:R()*6.28,vid:v.id,born:simMin,
-  col:pick(air?VEH_AIR_COL:VEH_GROUND_COL),tx:sx,ty:sy,z:air?11+R()*9:0,bob:R()*6.28,
-  retarget:0,style:(R()*3)|0,len:air?(6+R()*2):(5+R()*1.5)};
- vehicles.push(veh);
- return veh;
-}
-function vehRetarget(veh){
- const v=villages.find(x=>x.id===veh.vid);
- if(v){ veh.tx=clamp(v.cx+rf(-v.rad,v.rad),2,W-2); veh.ty=clamp(v.cy+rf(-v.rad,v.rad),2,H-2); }
- else { veh.tx=clamp((veh.x/TILE)+rf(-7,7),2,W-2); veh.ty=clamp((veh.y/TILE)+rf(-7,7),2,H-2); }
- veh.retarget=rf(3,9);
-}
-function updateVehicles(dt){
- for(let i=vehicles.length-1;i>=0;i--){
-  const veh=vehicles[i];
-  const v=villages.find(x=>x.id===veh.vid);
-  if((!v||!villageMembers(v).length)&&chance(dt*0.02)){vehicles.splice(i,1);continue}  // strays wind down & leave
-  veh.retarget-=dt;
-  if(veh.retarget<=0)vehRetarget(veh);
-  const tx=veh.tx*TILE, ty=veh.ty*TILE;
-  let dx=tx-veh.x, dy=ty-veh.y; const d=Math.hypot(dx,dy)||1;
-  if(d<10){veh.retarget=Math.min(veh.retarget,0.2);}
-  const spd=(veh.kind==='air'?AIR_SPD:GROUND_SPD)*dt;
-  const nx=veh.x+dx/d*spd, ny=veh.y+dy/d*spd;
-  if(veh.kind==='air'){ veh.x=clamp(nx,3,W*TILE-3); veh.y=clamp(ny,3,H*TILE-3); veh.bob+=dt*0.2; }
-  else{
-   let moved=false;
-   if(walkable((nx/TILE)|0,(veh.y/TILE)|0)){veh.x=nx;moved=true;}
-   if(walkable((veh.x/TILE)|0,(ny/TILE)|0)){veh.y=ny;moved=true;}
-   if(!moved)veh.retarget=0;   // boxed in → pick a new heading
-  }
-  const mgx=veh.tx*TILE-veh.x, mgy=veh.ty*TILE-veh.y;
-  if(Math.hypot(mgx,mgy)>2)veh.ang+=(Math.atan2(mgy,mgx)-veh.ang)*Math.min(1,dt*0.4);
- }
-}
-function drawVehicle(c,veh,t){
- const air=veh.kind==='air';
- const bob=air?Math.sin(t*0.003+veh.born)*2:0;
- const px=veh.x, py=veh.y-(air?veh.z:0)-bob;
- const ang=veh.ang, ca=Math.cos(ang), sa=Math.sin(ang), L=veh.len, Wd=air?4.4:3.4;
- // ground shadow (smaller & offset up high for aircraft)
- c.fillStyle='rgba(0,0,0,'+(air?0.16:0.28)+')';
- c.beginPath();c.ellipse(veh.x,veh.y+1,L*0.7,2.2,0,0,7);c.fill();
- c.save();c.translate(px,py);c.rotate(ang);
- if(air){
-  // sleek hovercraft: hull + canopy + thruster glow
-  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
-  c.drawImage(GLOW_CYAN,-L-3,-Wd-3,L*2+6,Wd*2+6);c.globalCompositeOperation=go;
-  c.fillStyle=veh.col;c.beginPath();c.moveTo(L,0);c.lineTo(-L*0.7,-Wd);c.lineTo(-L,0);c.lineTo(-L*0.7,Wd);c.closePath();c.fill();
-  c.fillStyle='rgba(255,255,255,0.55)';c.fillRect(-1,-1.4,3,2.8);   // canopy
-  c.fillStyle='#26e0ff';c.fillRect(-L,-1,1.6,2);                    // thruster
- }else{
-  // wheeled roadster: body, cabin glass, neon underglow, headlights
-  const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
-  c.drawImage(GLOW_WARM,-L-2,-Wd-2,L*2+4,Wd*2+4);c.globalCompositeOperation=go;
-  c.fillStyle='#15121c';c.fillRect(-L,Wd-0.5,L*2,1.5);             // underglow shadow
-  c.fillStyle=veh.col;c.beginPath();c.moveTo(L,-Wd*0.6);c.lineTo(L*0.5,-Wd);c.lineTo(-L,-Wd);c.lineTo(-L,Wd);c.lineTo(L*0.5,Wd);c.lineTo(L,Wd*0.6);c.closePath();c.fill();
-  c.fillStyle='rgba(180,225,255,0.75)';c.fillRect(-1.5,-Wd+0.5,4,Wd*2-1);   // windshield
-  c.fillStyle='#0c0a12';c.fillRect(-L+1,-Wd,1.5,Wd*2);
-  c.fillStyle='#fff2a0';c.fillRect(L-1,-Wd*0.7,1.2,1.4);c.fillRect(L-1,Wd*0.7-1.4,1.2,1.4);   // headlights
- }
- c.restore();
-}
-function cullVehiclesFar(){ if(vehicles.length>VEHICLE_CAP)vehicles.length=VEHICLE_CAP; }
 function drawFlyer(c,fl,t){
  const bob=Math.sin(t*0.004+fl.id*1.3)*2;
  const s=fl.sizeScale;
@@ -3730,7 +3668,7 @@ function drawAnimal(c,a,t){
 
 /* ================= villages (the collective mind) ================= */
 const VIL_ADJ=['Verdance','Quiddity','Perhaps','Tenderloam','Bloomgate','Stillwater','Gloamrest','Emberfold','Seedwell','Neon Hollow','Thornhaven','Sempervirens'];
-const CLAIM_MARGIN=3,CLAIM_MIN=14,CLAIM_MAX=30,WALL_THICK=2;
+const CLAIM_MARGIN=4,CLAIM_MIN=16,CLAIM_MAX=40,WALL_THICK=2;   // roomier claims to fit the spaced street grid
 function villageName(){for(let tr=0;tr<20;tr++){const n=(Lore.active&&Lore.name(4,11))||pick(VIL_ADJ);if(!usedVil.has(n)){usedVil.add(n);return n}}const n=pick(VIL_ADJ);usedVil.add(n);return n}
 function clampClaim(c){return{x0:clamp(Math.round(c.x0),2,W-3),y0:clamp(Math.round(c.y0),2,H-3),x1:clamp(Math.round(c.x1),2,W-3),y1:clamp(Math.round(c.y1),2,H-3)}}
 function claimOf(g,extra){
@@ -4144,8 +4082,6 @@ function factoryTick(v){
   // milled building-parts: the finished materials that let a city raise arcologies
   v.stock.parts=Math.min(40,(v.stock.parts||0)+1);
   f.prosperity=(f.prosperity||0)+1;
-  // manufactories also roll mechanical vehicles off the line for the city streets & skies
-  if(chance(0.5))factorySpawnVehicle(v,f);
   if(chance(0.16)&&members.length){
    const p=pick(members), relic=pick(RELICS); giveRelic(p,relic);
    tale([p],'The manufactory of '+v.name+' pressed out '+relic.g+' the '+relic.n+', and it fell to '+p.name+'.',true);
@@ -5839,12 +5775,6 @@ function draw(t){
   if(a.x/TILE<vx0-2||a.x/TILE>vx1+2||a.y/TILE<vy0-2||a.y/TILE>vy1+2)continue;
   drawables.push({y:a.y,f:()=>drawAnimal(ctx,a,t)});
  }
- // ground vehicles ride at street level, painter-sorted with folk & beasts
- for(const veh of vehicles){
-  if(veh.kind!=='ground')continue;
-  if(veh.x/TILE<vx0-2||veh.x/TILE>vx1+2||veh.y/TILE<vy0-2||veh.y/TILE>vy1+2)continue;
-  drawables.push({y:veh.y,f:()=>drawVehicle(ctx,veh,t)});
- }
  if(!hero.down)drawables.push({y:hero.y,f:()=>drawHero(t)});
  drawables.sort((a,b)=>a.y-b.y);
  for(const d of drawables)d.f();
@@ -5856,11 +5786,6 @@ function draw(t){
  }
  airborne.sort((a,b)=>a.y-b.y);
  for(const fl of airborne)drawFlyer(ctx,fl,t);
- for(const veh of vehicles){
-  if(veh.kind!=='air')continue;
-  if(veh.x/TILE<vx0-3||veh.x/TILE>vx1+3||veh.y/TILE<vy0-3||veh.y/TILE>vy1+3)continue;
-  drawVehicle(ctx,veh,t);
- }
  if(particles.length)drawParticles(ctx);   // mining debris & sparks, above the ground
  // ---- rain, then clouds overhead ----
  if(WATER_ON&&clouds.length){
@@ -8391,9 +8316,6 @@ return {
   bashAt:(x,y,power)=>bashStruct(x,y,power||999,{hero:true}),
   setTile:(x,y,kind)=>{ if(kind==='wall')setSolid(x,y,S_WALL); else if(kind==='ruin')setSolid(x,y,S_RUIN); else if(kind==='rock')revertTile(x,y); else carveFloor(x,y); regionsDirty=true; return struct[idx(x,y)]; },
   // ---- megacity hooks (tinkering & tests) ----
-  vehicles:()=>vehicles.map(v=>({kind:v.kind,x:(v.x/TILE)|0,y:(v.y/TILE)|0,vid:v.vid})),
-  vehicleCount:()=>vehicles.length,
-  spawnVehicle:(air)=>{const v=villages[0];if(!v)return null;const f=buildings.find(b=>b.tp==='factory'&&!b.gone&&!b.ruined&&b.vid===v.id)||{x:(v.cx|0)-1,y:(v.cy|0)-1,w:3,h:3};const veh=factorySpawnVehicle(v,f);if(veh&&air!=null){veh.kind=air?'air':'ground';veh.z=air?12:0;}return veh?veh.kind:null;},
   cityLinks:()=>{rebuildCityLinks();return cityLinks.map(l=>({kind:l.kind,a:l.a.tp,b:l.b.tp}));},
   giveParts:(n)=>{const v=villages[0];if(!v)return null;v.stock.parts=(v.stock.parts||0)+(n||12);return v.stock.parts;},
   forceArcology:()=>{const v=villages.find(x=>villageMembers(x).length)||villages[0];if(!v)return null;v.dev=Math.max(v.dev||0,4);v.stock.parts=(v.stock.parts||0)+COST.arcology.parts;const bp=villageMembers(v).find(p=>p.age>=16);if(!bp)return null;const ok=startBuild(bp,'arcology',null,v);if(ok){const b=buildings[buildings.length-1];b.prog=b.need;completeBuild(b);return b.id;}return null;},
