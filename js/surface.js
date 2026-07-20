@@ -25,7 +25,7 @@ const COST={shelter:{wood:5},home:{wood:10,stone:6},biz:{wood:12,stone:8},
  venue:{wood:26,stone:20},factory:{wood:24,stone:24},highrise:{wood:42,stone:44},
  arcology:{wood:64,stone:66,parts:10}};
 const NEED={shelter:50,home:130,biz:150,apartment:260,warehouse:210,park:110,venue:320,factory:340,highrise:560,arcology:1100};
-const SZ={shelter:[1,1],home:[2,2],biz:[2,2],grave:[1,1],apartment:[2,3],warehouse:[3,2],park:[3,3],venue:[3,3],factory:[3,3],highrise:[3,3],arcology:[4,4]};
+const SZ={shelter:[2,2],home:[3,3],biz:[2,2],grave:[1,1],apartment:[2,3],warehouse:[3,2],park:[3,3],venue:[3,3],factory:[3,3],highrise:[3,3],arcology:[4,4]};
 // as a settlement grows it unlocks grander builds. cat drives who tends it (so it
 // knows when to fall to ruin), cap = households it holds, stories = drawn height.
 const BMETA={
@@ -783,6 +783,21 @@ function ecologyTick(){
 /* ================= sprite baking (Creature Forge) ================= */
 let bakeQueue=[];                       // [{kind:'person'|'hero'|'mon', ...}]
 let surfMon={};
+// ---- procedural building sprites (Building Forge) ----
+// one architecture per world; each small build gets one of a handful of variants,
+// pre-baked to a canvas on first sight and cached for the world's lifetime.
+let buildStyle=null; let bldSprites={}; const BLDG_VARIANTS=8;
+function buildingVariant(b){ return ((b.id*2654435761)>>>0)%BLDG_VARIANTS; }
+function buildingSprite(b){
+ if(!buildStyle||typeof BuildingForge==='undefined')return null;
+ const v=buildingVariant(b), key=b.tp+'/'+b.w+'x'+b.h+'/'+v;
+ let s=bldSprites[key];
+ if(s===undefined){
+  try{ s=BuildingForge.bake(b.tp,b.w,b.h,'v'+v,buildStyle,TILE); }catch(e){ s=null; }
+  bldSprites[key]=s;
+ }
+ return s;
+}
 function queuePersonBake(p){p.sprite=null;bakeQueue.push({kind:'person',p})}
 function queueHeroBake(){hero.sprite=null;bakeQueue.push({kind:'hero'})}
 function queueMonsterBakes(){surfMon={};
@@ -847,6 +862,7 @@ function genWorld(){
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
+ if(typeof BuildingForge!=='undefined'){buildStyle=BuildingForge.worldStyle(seed);bldSprites={};}   // this world's architecture
  AF.setWorld(biome.faunaShift);TF.setWorld(biome.relicRot,seed);relicIconCache.clear();
  bakeFlora('garden-'+seed);
  queueMonsterBakes();
@@ -5272,9 +5288,16 @@ function drawBuilding(c,b,nf){
  }
  if(b.tp==='park'){drawPark(c,b);return}
  if(['apartment','warehouse','venue','factory','highrise','arcology'].includes(b.tp)){drawTallBuilding(c,b);return}
- c.fillStyle='#1b1626';c.fillRect(px+w/2-2,py+h-4,4,4);
+ // small builds (lean-to / house / shop): a pre-baked procedural sprite unique to this world
+ const spr=buildingSprite(b);
+ if(spr&&spr.canvas){
+  c.fillStyle='rgba(0,0,0,0.30)';c.beginPath();c.ellipse(px+w/2,py+h-1,w*0.52,3,0,0,7);c.fill();
+  c.drawImage(spr.canvas,px+spr.dx,py+spr.dy);
+ }else{
+  c.fillStyle='#1b1626';c.fillRect(px+w/2-2,py+h-4,4,4);
+ }
  if(b.tp==='biz'&&b.sub){
-  // neon storefront sign
+  // neon storefront sign floating above the shop
   const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
   c.drawImage(GLOW_PINK,px+w-14,py-18,18,18);c.globalCompositeOperation=go;
   c.fillStyle='#3d3554';c.fillRect(px+w-6,py-8,2,8);
@@ -5778,7 +5801,7 @@ function draw(t){
  if(!hero.down)drawables.push({y:hero.y,f:()=>drawHero(t)});
  drawables.sort((a,b)=>a.y-b.y);
  for(const d of drawables)d.f();
- // flyers & aircraft ride above everything (with a ground shadow), sorted among themselves
+ // flyers ride above everything (with a ground shadow), sorted among themselves
  const airborne=[];
  for(const fl of flyers){
   if(fl.x/TILE<vx0-3||fl.x/TILE>vx1+3||fl.y/TILE<vy0-3||fl.y/TILE>vy1+3)continue;
@@ -8294,6 +8317,9 @@ return {
   rerollFolk:()=>{for(const p of people){p.lookSeed='folk-'+p.id+'-'+((Math.random()*1e9)|0);queuePersonBake(p)}toast('Everyone wakes up feeling like someone slightly else.')},
   rerollHero:()=>{Hero.lookSeed='sage-'+((Math.random()*1e9)|0);queueHeroBake();toast('The Sage is reborn mid-stride.')},
   rerollMonsters:()=>{queueMonsterBakes();toast('The things below molt into new shapes.')},
+  rerollBuildings:()=>{if(typeof BuildingForge==='undefined')return null;buildStyle=BuildingForge.worldStyle('reroll-'+((Math.random()*1e9)|0));bldSprites={};toast('The town is rebuilt in a new style.');return buildStyle.wallMat+'/'+buildStyle.roofShapes.join('+');},
+  buildingStyle:()=>buildStyle?{wallMat:buildStyle.wallMat,roofShapes:buildStyle.roofShapes.slice(),roofHue:Math.round(buildStyle.roofHue),wallHue:Math.round(buildStyle.wallHue),thatch:buildStyle.thatch}:null,
+  buildingSpriteInfo:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;const s=buildingSprite(b);return s&&s.canvas?{tp:b.tp,w:b.w,h:b.h,variant:buildingVariant(b),cw:s.canvas.width,ch:s.canvas.height,dx:s.dx,dy:s.dy}:{tp:b.tp,w:b.w,h:b.h,noSprite:true};},
   // per-entity edits
   renamePerson:(p,nm)=>{if(!nm)return;p.name=nm;if(selected===p)renderPanelFull(p);toast('So named: '+nm)},
   rerollTraits:(p)=>{
