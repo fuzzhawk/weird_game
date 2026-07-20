@@ -63,6 +63,8 @@ const U = (function(){
    Hearts, level and blade upgrades persist across the surface
    garden and every Understory floor.                          */
 const Hero = {
+  name:'the Sage',                               // the player character's name
+  pc:null,                                        // set when the player has taken over an NPC's life
   hp:5, maxHp:5,
   level:1, xp:0, kills:0, renown:0,          // dreams the Sage has helped realize
   dmg:1, rangeMul:1, arcMul:1, speedMul:1,
