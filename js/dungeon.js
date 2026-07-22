@@ -59,6 +59,7 @@ function applyWorldPalette(seedStr){
     T.dirtColor  = skin.dirt;
     T.style = TileGen.deriveStyle(skin.styleSeed || seedStr);
     T.borrowedSkin = true;
+    T.worldTheme = skin.theme || null;
     renderTileset();
     return;
   }
@@ -358,7 +359,10 @@ document.addEventListener('mousedown',()=>{ const ac=audio(); if(ac&&ac.state===
    ============================================================ */
 const ROWS=72, COLS=72, RES=T.res;
 const WORLD_W=COLS*RES, WORLD_H=ROWS*RES;
-let field, vgrid, tileMap, variantMap, trees=[];
+let field, vgrid, tileMap, variantMap, trees=[], cavePlants=[], dungTech=[];
+let dungTechCache={};
+function dungTechSprite(kind,variant){ const key=kind+'/'+variant; let s=dungTechCache[key];
+  if(s===undefined){ try{ s=(typeof SceneryForge!=='undefined')?SceneryForge.bake(kind,'d'+variant,'cyber'):null; }catch(e){ s=null; } dungTechCache[key]=s; } return s; }
 let blockGrid=new Uint8Array(ROWS*COLS);
 const FACE_ROWS=2;
 let highCellArr=new Uint8Array(ROWS*COLS);
@@ -571,9 +575,15 @@ function genWorld(seedStr){
   mainRegion = largestInteriorRegion();
   regionSet = new Set(mainRegion.map(([y,x])=>y*COLS+x));
   variantMap = tileMap.map(row=>row.map(()=>Math.floor(rng()*NUM_VARIANTS)));
-  trees=[];
+  trees=[]; cavePlants=[]; dungTech=[];
+  const cyberSkin = (T.worldTheme==='cyberpunk');
   for(const [y,x] of mainRegion){
-    if(!highCellArr[y*COLS+x] && rng()<0.055) trees.push({x:(x+0.5)*RES, y:(y+0.5)*RES, r:6, wob:rng()*6.28});
+    if(highCellArr[y*COLS+x]) continue;
+    if(rng()<0.055){ trees.push({x:(x+0.5)*RES, y:(y+0.5)*RES, r:6, wob:rng()*6.28}); continue; }
+    // cave flora dwells in the deep — glowing fungi, fungal shelves, hanging roots
+    if(rng()<0.05){ cavePlants.push({x:(x+0.5)*RES, y:(y+0.5)*RES, pv:(rng()*3)|0, glow:rng()<0.55, wob:rng()*6.28}); continue; }
+    // a cyber-skinned Understory bleeds tech into scattered pockets
+    if(cyberSkin && rng()<0.025){ const KIND=['panel','wires','pipes','conduit','junction','screen']; dungTech.push({x:(x+0.5)*RES, y:(y+0.5)*RES, kind:KIND[(rng()*KIND.length)|0], variant:(rng()*4)|0, ph:rng()*6.28}); }
   }
 }
 function walkable(px,py){
@@ -1582,6 +1592,29 @@ function drawTree(t){
   ctx.fillStyle=`rgb(${pal.grassBase.join(',')})`;
   ctx.beginPath(); ctx.arc(px-2+sway,py-12,7,0,6.28); ctx.fill();
 }
+function drawCavePlant(cp){
+  const px=wx(cp.x), py=wy(cp.y), gy=py+6, pv=cp.pv||0, tt=performance.now();
+  ctx.fillStyle='rgba(0,0,0,0.28)';ctx.beginPath();ctx.ellipse(px,gy,6,2.2,0,0,6.28);ctx.fill();
+  if(cp.glow){const go=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';ctx.globalAlpha=0.3+0.2*Math.sin(tt*0.004+cp.wob);
+    ctx.fillStyle='rgba(120,255,180,0.5)';ctx.beginPath();ctx.arc(px,gy-6,10,0,6.28);ctx.fill();ctx.globalAlpha=1;ctx.globalCompositeOperation=go;}
+  if(pv===0){ for(let m=0;m<3;m++){const mx=px-4+m*4, mh=4+((m*2)%3);
+    ctx.fillStyle='#c8d8b0';ctx.fillRect(mx-0.5,gy-mh,1.6,mh);
+    ctx.fillStyle=cp.glow?'#8affc0':'#9a6ad0';ctx.beginPath();ctx.ellipse(mx+0.3,gy-mh,2.5,1.7,0,Math.PI,0);ctx.fill();} }
+  else if(pv===1){ ctx.fillStyle='#4a6a3a';ctx.beginPath();ctx.ellipse(px,gy-2,5,3,0,0,6.28);ctx.fill();
+    ctx.fillStyle=cp.glow?'#7fe0a0':'#5f8a48';for(let m=0;m<4;m++)ctx.fillRect(px-4+m*2.4,gy-3-((m*3)%3),1.6,2); }
+  else{ ctx.strokeStyle='#5a4a34';ctx.lineWidth=1.2;
+    for(let r=0;r<4;r++){const rx=px-4+r*3;ctx.beginPath();ctx.moveTo(rx,py-10);ctx.lineTo(rx+Math.sin(r+tt*0.001)*1.5,py-4+((r*2)%4));ctx.stroke();}
+    ctx.fillStyle=cp.glow?'#8affc0':'#7a9a5a';for(let r=0;r<3;r++)ctx.fillRect(px-4+r*4,py-6+((r*2)%3),1.4,1.4); }
+}
+function drawDungTech(dt,time){
+  const s=dungTechSprite(dt.kind,dt.variant); if(!s||!s.canvas)return;
+  const px=wx(dt.x), py=wy(dt.y);
+  ctx.drawImage(s.canvas,px-s.ax,py-s.ay);
+  const go=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';
+  ctx.globalAlpha=0.3+0.2*Math.sin(time*0.005+dt.ph);
+  ctx.fillStyle='rgba(60,220,220,0.5)';ctx.beginPath();ctx.arc(px,py-9,8,0,6.28);ctx.fill();
+  ctx.globalAlpha=1;ctx.globalCompositeOperation=go;
+}
 let keeperSprite=null;
 function ensureKeeperSprite(){
   if(keeperSprite && keeperSprite._seed===worldSeed) return keeperSprite;
@@ -1857,6 +1890,8 @@ function draw(time){
   const sprites=[];
   for(const s of structures) sprites.push({y:(s.cy+s.h)*RES, f:()=>drawStructure(s)});
   for(const t of trees) if(Math.abs(t.x-player.x)<W && Math.abs(t.y-player.y)<H) sprites.push({y:t.y,f:()=>drawTree(t)});
+  for(const cp of cavePlants) if(Math.abs(cp.x-player.x)<W && Math.abs(cp.y-player.y)<H) sprites.push({y:cp.y,f:()=>drawCavePlant(cp)});
+  for(const dt of dungTech) if(Math.abs(dt.x-player.x)<W && Math.abs(dt.y-player.y)<H) sprites.push({y:dt.y,f:()=>drawDungTech(dt,time)});
   for(const n of npcs) sprites.push({y:n.y,f:()=>drawNpc(n)});
   for(const e of enemies) sprites.push({y:e.y,f:()=>drawEnemy(e)});
   if(!dead && !player.falling) sprites.push({y:player.y,f:()=>drawPlayerChar(time)});
@@ -1950,7 +1985,8 @@ return {
   // small debug/cheat surface — used by smoke tests and the curious
   debug:{
     get state(){return {floorIdx,cleansedRun,objective:objTitle(),final:isFinalFloor(),hasDown:!!portalDown,hasBoss:!!boss,keeper:false}},
-    get skin(){return {borrowed:!!T.borrowedSkin, grass:T.grassColor, dirt:T.dirtColor}},
+    get skin(){return {borrowed:!!T.borrowedSkin, grass:T.grassColor, dirt:T.dirtColor, theme:T.worldTheme||null}},
+    get flora(){return {trees:trees.length, cavePlants:cavePlants.length, dungTech:dungTech.length}},
     get roster(){return CREATURES?{slime:CREATURES.slime.arch,wisp:CREATURES.wisp.arch,brute:CREATURES.brute.arch,boss:CREATURES.boss.arch}:null},
     get zoom(){return camZ}, set zoom(z){camZTarget=dclamp(z,ZMIN,ZMAX)},
     completeTask(){   // clear the objective: slay the heart on the deepest floor, else cleanse

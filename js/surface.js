@@ -94,7 +94,7 @@ let farmTiles=new Set();
 let farmAband=new Map();     // tile→days a farm plot has gone untended by any living town
 let region,regionsDirty=true;
 let people=[],allById=new Map(),buildings=[];
-let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[],quests=[];
+let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[],quests=[],techProps=[];
 let flockSeq=1;
 let civFallen=false,expeditionDay=0;   // settlements can die out; an expedition reseeds a new town
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
@@ -836,6 +836,47 @@ function buildingSprite(b){
  }
  return s;
 }
+// ---- passive tech scenery (SceneryForge): panels · wires · pipes · screens ----
+let techSpriteCache={}, techPropT=0;
+function techSprite(kind,theme,variant){
+ const key=kind+'/'+theme+'/'+variant;
+ let s=techSpriteCache[key];
+ if(s===undefined){ try{ s=SceneryForge.bake(kind,'v'+variant,theme); }catch(e){ s=null; } techSpriteCache[key]=s; }
+ return s;
+}
+function techTheme(){ return worldTheme==='cyberpunk'?'cyber':'modern'; }
+function techEraActive(){
+ if(typeof SceneryForge==='undefined')return false;
+ if(worldTheme==='cyberpunk'||worldTheme==='modern')return true;
+ return villages.some(v=>villageDev(v)>=3);   // any world, once a proper city rises
+}
+// scatter tech props over open ground around built-up towns (deterministic per town)
+function refreshTechProps(){
+ if(!techEraActive()){techProps.length=0;return;}
+ const theme=techTheme(), minDev=(worldTheme==='cyberpunk'||worldTheme==='modern')?1:3, out=[];
+ for(const v of villages){ const dev=villageDev(v); if(dev<minDev)continue;
+  const n=Math.min(10,2+dev*2), cl=v.claim||{x0:v.cx-8,y0:v.cy-8,x1:v.cx+8,y1:v.cy+8};
+  const rng=U.mulberry32(U.hashStr('tech-'+v.id+'-'+dev+'-'+seed));
+  let placed=0,tries=0;
+  while(placed<n&&tries++<60){
+   const x=clamp(Math.round(cl.x0-1+rng()*(cl.x1-cl.x0+2)),2,W-3), y=clamp(Math.round(cl.y0-1+rng()*(cl.y1-cl.y0+2)),2,H-3);
+   const i=idx(x,y);
+   if(map[i]!==0||bld[i]>=0||nodeAt.has(i)||pavedTiles.has(i)||farmGrid[i]||(typeof water!=='undefined'&&water&&water[i])||dungeonAt(x,y))continue;
+   const kind=SceneryForge.KINDS[(rng()*SceneryForge.KINDS.length)|0], variant=(rng()*4)|0;
+   out.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,kind,variant,theme,glow:(kind==='screen'||kind==='junction'||kind==='panel'),ph:rng()*6.28});
+   placed++;
+  }
+ }
+ techProps=out.slice(0,48);
+}
+function drawTechProp(c,p,t){
+ const s=techSprite(p.kind,p.theme,p.variant); if(!s||!s.canvas)return;
+ c.drawImage(s.canvas,p.x-s.ax,p.y-s.ay);
+ if(p.glow){ const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+  c.globalAlpha=0.30+0.22*Math.sin(t*0.005+p.ph);
+  c.drawImage(p.theme==='cyber'?GLOW_CYAN:GLOW_BLUE,p.x-9,p.y-19,18,18);
+  c.globalAlpha=1;c.globalCompositeOperation=go; }
+}
 function queuePersonBake(p){p.sprite=null;bakeQueue.push({kind:'person',p})}
 function queueHeroBake(){hero.sprite=null;bakeQueue.push({kind:'hero'})}
 function queueMonsterBakes(){surfMon={};
@@ -896,7 +937,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;heroGold=0;heroGems=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];farmAband=new Map();cityLinks=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];techProps=[];farmAband=new Map();cityLinks=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -4789,7 +4830,7 @@ function paintCellTexture(c,x,y,solidMask){ paintCellTextureTo(c,x,y,solidMask,s
 // derelict/overgrown variants for degraded ruins.
 function bakeInteriorBg(intr){
  const b=intr.b, decay=intr.decay||0;
- const mat = decay===1?'derelict' : decay===2?'overgrown' : TileGen.interiorMatFor(b.tp);
+ const mat = decay===1?'cyber' : decay===2?'ancient' : TileGen.interiorMatFor(b.tp);
  const Wpx=intr.gw*TILE, Hpx=intr.gh*TILE;
  const cv=document.createElement('canvas');cv.width=Wpx;cv.height=Hpx;
  const c=cv.getContext('2d');c.imageSmoothingEnabled=false;
@@ -5836,6 +5877,10 @@ function draw(t){
   if(a.x/TILE<vx0-2||a.x/TILE>vx1+2||a.y/TILE<vy0-2||a.y/TILE>vy1+2)continue;
   drawables.push({y:a.y,f:()=>drawAnimal(ctx,a,t)});
  }
+ for(const p of techProps){
+  if(p.x/TILE<vx0-2||p.x/TILE>vx1+2||p.y/TILE<vy0-2||p.y/TILE>vy1+2)continue;
+  drawables.push({y:p.y,f:()=>drawTechProp(ctx,p,t)});
+ }
  if(!hero.down)drawables.push({y:hero.y,f:()=>drawHero(t)});
  drawables.sort((a,b)=>a.y-b.y);
  for(const d of drawables)d.f();
@@ -6210,6 +6255,15 @@ function makeInterior(b){
   for(let k=0;k<nLoot;k++){ const s=grab(); if(!s)break;
    const r=rng(), kind=r<.12?'relic':r<.42?'gem':'gold';
    intr.loot.push({x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,kind,amt:kind==='gold'?(3+((rng()*7)|0)):(1+((rng()*2)|0)),relic:kind==='relic'?pick(RELICS):null,got:false,t:rng()*6}); }
+  // cave flora reclaims the ruin — thick in an ancient overgrowth, damp sprigs in cyber
+  const nPlant = ancient?(4+((rng()*4)|0)):(1+((rng()*2)|0));
+  for(let k=0;k<nPlant;k++){ const s=grab(); if(!s)break; put(s[0],s[1],1,1,'caveplant',0);
+   const fp=intr.furniture[intr.furniture.length-1]; fp.pv=(rng()*3)|0; fp.glow=rng()<0.5; }
+  // haunted cyber-tech scenery bled through the derelict floor
+  if(cyber&&typeof SceneryForge!=='undefined'){ const nTech=2+((rng()*3)|0);
+   for(let k=0;k<nTech;k++){ const s=grab(); if(!s)break;
+    const kind=SceneryForge.KINDS[(rng()*SceneryForge.KINDS.length)|0];
+    intr.furniture.push({x:s[0],y:s[1],w:1,h:1,kind:'tech',sprite:techSprite(kind,'cyber',(rng()*4)|0)}); } }
   bakeInteriorBg(intr);
   return intr;
  }
@@ -6266,6 +6320,12 @@ function makeInterior(b){
  // the central corridor is kept clear no matter what furniture landed on it, so
  // every room stays reachable from the door
  if(mega)for(let y=1;y<gh-1;y++){solid[si(dcx,y)]=0;solid[si(dcx-1,y)]=0;}
+ // modern civic interiors are dressed with clean tech: screens, panels, conduits
+ if(!decay && ['factory','highrise','arcology','venue'].includes(b.tp) && typeof SceneryForge!=='undefined'){
+  const nTech=2+((rng()*3)|0);
+  for(let k=0;k<nTech;k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2)continue;
+   const kind=SceneryForge.KINDS[(rng()*SceneryForge.KINDS.length)|0];
+   intr.furniture.push({x:s[0],y:s[1],w:1,h:1,kind:'tech',sprite:techSprite(kind,'modern',(rng()*4)|0)}); } }
  // occupants are EXACTLY the folk currently inside this building — the same souls
  // who stepped off the overworld to sleep here. Empty if nobody's home, so the
  // inside always matches the streets outside.
@@ -6457,6 +6517,29 @@ function resolveIntSlashes(rdt){
 }
 function drawFurniture(c,f){
  const px=f.x*TILE,py=f.y*TILE,w=f.w*TILE,h=f.h*TILE;
+ if(f.kind==='tech'){
+  const s=f.sprite; if(s&&s.canvas)c.drawImage(s.canvas,px+TILE/2-s.ax,py+TILE-s.ay);
+  return;
+ }
+ if(f.kind==='caveplant'){
+  // glowing fungi / fungal cluster / hanging root — a breath of cave life
+  const cx=px+TILE/2, gy=py+TILE-2, pv=f.pv||0, tt=performance.now();
+  if(f.glow){const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';c.globalAlpha=0.3+0.18*Math.sin(tt*0.004+f.x);
+   c.drawImage(GLOW_GREEN,cx-8,gy-12,16,16);c.globalAlpha=1;c.globalCompositeOperation=go;}
+  if(pv===0){ // capped mushrooms
+   for(let m=0;m<3;m++){const mx=cx-4+m*4, mh=4+((m*2)%3);
+    c.fillStyle='#c8d8b0';c.fillRect(mx-0.5,gy-mh,1.6,mh);
+    c.fillStyle=f.glow?'#8affc0':'#9a6ad0';c.beginPath();c.ellipse(mx+0.3,gy-mh,2.4,1.6,0,Math.PI,0);c.fill();}
+  }else if(pv===1){ // fungal shelf / moss clump
+   c.fillStyle='#4a6a3a';c.beginPath();c.ellipse(cx,gy-2,5,3,0,0,7);c.fill();
+   c.fillStyle=f.glow?'#7fe0a0':'#5f8a48';for(let m=0;m<4;m++)c.fillRect(cx-4+m*2.4,gy-3-((m*3)%3),1.6,2);
+  }else{ // hanging roots from above
+   c.strokeStyle='#5a4a34';c.lineWidth=1.2;
+   for(let r=0;r<4;r++){const rx=px+3+r*3;c.beginPath();c.moveTo(rx,py);c.lineTo(rx+Math.sin(r+tt*0.001)*1.5,py+6+((r*2)%4));c.stroke();}
+   c.fillStyle=f.glow?'#8affc0':'#7a9a5a';for(let r=0;r<3;r++)c.fillRect(px+3+r*4,py+5+((r*2)%3),1.4,1.4);
+  }
+  return;
+ }
  if(f.kind==='rug'){
   c.fillStyle='#7a3b4a';c.fillRect(px+1,py+1,w-2,h-2);
   c.fillStyle='#a8586a';c.fillRect(px+3,py+3,w-6,h-6);
@@ -7745,6 +7828,7 @@ function finishDropIn(){
   tale([],'And so, after '+yrs+' years of seasons, births, feuds and quiet triumphs, a wandering Sage crests the hills and walks down into the living world.',true);
  }
  startCampaign();
+ refreshTechProps();   // dress the tech-era cities with panels, wires & screens
  if(warmDone)warmDone();
 }
 
@@ -8459,6 +8543,7 @@ function frame(t){
  updateMerchant(rdt);
  renownFrameTick(rdt);
  campaignTick(rdt);
+ techPropT-=rdt; if(techPropT<=0){ techPropT=12; refreshTechProps(); }   // keep tech scenery in step with the cities
  if(cine){
   cam.z+=(cineZoomTarget-cam.z)*0.09;
  }
@@ -8722,10 +8807,15 @@ return {
    const push=(x,y)=>{if(x<0||y<0||x>=intr.gw||y>=intr.gh)return;const i=intr.si(x,y);if(seen[i]||intr.wallMask[i]===1)return;seen[i]=1;q.push([x,y]);};
    if(intr.wallMask[intr.si(intr.door[0],intr.gh-2)]===0){seen[intr.si(intr.door[0],intr.gh-2)]=1;}
    while(q.length){const[x,y]=q.pop();const i=intr.si(x,y);if(intr.wallMask[i]===1)continue;if(!seen[i])seen[i]=1;reach++;push(x+1,y);push(x-1,y);push(x,y+1);push(x,y-1);}
+   const fk={}; for(const f of intr.furniture)fk[f.kind]=(fk[f.kind]||0)+1;
    return {rooms:intr.rooms?intr.rooms.length:0, roomShapes:intr.rooms?intr.rooms.map(r=>r.shape):[], floor, walls, breakable,
      reachable:reach, connectedPct:floor?Math.round(reach/floor*100):0,
-     foes:intr.foes.length, loot:intr.loot.length, traps:intr.traps.length};
+     foes:intr.foes.length, loot:intr.loot.length, traps:intr.traps.length,
+     mat:intr.mat, tech:fk.tech||0, caveplants:fk.caveplant||0};
   },
+  techPropCount:()=>techProps.length,
+  techPropKinds:()=>{const k={};for(const p of techProps)k[p.kind]=(k[p.kind]||0)+1;return {theme:techProps[0]&&techProps[0].theme,count:techProps.length,kinds:k};},
+  forceTechProps:()=>{refreshTechProps();return techProps.length;},
   // TEST: force-break every breakable wall within radius tiles of the hero
   intSmashNear:(radius)=>{
    if(!interior||!interior.breakable)return 0; const intr=interior, R=(radius||6);
