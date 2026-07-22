@@ -937,7 +937,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;heroGold=0;heroGems=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];techProps=[];farmAband=new Map();cityLinks=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];techProps=[];interiorQuest=null;farmAband=new Map();cityLinks=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -2798,6 +2798,7 @@ function heroParkTick(dt){
  }else hero._inPark=false;
 }
 function updatePerson(p,dt){
+ if(p.questLost){p.age+=dt/(DAY*2);return}   // spirited away into a ruin/dungeon until rescued
  if(p.inDungeon){p.age+=dt/(DAY*2);return}
  p.age+=dt/(DAY*2);
  p.hunger=clamp(p.hunger+0.055*dt*(p.age<12?0.7:1),0,100);
@@ -5842,7 +5843,7 @@ function draw(t){
  }
  // people + the Sage, painter-sorted together — folk who've stepped inside a
  // building are off the overworld entirely (you'll find them in its interior)
- const ppl=people.filter(p=>!p.inDungeon&&!p.inside);
+ const ppl=people.filter(p=>!p.inDungeon&&!p.inside&&!p.questLost);
  const drawables=ppl.map(p=>({y:p.y,f:()=>{
   ctx.save();ctx.translate(p.x,p.y);
   if(p===selected){
@@ -6183,6 +6184,26 @@ function breakIntWall(intr,tx,ty){
   if(nx>0&&ny>0&&nx<intr.gw-1&&ny<intr.gh-1&&intr.breakable&&!intr.breakable[intr.si(nx,ny)]&&intr.wallMask[intr.si(nx,ny)]===1){
    intr.breakable[intr.si(nx,ny)]=1;intr.wallHp[intr.si(nx,ny)]=intr.breakBase;}}
 }
+// the farthest open floor cell from the door — where a quest's prize or captive hides
+function farInteriorCell(intr){
+ let best=[intr.door[0],1], bd=-1;
+ for(let y=1;y<intr.gh-2;y++)for(let x=1;x<intr.gw-1;x++){ if(intr.wallMask[intr.si(x,y)]!==0)continue;
+  const d=Math.abs(x-intr.door[0])+Math.abs(y-(intr.gh-1)); if(d>bd){bd=d;best=[x,y];} }
+ return best;
+}
+// if a sub-area quest is bound to this building, plant its objective inside
+function injectInteriorQuest(intr,b){
+ const q=interiorQuest; if(!q||q.bId!==b.id||q.done)return;
+ const s=farInteriorCell(intr);
+ if(q.kind==='recoverLoot'){
+  intr.loot.push({x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,kind:'relic',relic:q.relic||pick(RELICS),amt:1,got:false,t:0,quest:true});
+ }else if(q.kind==='rescue'){
+  const p=allById.get(q.npcId);
+  intr.occupants.push({pid:q.npcId,name:q.npcName||(p&&p.name)||'the lost soul',sprite:(p&&p.sprite)||null,col:(p&&p.col)||'#c8a25a',
+   x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,tx:0,ty:0,dir:0,animClock:0,wait:1e9,moving:false,quest:true,rescue:true});
+ }
+ // clearRuin needs no plant — the ruin's own foes are the objective
+}
 function makeInterior(b){
  // big civic buildings & towers open into deep, multi-room floors you can wander
  const mega=['apartment','warehouse','venue','factory','highrise','arcology'].includes(b.tp);
@@ -6264,6 +6285,7 @@ function makeInterior(b){
    for(let k=0;k<nTech;k++){ const s=grab(); if(!s)break;
     const kind=SceneryForge.KINDS[(rng()*SceneryForge.KINDS.length)|0];
     intr.furniture.push({x:s[0],y:s[1],w:1,h:1,kind:'tech',sprite:techSprite(kind,'cyber',(rng()*4)|0)}); } }
+  injectInteriorQuest(intr,b);
   bakeInteriorBg(intr);
   return intr;
  }
@@ -6336,6 +6358,7 @@ function makeInterior(b){
   intr.occupants.push({pid:o.id,name:o.name,sprite:o.sprite||null,col:o.col,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,
     tx:0,ty:0,dir:0,animClock:0,wait:rng()*2.5,moving:false});
  }
+ injectInteriorQuest(intr,b);
  bakeInteriorBg(intr);
  return intr;
 }
@@ -6426,6 +6449,15 @@ function updateInteriorScene(rdt){
  if(interior.traps&&interior.traps.length)updateIntTraps(rdt);
  if(interior.loot&&interior.loot.length)collectIntLoot(rdt);
  if(heroSlashes.length)resolveIntSlashes(rdt);
+ // sub-area quest checks: reaching the captive / clearing every foe
+ if(interiorQuest&&!interiorQuest.done&&interior.b.id===interiorQuest.bId){
+  if(interiorQuest.kind==='rescue'){
+   const cap=interior.occupants.find(o=>o.rescue);
+   if(cap&&dist2(cap.x,cap.y,hero.x,hero.y)<(TILE*1.4)**2){ interiorQuest.done=true; cap.freed=true; toast('✦ You found '+(cap.name||'them')+'! Lead them back to the light.'); }
+  }else if(interiorQuest.kind==='clearRuin'){
+   if((!interior.foes||interior.foes.length===0)){ interiorQuest.done=true; toast('✦ The ruin is cleared — nothing stirs.'); }
+  }
+ }
  // stepping into the doorway leads back outside
  if(((hero.y/TILE)|0)>=interior.gh-1)exitInterior();
  uiProxT-=rdt;if(uiProxT<=0){uiProxT=0.2;updateContextButtons()}
@@ -6469,6 +6501,7 @@ function collectIntLoot(rdt){
   lo.t=(lo.t||0)+rdt;
   if(!lo.got&&dist2(lo.x,lo.y,hero.x,hero.y)<(TILE*0.85)**2){
    lo.got=true;
+   if(lo.quest&&interiorQuest&&interiorQuest.kind==='recoverLoot'&&interior&&interior.b.id===interiorQuest.bId){interiorQuest.done=true;toast('✦ You recovered what you came for!');}
    if(lo.kind==='relic'&&lo.relic){ Hero.relics.push(lo.relic); toast('You prised '+lo.relic.g+' '+lo.relic.n+' from the wreckage!'); }
    else if(lo.kind==='gem'){ heroGems+=lo.amt; toast('💎 +'+lo.amt+' gems from the ruins.'); }
    else { heroGold+=lo.amt; toast('🪙 +'+lo.amt+' gold from the ruins.'); }
@@ -6745,6 +6778,11 @@ function drawInterior(t){
   else{ // sprite not baked yet — a simple painted stand-in so they're never invisible
    ctx.fillStyle=o.col||'#b48a5a';ctx.beginPath();ctx.ellipse(0,-3,3.4,4.4,0,0,7);ctx.fill();
    ctx.fillStyle='#e8d0b0';ctx.beginPath();ctx.arc(0,-8,2.2,0,7);ctx.fill();
+  }
+  if(o.rescue){ // a captive soul you've come to find — flag them so they read across the gloom
+   const go=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';ctx.globalAlpha=0.5+0.3*Math.sin(t*0.006);
+   ctx.drawImage(GLOW_GOLD,-11,-24,22,22);ctx.globalAlpha=1;ctx.globalCompositeOperation=go;
+   ctx.font='9px system-ui';ctx.textAlign='center';ctx.fillStyle='#ffe08a';ctx.fillText(o.freed?'🙏':'🆘',0,-15);
   }
   ctx.restore();
  }});
@@ -7660,7 +7698,7 @@ function reseed(newSeed,theme,params){
  {const wov=$('warm'); if(wov)wov.classList.add('hidden');}
  {const cs=$('charsel'); if(cs)cs.classList.add('hidden');}
  Hero.name='the Sage'; Hero.pc=null;   // each world lets the player choose a new life
- campaign=null; closeStoryCard(); {const sb=$('story');if(sb)sb.classList.add('hidden');}
+ campaign=null; interiorQuest=null; closeStoryCard(); {const sb=$('story');if(sb)sb.classList.add('hidden');}
  seed=(newSeed===undefined)?((Math.random()*2**31)|0):newSeed;
  if(theme)worldTheme=theme;
  if(params)worldParams=Object.assign({buildup:0,flora:.5,fertility:.5,fauna:.5,monsters:.5,treasure:.5,hue:-1,sat:-1},params);
@@ -7950,6 +7988,9 @@ function traitList(keys){ return (keys||[]).map(t=>TRAITS[t]?TRAITS[t].a:t).join
    quest of escalating chapters (a sign, a soul, a hunt, a descent) that climbs to a
    named boss and a saved world. Fresh setting, villain and lore every world. */
 let campaign=null;
+// a sub-area quest bound to one building/ruin the player must enter:
+// {kind:'recoverLoot'|'clearRuin'|'rescue', bId, npcId, npcName, relic, done}
+let interiorQuest=null;
 const VILLAINS={
  fantasy:[['the Barrow-King','a crowned dead thing risen from the old graves'],['the Thornwitch','a hedge-sovereign who trades in stolen names'],['the Ashen Wyrm','a slow furnace wearing scales'],['the Pale Shepherd','who herds the drowned and the forgotten']],
  cyberpunk:[['the Chrome Warden','a security mind that grew a body and a grudge'],['the Hollow Broker','a data-ghost in a stolen face'],['the Rust Sovereign','a landfill god of cast-off machines'],['the Signal','a hunger loose in the wires']],
@@ -8257,6 +8298,39 @@ function escortStep(p,dt){
   p.moving=true; p.fx=dx>0?1:-1; }
  else p.moving=false;
 }
+/* ---- interior/ruin quests: send the Sage INTO a building or ruin ---- */
+function questRuins(){ return buildings.filter(b=>!b.gone&&b.done&&(b.decay===1||b.decay===2)); }
+function pickQuestRuin(){ const r=questRuins(); return r.length?pick(r):null; }
+function buildingDoorMark(b){ const dt=doorTileOf(b); return [dt[0],dt[1]]; }
+// recover a relic from inside a ruin (or, failing that, a standing civic building)
+function genRuinLoot(H){
+ const b=pickQuestRuin()||buildings.find(x=>!x.gone&&x.done&&!x.decay&&['warehouse','factory','apartment','biz','venue'].includes(x.tp));
+ if(!b)return null;
+ return {k:'ruinloot', bId:b.id, relic:pick(RELICS), mark:buildingDoorMark(b),
+  title:'Salvage in '+enterLabel(b).replace(/^the /,''),
+  intro:'Something worth carrying still lies deep inside '+enterLabel(b)+'. Go in, take it from the dark, and get out alive.',
+  desc:'Recover the relic from inside '+enterLabel(b)+'.'};
+}
+// clear every foe nesting inside a ruin
+function genRuinClear(H){
+ const b=pickQuestRuin(); if(!b)return null;
+ return {k:'ruinclear', bId:b.id, mark:buildingDoorMark(b),
+  title:'Clear out '+enterLabel(b).replace(/^the /,''),
+  intro:'Things out of the dark have nested in '+enterLabel(b)+', and by night they hunt the folk of {home}. Go inside and clear them out, root and branch.',
+  desc:'Clear every foe inside '+enterLabel(b)+'.'};
+}
+// find a villager lost inside a ruin and bring them out
+function genRescue(H){
+ const b=pickQuestRuin(); if(!b)return null;
+ const home=homeVillage();
+ const pool=people.filter(p=>!p.dead&&!p.inDungeon&&!p.inside&&!p.questLost&&p.age>=12&&(home?p.vid===home.id:true));
+ if(!pool.length)return null;
+ const p=pick(pool);
+ return {k:'rescue', bId:b.id, npcId:p.id, figName:p.name, mark:buildingDoorMark(b),
+  title:'The Lost — '+p.name,
+  intro:p.name+' of {home} went into '+enterLabel(b)+' chasing salvage, and never came back out. Go into the dark, find them, and bring them home.',
+  desc:'Find '+p.name+', lost inside '+enterLabel(b)+'.'};
+}
 function genBoss(H){
  return {k:'boss',title:'{villain}',
   intro:'{villain} has risen at last — {villainDesc} — and turns toward {home}. Stand between it and the town, Sage. End this, and the world is saved.',
@@ -8271,7 +8345,8 @@ function buildChapters(){
  if(roles.length)for(const r of roles)chs.push(r);
  else chs.push(genReach(H)||genGather(H));
  const gens=[genNpc,genHunt,genDungeon,genGather,genFeud,genBloom,genGuard,
-   genEscort,genBeast,genTame,genRelic,genTribute,genVigil,genTrade,genRite,genPilgrimage,genChampion];
+   genEscort,genBeast,genTame,genRelic,genTribute,genVigil,genTrade,genRite,genPilgrimage,genChampion,
+   genRuinLoot,genRuinClear,genRescue];   // interior/ruin quests: enter a building to loot, clear or rescue
  shuffle(gens);
  // sagas grow longer as the acts climb (more mid-chapters, capped)
  let lastK=chs[chs.length-1].k, added=0, want=Math.min(9, ri(4,6)+Math.min(4,(campaign.act||1)-1));
@@ -8289,6 +8364,8 @@ function chapterDifficulty(){ return (campaign.tier||0); }
 function activateChapter(){
  const ch=campaign.chapters[campaign.idx]; if(!ch){finishCampaign();return}
  ch.prog=0; ch.done=false;
+ // free any still-lost soul and clear a stale interior objective from the last chapter
+ if(interiorQuest){ if(interiorQuest.npcId){const lp=allById.get(interiorQuest.npcId);if(lp)lp.questLost=false;} interiorQuest=null; }
  const diff=chapterDifficulty();
  if(ch.k==='reach'){ ch.mark=[ch.place.x,ch.place.y]; }
  else if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(!t||t.dead){const g=genNpc(campaign.history);if(g)Object.assign(ch,g);} const t2=allById.get(ch.targetId); if(t2){ch.mark=[(t2.x/TILE)|0,(t2.y/TILE)|0];emote(t2,'❔');} }
@@ -8312,6 +8389,9 @@ function activateChapter(){
  else if(ch.k==='rite'){ const v=villages.find(x=>x.id===ch.festVid)||homeVillage(); if(v){ch.festVid=v.id;v.lastFest=0;v.festival={id:nextId++,endDay:cday()+2,cx:v.cx,cy:v.cy};if(typeof gatherFestival==='function')gatherFestival(v,.85);ch.mark=[Math.round(v.cx),Math.round(v.cy)];} else { advanceChapter(); return; } }
  else if(ch.k==='pilgrimage'){ ch.si=0; ch.mark=[ch.stops[0][0],ch.stops[0][1]]; }
  else if(ch.k==='champion'){ ch._champ=spawnChampion(ch.champName,ch.spot); if(!ch._champ){ advanceChapter(); return; } ch.mark=[(ch._champ.x/TILE)|0,(ch._champ.y/TILE)|0]; }
+ else if(ch.k==='ruinloot'){ let b=buildings.find(x=>x.id===ch.bId&&!x.gone); if(!b){const g=genRuinLoot(campaign.history);if(g)Object.assign(ch,g);b=buildings.find(x=>x.id===ch.bId&&!x.gone);} if(!b){advanceChapter();return;} interiorQuest={kind:'recoverLoot',bId:b.id,relic:ch.relic,done:false}; ch.mark=buildingDoorMark(b); }
+ else if(ch.k==='ruinclear'){ let b=buildings.find(x=>x.id===ch.bId&&!x.gone); if(!b){const g=genRuinClear(campaign.history);if(g)Object.assign(ch,g);b=buildings.find(x=>x.id===ch.bId&&!x.gone);} if(!b){advanceChapter();return;} interiorQuest={kind:'clearRuin',bId:b.id,done:false}; ch.mark=buildingDoorMark(b); }
+ else if(ch.k==='rescue'){ let b=buildings.find(x=>x.id===ch.bId&&!x.gone); let p=allById.get(ch.npcId); if(!b||!p||p.dead){const g=genRescue(campaign.history);if(g)Object.assign(ch,g);b=buildings.find(x=>x.id===ch.bId&&!x.gone);p=allById.get(ch.npcId);} if(!b||!p||p.dead){advanceChapter();return;} p.questLost=true;p.inside=null;p.task=null;p.path=null; interiorQuest={kind:'rescue',bId:b.id,npcId:p.id,npcName:p.name,done:false}; ch.mark=buildingDoorMark(b); emote(p,'🆘'); }
  else if(ch.k==='boss'){ const b=spawnBoss(); campaign.boss=b; if(b)ch.mark=[(b.x/TILE)|0,(b.y/TILE)|0]; }
  ch._desc=fillTokens(ch.desc,ch).replace(/{need}/g,ch.need||1);
  const introTxt=fillTokens(ch.intro,ch).replace(/{need}/g,ch.need||1);
@@ -8409,6 +8489,19 @@ function campaignTick(dt){
    if(dist2(hero.x,hero.y,st[0]*TILE+TILE/2,st[1]*TILE+TILE/2)<(2.8*TILE)**2){ ch.si++; if(ch.si>=ch.stops.length)done=true; else { toast('✦ '+ch.stops[ch.si-1][2]+' woken. On to '+ch.stops[ch.si][2]+'.'); updateStoryBanner(); } } } else done=true;
  }
  else if(ch.k==='champion'){ if(!ch._champ||monsters.indexOf(ch._champ)<0)done=true; else ch.mark=[(ch._champ.x/TILE)|0,(ch._champ.y/TILE)|0]; }
+ else if(ch.k==='ruinloot'||ch.k==='ruinclear'){ const b=buildings.find(x=>x.id===ch.bId&&!x.gone); if(b)ch.mark=buildingDoorMark(b); else { advanceChapter(); return; } if(interiorQuest&&interiorQuest.done)done=true; }
+ else if(ch.k==='rescue'){
+  const b=buildings.find(x=>x.id===ch.bId&&!x.gone), p=allById.get(ch.npcId);
+  if(!p||p.dead){ toast('The one you sought is beyond saving.'); done=true; }
+  else if(b)ch.mark=buildingDoorMark(b);
+  if(interiorQuest&&interiorQuest.done&&p&&!p.dead){ // found them: free them back into the light
+   p.questLost=false; p.sleeping=false;
+   const dm=b?buildingDoorMark(b):null, s=dm?nearOpen(dm[0],dm[1]):null;
+   if(s){p.x=s[0]*TILE+TILE/2;p.y=s[1]*TILE+TILE/2;} p.thinkT=simMin+2; emote(p,'🙏');
+   tale([p],'The Sage led '+p.name+' out of the dark and back into '+((homeVillage()||{}).name||'the town')+'.',true);
+   done=true;
+  }
+ }
  else if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)<0)done=true; }
  if(done)advanceChapter();
 }
@@ -8814,6 +8907,23 @@ return {
      mat:intr.mat, tech:fk.tech||0, caveplants:fk.caveplant||0};
   },
   techPropCount:()=>techProps.length,
+  // ---- interior/ruin quest test hooks ----
+  interiorQuestState:()=>interiorQuest?{kind:interiorQuest.kind,bId:interiorQuest.bId,done:!!interiorQuest.done,npcName:interiorQuest.npcName}:null,
+  setupInteriorQuest:(kind)=>{
+   let b=buildings.find(x=>!x.gone&&x.done&&(x.decay===1||x.decay===2));
+   if(!b){ b=buildings.find(x=>!x.gone&&x.done&&['warehouse','factory','apartment','highrise','venue','arcology'].includes(x.tp)); if(b)ruinBuilding(b); }
+   if(!b)return null;
+   if(kind==='rescue'){ const p=people.find(x=>!x.dead&&!x.inDungeon&&!x.inside&&!x.questLost&&x.age>=12); if(!p)return null; p.questLost=true;p.inside=null;p.task=null;p.path=null; interiorQuest={kind:'rescue',bId:b.id,npcId:p.id,npcName:p.name,done:false}; return {bId:b.id,npcId:p.id,npc:p.name}; }
+   if(kind==='recoverLoot'){ interiorQuest={kind:'recoverLoot',bId:b.id,relic:pick(RELICS),done:false}; return {bId:b.id}; }
+   if(kind==='clearRuin'){ interiorQuest={kind:'clearRuin',bId:b.id,done:false}; return {bId:b.id}; }
+   return null;
+  },
+  intQuestProbe:()=>interior?{questLoot:interior.loot.filter(l=>l.quest).length, rescue:interior.occupants.filter(o=>o.rescue).length, foes:interior.foes.length}:null,
+  intWarpToQuest:()=>{ if(!interior)return null;
+   const lo=interior.loot.find(l=>l.quest), cap=interior.occupants.find(o=>o.rescue);
+   const tgt=lo||cap; if(!tgt)return null; hero.x=tgt.x; hero.y=tgt.y-(cap?TILE*0.6:0); return {x:(hero.x/TILE)|0,y:(hero.y/TILE)|0};
+  },
+  intClearFoes:()=>{ if(!interior)return null; const n=interior.foes.length; interior.foes.length=0; return n; },
   techPropKinds:()=>{const k={};for(const p of techProps)k[p.kind]=(k[p.kind]||0)+1;return {theme:techProps[0]&&techProps[0].theme,count:techProps.length,kinds:k};},
   forceTechProps:()=>{refreshTechProps();return techProps.length;},
   // TEST: force-break every breakable wall within radius tiles of the hero
