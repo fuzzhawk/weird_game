@@ -675,7 +675,7 @@ function spawnRescueSoul(rng){
   let spot=null, far=0;
   for(let i=0;i<200;i++){ const c=randRegionCell(rng, RES*2, player.x, player.y); if(!pathFromPlayer(c.x,c.y))continue;
     const d=Math.hypot(c.x-player.x,c.y-player.y); if(d>far){far=d;spot=c;} }
-  if(!spot)spot={x:player.x+RES*5,y:player.y};
+  if(!spot)spot=farReachableCell()||{x:player.x+RES*5,y:player.y};   // the captive must be reachable
   npcs.push({x:spot.x,y:spot.y,bob:Math.random()*6.28,rescue:true,found:false,name:(dInfo&&dInfo.ref&&dInfo.ref.storyObjective&&dInfo.ref.storyObjective.npcName)||'the lost soul'});
 }
 let combo=0, comboT=0, shake=0, hitstop=0, spawnT=2.5, dead=false, deadT=0;
@@ -860,11 +860,13 @@ function startFloor(){
   player.x=(bestCell[1]+0.5)*RES; player.y=(bestCell[0]+0.5)*RES;
   player.falling=null; player.lunge=0;
   // the way UP sits near the spawn — you can always retreat to the surface
-  let us;
+  let us=null;
   for(let i=0;i<200;i++){
-    us=randRegionCell(rng, RES*3, player.x, player.y);
-    if(Math.hypot(us.x-player.x,us.y-player.y)<RES*7 && pathFromPlayer(us.x,us.y)) break;
+    const c=randRegionCell(rng, RES*3, player.x, player.y);
+    if(Math.hypot(c.x-player.x,c.y-player.y)<RES*7 && pathFromPlayer(c.x,c.y)){ us=c; break; }
   }
+  if(!us){ for(let i=0;i<200;i++){ const c=randRegionCell(rng, RES*2, player.x, player.y); if(pathFromPlayer(c.x,c.y)){ us=c; break; } } }
+  if(!us) us={x:player.x+RES*3, y:player.y};   // the retreat home must always exist
   portalUp={x:us.x,y:us.y,t:Math.random()*6.28};
   portalDown=null;
   trees = trees.filter(t=>Math.hypot(t.x-portalUp.x,t.y-portalUp.y)>RES*1.5 && Math.hypot(t.x-player.x,t.y-player.y)>RES*1.5);
@@ -885,12 +887,21 @@ function startFloor(){
   if(floorIdx===0 && hasObjective()) floater(player.x,player.y-40,objTitle().toUpperCase(),'#e8c065');
   updHud();
 }
+// scan the walkable region for the farthest cell the player can actually path to
+function farReachableCell(){
+  let far=-1, best=null;
+  for(const [y,x] of mainRegion){ const cx=(x+0.5)*RES, cy=(y+0.5)*RES;
+    if(!pathFromPlayer(cx,cy)) continue;
+    const d=Math.hypot(cx-player.x,cy-player.y); if(d>far){ far=d; best={x:cx,y:cy}; } }
+  return best;
+}
 function spawnPortalDown(quiet){
-  let ps;
+  let ps=null;
   for(let i=0;i<200;i++){
-    ps = randRegionCell(null, RES*10, player.x, player.y);
-    if(pathFromPlayer(ps.x, ps.y)) break;
+    const c = randRegionCell(null, RES*10, player.x, player.y);
+    if(pathFromPlayer(c.x, c.y)){ ps=c; break; }
   }
+  if(!ps) ps = farReachableCell() || {x:player.x+RES*6, y:player.y};   // never leave the way down unreachable
   portalDown={x:ps.x, y:ps.y, t:Math.random()*6.28};
   trees = trees.filter(t=>Math.hypot(t.x-portalDown.x,t.y-portalDown.y)>RES*1.5);
   if(!quiet)floater(player.x,player.y-30,'THE WAY DOWN OPENS','#b08fff');
@@ -1912,8 +1923,6 @@ function draw(time){
     ctx.beginPath(); ctx.arc(0,0,s.range-4,a1-0.25,a1); ctx.stroke();
     ctx.restore();
   }
-  drawPortal(portalUp,true);
-  drawPortal(portalDown,false);
   for(const tr of treasures) drawTreasure(tr);
   for(const b of blooms) drawBloom(b);
   for(const d of drops) drawDrop(d);
@@ -1935,6 +1944,10 @@ function draw(time){
   }
   ctx.globalAlpha=1;
   drawLighting();                       // atmospheric per-tile darkness over the scene
+  // portals are glowing gateways — draw them ON TOP of the darkness so they read
+  // clearly (their light pools already brighten the surrounding tiles)
+  drawPortal(portalUp,true);
+  drawPortal(portalDown,false);
   ctx.font='bold 16px Courier New'; ctx.textAlign='center';
   for(const f of floaters){
     ctx.globalAlpha=1-f.t/0.9; ctx.fillStyle=f.col;
@@ -2020,6 +2033,9 @@ return {
     get flora(){return {trees:trees.length, cavePlants:cavePlants.length, dungTech:dungTech.length}},
     get rescue(){return {objKind:objKind(), npcs:npcs.length, rescueNpcs:npcs.filter(n=>n.rescue).length, found:npcs.some(n=>n.rescue&&n.found), rescuedSoul, cleansed:cleansedRun}},
     reachRescue(){ const n=npcs.find(x=>x.rescue); if(n){ player.x=n.x; player.y=n.y; } return !!n; },
+    get portals(){ return {up:!!portalUp, down:!!portalDown, floor:floorIdx, finalFloor:isFinalFloor(),
+      upReach: portalUp?!!pathFromPlayer(portalUp.x,portalUp.y):null,
+      downReach: portalDown?!!pathFromPlayer(portalDown.x,portalDown.y):null }; },
     descendToFinal(){ let g=0; while(dInfo&&floorIdx<dInfo.depth-1&&g++<12){ floorIdx++; startFloor(); } return floorIdx; },
     get roster(){return CREATURES?{slime:CREATURES.slime.arch,wisp:CREATURES.wisp.arch,brute:CREATURES.brute.arch,boss:CREATURES.boss.arch}:null},
     get zoom(){return camZ}, set zoom(z){camZTarget=dclamp(z,ZMIN,ZMAX)},
