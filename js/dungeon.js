@@ -669,7 +669,15 @@ const player = {
 function xpNeed(){ return 5 + (player.level-1)*4; }
 
 let enemies=[], particles=[], slashes=[], floaters=[], drops=[], blooms=[], treasures=[];
-let npcs=[], boss=null;
+let npcs=[], boss=null, rescuedSoul=false;
+function objKind(){ return hasObjective() ? (dInfo.ref.storyObjective.kind||'boss') : null; }
+function spawnRescueSoul(rng){
+  let spot=null, far=0;
+  for(let i=0;i<200;i++){ const c=randRegionCell(rng, RES*2, player.x, player.y); if(!pathFromPlayer(c.x,c.y))continue;
+    const d=Math.hypot(c.x-player.x,c.y-player.y); if(d>far){far=d;spot=c;} }
+  if(!spot)spot={x:player.x+RES*5,y:player.y};
+  npcs.push({x:spot.x,y:spot.y,bob:Math.random()*6.28,rescue:true,found:false,name:(dInfo&&dInfo.ref&&dInfo.ref.storyObjective&&dInfo.ref.storyObjective.npcName)||'the lost soul'});
+}
 let combo=0, comboT=0, shake=0, hitstop=0, spawnT=2.5, dead=false, deadT=0;
 let questPath=null, pathTimer=0;
 let camX=0, camY=0, camCx=0, camCy=0;
@@ -863,7 +871,10 @@ function startFloor(){
   // A SCRIPTED dungeon has an objective: the heart (boss) waits on the deepest
   // floor. A free-roam raid has NO quest at all — no heart, just a way deeper on
   // every floor (and the way up to leave whenever).
-  if(hasObjective() && isFinalFloor()) spawnBoss();
+  if(hasObjective() && isFinalFloor()){
+    if(objKind()==='rescue') spawnRescueSoul(rng);   // a lost villager waits in the deepest dark
+    else spawnBoss();
+  }
   else if(!isFinalFloor()) spawnPortalDown(true);
   // (free-roam final floor: no boss, no way down — it's simply the bottom)
   spawnTreasures();
@@ -1425,6 +1436,17 @@ function update(dt){
   treasures=treasures.filter(t=>!t.got);
   $('dTalkBtn').style.display='none';   // no Keeper to talk to any more
 
+  // --- lost souls: reach a rescue NPC to complete a rescue objective ---
+  for(const n of npcs){ n.bob+=dt*3;
+    if(n.rescue && !n.found && Math.hypot(n.x-player.x,n.y-player.y)<player.r+16){
+      n.found=true; rescuedSoul=true; cleansedRun=true;
+      floater(player.x,player.y-30,'FOUND '+String(n.name||'THEM').toUpperCase()+' — TAKE THE WAY UP ▲','#e8c065');
+      if(SFX.quest)SFX.quest(); if(SFX.level)SFX.level();
+    }
+    if(n.found){ const dx=player.x-n.x,dy=player.y-n.y,d=Math.hypot(dx,dy)||1;   // they follow you out
+      if(d>RES*1.3){ const st=Math.min(d,80*dt); if(walkable(n.x+dx/d*st,n.y)) n.x+=dx/d*st; if(walkable(n.x,n.y+dy/d*st)) n.y+=dy/d*st; } }
+  }
+
   // --- portals ---
   portalCd-=dt;
   if(portalUp){
@@ -1636,6 +1658,13 @@ function drawNpc(n){
     ctx.fillStyle='#8a6f3f';
     ctx.beginPath(); ctx.moveTo(px-8,py+9); ctx.lineTo(px,py-8); ctx.lineTo(px+8,py+9); ctx.closePath(); ctx.fill();
   }
+  if(n.rescue){ // a lost soul flagged so they read across the dark
+    const go=ctx.globalCompositeOperation; ctx.globalCompositeOperation='screen';
+    ctx.globalAlpha=0.5+0.3*Math.sin(performance.now()*0.006); ctx.fillStyle='rgba(255,205,90,0.6)';
+    ctx.beginPath(); ctx.arc(px,py-12,10,0,6.28); ctx.fill(); ctx.globalAlpha=1; ctx.globalCompositeOperation=go;
+    ctx.font='9px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ffe08a'; ctx.fillText(n.found?'🙏':'🆘', px, py-16);
+    ctx.font='6.5px Georgia'; ctx.fillStyle='rgba(240,220,180,0.9)'; ctx.fillText(n.name||'', px, py+18);
+  }
 }
 function enemySprite(e){
   if(!CREATURES) return null;
@@ -1772,6 +1801,7 @@ function compassTarget(){
   // the overworld objective, floor by floor: on the deepest floor point at the heart
   // (then the way up once it's put to rest); above it, point at the way down
   if(isFinalFloor()){
+    const rn=npcs.find(n=>n.rescue&&!n.found); if(rn) return {x:rn.x,y:rn.y,g:'🆘'};
     if(boss) return {x:boss.x,y:boss.y,g:'☠'};
     if(cleansedRun&&portalUp) return {x:portalUp.x,y:portalUp.y,g:'▲'};
     return null;
@@ -1945,7 +1975,7 @@ function syncToHero(){
 }
 function enter(info, onExit){
   dInfo=info; exitCb=onExit; active=true;
-  floorIdx=0; lootBag={food:0,wood:0,stone:0}; totalKills=0; cleansedRun=false;
+  floorIdx=0; lootBag={food:0,wood:0,stone:0}; totalKills=0; cleansedRun=false; rescuedSoul=false;
   augmentsGot=[]; treasures=[];
   stick=null; pending.clear(); mDown=null; touchPts.clear(); pinch=null;
   camZ=camZTarget=1.25;
@@ -1966,7 +1996,8 @@ function exitDungeon(){
   gamePaused=false; dialogQueue=null;
   $('dDialog').style.display='none';
   $('dTalkBtn').style.display='none';
-  const results={dungeon:dInfo?dInfo.ref:null, loot:lootBag, kills:totalKills, cleansed:cleansedRun, floors:floorIdx+1, augments:augmentsGot.slice()};
+  const results={dungeon:dInfo?dInfo.ref:null, loot:lootBag, kills:totalKills, cleansed:cleansedRun, floors:floorIdx+1, augments:augmentsGot.slice(),
+    rescued:rescuedSoul, rescueId:(dInfo&&dInfo.ref&&dInfo.ref.storyObjective&&dInfo.ref.storyObjective.npcId)||null};
   const cb=exitCb; exitCb=null;
   if(cb)cb(results);
 }
@@ -1987,6 +2018,9 @@ return {
     get state(){return {floorIdx,cleansedRun,objective:objTitle(),final:isFinalFloor(),hasDown:!!portalDown,hasBoss:!!boss,keeper:false}},
     get skin(){return {borrowed:!!T.borrowedSkin, grass:T.grassColor, dirt:T.dirtColor, theme:T.worldTheme||null}},
     get flora(){return {trees:trees.length, cavePlants:cavePlants.length, dungTech:dungTech.length}},
+    get rescue(){return {objKind:objKind(), npcs:npcs.length, rescueNpcs:npcs.filter(n=>n.rescue).length, found:npcs.some(n=>n.rescue&&n.found), rescuedSoul, cleansed:cleansedRun}},
+    reachRescue(){ const n=npcs.find(x=>x.rescue); if(n){ player.x=n.x; player.y=n.y; } return !!n; },
+    descendToFinal(){ let g=0; while(dInfo&&floorIdx<dInfo.depth-1&&g++<12){ floorIdx++; startFloor(); } return floorIdx; },
     get roster(){return CREATURES?{slime:CREATURES.slime.arch,wisp:CREATURES.wisp.arch,brute:CREATURES.brute.arch,boss:CREATURES.boss.arch}:null},
     get zoom(){return camZ}, set zoom(z){camZTarget=dclamp(z,ZMIN,ZMAX)},
     completeTask(){   // clear the objective: slay the heart on the deepest floor, else cleanse

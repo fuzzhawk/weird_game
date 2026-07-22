@@ -8117,6 +8117,18 @@ function genDungeon(H){
   title:'Descent into '+d.name, intro:'Only one thing can wound {villain}, and it lies in the deep dark of '+d.name+'. Descend, and carry it back into the light.',
   desc:'Descend into '+d.name+'.'};
 }
+// descend a dungeon to find a villager lost in its deepest dark
+function genDungeonRescue(H){
+ const live=dungeons.filter(d=>!d.cleansed); if(!live.length)return null;
+ const home=homeVillage();
+ const pool=people.filter(p=>!p.dead&&!p.inDungeon&&!p.inside&&!p.questLost&&p.age>=12&&(home?p.vid===home.id:true));
+ if(!pool.length)return null;
+ const d=pick(live), p=pick(pool);
+ return {k:'dungrescue', dungeonId:d.id, dunName:d.name, npcId:p.id, figName:p.name, mark:[d.x,d.y],
+  title:'Into the Deep for '+p.name,
+  intro:p.name+' of {home} followed something down into '+d.name+' and never climbed back out. Descend into the dark, find them, and carry them up into the light.',
+  desc:'Find '+p.name+', lost in the deep of '+d.name+'.'};
+}
 function genGather(H){
  const v=homeVillage(); const rebuild=H.ruins.length?pick(H.ruins):null;
  return {k:'gather',need:0,
@@ -8346,7 +8358,7 @@ function buildChapters(){
  else chs.push(genReach(H)||genGather(H));
  const gens=[genNpc,genHunt,genDungeon,genGather,genFeud,genBloom,genGuard,
    genEscort,genBeast,genTame,genRelic,genTribute,genVigil,genTrade,genRite,genPilgrimage,genChampion,
-   genRuinLoot,genRuinClear,genRescue];   // interior/ruin quests: enter a building to loot, clear or rescue
+   genRuinLoot,genRuinClear,genRescue,genDungeonRescue];   // interior/ruin/dungeon quests: loot, clear, rescue
  shuffle(gens);
  // sagas grow longer as the acts climb (more mid-chapters, capped)
  let lastK=chs[chs.length-1].k, added=0, want=Math.min(9, ri(4,6)+Math.min(4,(campaign.act||1)-1));
@@ -8365,7 +8377,8 @@ function activateChapter(){
  const ch=campaign.chapters[campaign.idx]; if(!ch){finishCampaign();return}
  ch.prog=0; ch.done=false;
  // free any still-lost soul and clear a stale interior objective from the last chapter
- if(interiorQuest){ if(interiorQuest.npcId){const lp=allById.get(interiorQuest.npcId);if(lp)lp.questLost=false;} interiorQuest=null; }
+ interiorQuest=null;
+ for(const p of people)if(p.questLost)p.questLost=false;
  const diff=chapterDifficulty();
  if(ch.k==='reach'){ ch.mark=[ch.place.x,ch.place.y]; }
  else if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(!t||t.dead){const g=genNpc(campaign.history);if(g)Object.assign(ch,g);} const t2=allById.get(ch.targetId); if(t2){ch.mark=[(t2.x/TILE)|0,(t2.y/TILE)|0];emote(t2,'❔');} }
@@ -8392,6 +8405,7 @@ function activateChapter(){
  else if(ch.k==='ruinloot'){ let b=buildings.find(x=>x.id===ch.bId&&!x.gone); if(!b){const g=genRuinLoot(campaign.history);if(g)Object.assign(ch,g);b=buildings.find(x=>x.id===ch.bId&&!x.gone);} if(!b){advanceChapter();return;} interiorQuest={kind:'recoverLoot',bId:b.id,relic:ch.relic,done:false}; ch.mark=buildingDoorMark(b); }
  else if(ch.k==='ruinclear'){ let b=buildings.find(x=>x.id===ch.bId&&!x.gone); if(!b){const g=genRuinClear(campaign.history);if(g)Object.assign(ch,g);b=buildings.find(x=>x.id===ch.bId&&!x.gone);} if(!b){advanceChapter();return;} interiorQuest={kind:'clearRuin',bId:b.id,done:false}; ch.mark=buildingDoorMark(b); }
  else if(ch.k==='rescue'){ let b=buildings.find(x=>x.id===ch.bId&&!x.gone); let p=allById.get(ch.npcId); if(!b||!p||p.dead){const g=genRescue(campaign.history);if(g)Object.assign(ch,g);b=buildings.find(x=>x.id===ch.bId&&!x.gone);p=allById.get(ch.npcId);} if(!b||!p||p.dead){advanceChapter();return;} p.questLost=true;p.inside=null;p.task=null;p.path=null; interiorQuest={kind:'rescue',bId:b.id,npcId:p.id,npcName:p.name,done:false}; ch.mark=buildingDoorMark(b); emote(p,'🆘'); }
+ else if(ch.k==='dungrescue'){ let d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed)||pickStoryDungeon(); let p=allById.get(ch.npcId); if(!d||!p||p.dead){const g=genDungeonRescue(campaign.history);if(g)Object.assign(ch,g);d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed);p=allById.get(ch.npcId);} if(!d||!p||p.dead){advanceChapter();return;} ch.dungeonId=d.id;ch.mark=[d.x,d.y]; p.questLost=true;p.inside=null;p.task=null;p.path=null; for(const dd of dungeons)dd.storyObjective=null; d.storyObjective={kind:'rescue',label:'Find '+p.name,npcName:p.name,npcId:p.id,chapterIdx:campaign.idx,dungeonId:d.id}; }
  else if(ch.k==='boss'){ const b=spawnBoss(); campaign.boss=b; if(b)ch.mark=[(b.x/TILE)|0,(b.y/TILE)|0]; }
  ch._desc=fillTokens(ch.desc,ch).replace(/{need}/g,ch.need||1);
  const introTxt=fillTokens(ch.intro,ch).replace(/{need}/g,ch.need||1);
@@ -8501,6 +8515,13 @@ function campaignTick(dt){
    tale([p],'The Sage led '+p.name+' out of the dark and back into '+((homeVillage()||{}).name||'the town')+'.',true);
    done=true;
   }
+ }
+ else if(ch.k==='dungrescue'){
+  const td=dungeons.find(x=>x.id===ch.dungeonId), p=allById.get(ch.npcId);
+  if(!p||p.dead){ toast('The one you sought is lost for good.'); done=true; }
+  else { if(td)ch.mark=[td.x,td.y];
+   if(td&&td.cleansed){ p.questLost=false;p.sleeping=false; const s=nearOpen(td.x,td.y); if(s){p.x=s[0]*TILE+TILE/2;p.y=s[1]*TILE+TILE/2;} p.thinkT=simMin+2; emote(p,'🙏');
+    tale([p],'The Sage carried '+p.name+' up out of '+td.name+' and into the light of {home}.',true); done=true; } }
  }
  else if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)<0)done=true; }
  if(done)advanceChapter();
@@ -8924,6 +8945,15 @@ return {
    const tgt=lo||cap; if(!tgt)return null; hero.x=tgt.x; hero.y=tgt.y-(cap?TILE*0.6:0); return {x:(hero.x/TILE)|0,y:(hero.y/TILE)|0};
   },
   intClearFoes:()=>{ if(!interior)return null; const n=interior.foes.length; interior.foes.length=0; return n; },
+  setupDungeonRescue:()=>{
+   const live=dungeons.filter(d=>!d.cleansed); if(!live.length)return null;
+   const p=people.find(x=>!x.dead&&!x.inDungeon&&!x.inside&&!x.questLost&&x.age>=12); if(!p)return null;
+   const d=live[0]; for(const dd of dungeons)dd.storyObjective=null;
+   p.questLost=true;p.inside=null;p.task=null;p.path=null;
+   d.storyObjective={kind:'rescue',label:'Find '+p.name,npcName:p.name,npcId:p.id,dungeonId:d.id};
+   return {dungeonId:d.id,depth:d.depth,npcId:p.id,npc:p.name};
+  },
+  simulateDungeonReturn:(res)=>{ returnFromDungeon(res); return true; },
   techPropKinds:()=>{const k={};for(const p of techProps)k[p.kind]=(k[p.kind]||0)+1;return {theme:techProps[0]&&techProps[0].theme,count:techProps.length,kinds:k};},
   forceTechProps:()=>{refreshTechProps();return techProps.length;},
   // TEST: force-break every breakable wall within radius tiles of the hero
