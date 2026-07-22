@@ -59,6 +59,7 @@ function applyWorldPalette(seedStr){
     T.dirtColor  = skin.dirt;
     T.style = TileGen.deriveStyle(skin.styleSeed || seedStr);
     T.borrowedSkin = true;
+    T.worldTheme = skin.theme || null;
     renderTileset();
     return;
   }
@@ -358,7 +359,10 @@ document.addEventListener('mousedown',()=>{ const ac=audio(); if(ac&&ac.state===
    ============================================================ */
 const ROWS=72, COLS=72, RES=T.res;
 const WORLD_W=COLS*RES, WORLD_H=ROWS*RES;
-let field, vgrid, tileMap, variantMap, trees=[];
+let field, vgrid, tileMap, variantMap, trees=[], cavePlants=[], dungTech=[];
+let dungTechCache={};
+function dungTechSprite(kind,variant){ const key=kind+'/'+variant; let s=dungTechCache[key];
+  if(s===undefined){ try{ s=(typeof SceneryForge!=='undefined')?SceneryForge.bake(kind,'d'+variant,'cyber'):null; }catch(e){ s=null; } dungTechCache[key]=s; } return s; }
 let blockGrid=new Uint8Array(ROWS*COLS);
 const FACE_ROWS=2;
 let highCellArr=new Uint8Array(ROWS*COLS);
@@ -571,9 +575,15 @@ function genWorld(seedStr){
   mainRegion = largestInteriorRegion();
   regionSet = new Set(mainRegion.map(([y,x])=>y*COLS+x));
   variantMap = tileMap.map(row=>row.map(()=>Math.floor(rng()*NUM_VARIANTS)));
-  trees=[];
+  trees=[]; cavePlants=[]; dungTech=[];
+  const cyberSkin = (T.worldTheme==='cyberpunk');
   for(const [y,x] of mainRegion){
-    if(!highCellArr[y*COLS+x] && rng()<0.055) trees.push({x:(x+0.5)*RES, y:(y+0.5)*RES, r:6, wob:rng()*6.28});
+    if(highCellArr[y*COLS+x]) continue;
+    if(rng()<0.055){ trees.push({x:(x+0.5)*RES, y:(y+0.5)*RES, r:6, wob:rng()*6.28}); continue; }
+    // cave flora dwells in the deep — glowing fungi, fungal shelves, hanging roots
+    if(rng()<0.05){ cavePlants.push({x:(x+0.5)*RES, y:(y+0.5)*RES, pv:(rng()*3)|0, glow:rng()<0.55, wob:rng()*6.28}); continue; }
+    // a cyber-skinned Understory bleeds tech into scattered pockets
+    if(cyberSkin && rng()<0.025){ const KIND=['panel','wires','pipes','conduit','junction','screen']; dungTech.push({x:(x+0.5)*RES, y:(y+0.5)*RES, kind:KIND[(rng()*KIND.length)|0], variant:(rng()*4)|0, ph:rng()*6.28}); }
   }
 }
 function walkable(px,py){
@@ -659,7 +669,15 @@ const player = {
 function xpNeed(){ return 5 + (player.level-1)*4; }
 
 let enemies=[], particles=[], slashes=[], floaters=[], drops=[], blooms=[], treasures=[];
-let npcs=[], boss=null;
+let npcs=[], boss=null, rescuedSoul=false;
+function objKind(){ return hasObjective() ? (dInfo.ref.storyObjective.kind||'boss') : null; }
+function spawnRescueSoul(rng){
+  let spot=null, far=0;
+  for(let i=0;i<200;i++){ const c=randRegionCell(rng, RES*2, player.x, player.y); if(!pathFromPlayer(c.x,c.y))continue;
+    const d=Math.hypot(c.x-player.x,c.y-player.y); if(d>far){far=d;spot=c;} }
+  if(!spot)spot=farReachableCell()||{x:player.x+RES*5,y:player.y};   // the captive must be reachable
+  npcs.push({x:spot.x,y:spot.y,bob:Math.random()*6.28,rescue:true,found:false,name:(dInfo&&dInfo.ref&&dInfo.ref.storyObjective&&dInfo.ref.storyObjective.npcName)||'the lost soul'});
+}
 let combo=0, comboT=0, shake=0, hitstop=0, spawnT=2.5, dead=false, deadT=0;
 let questPath=null, pathTimer=0;
 let camX=0, camY=0, camCx=0, camCy=0;
@@ -842,18 +860,23 @@ function startFloor(){
   player.x=(bestCell[1]+0.5)*RES; player.y=(bestCell[0]+0.5)*RES;
   player.falling=null; player.lunge=0;
   // the way UP sits near the spawn — you can always retreat to the surface
-  let us;
+  let us=null;
   for(let i=0;i<200;i++){
-    us=randRegionCell(rng, RES*3, player.x, player.y);
-    if(Math.hypot(us.x-player.x,us.y-player.y)<RES*7 && pathFromPlayer(us.x,us.y)) break;
+    const c=randRegionCell(rng, RES*3, player.x, player.y);
+    if(Math.hypot(c.x-player.x,c.y-player.y)<RES*7 && pathFromPlayer(c.x,c.y)){ us=c; break; }
   }
+  if(!us){ for(let i=0;i<200;i++){ const c=randRegionCell(rng, RES*2, player.x, player.y); if(pathFromPlayer(c.x,c.y)){ us=c; break; } } }
+  if(!us) us={x:player.x+RES*3, y:player.y};   // the retreat home must always exist
   portalUp={x:us.x,y:us.y,t:Math.random()*6.28};
   portalDown=null;
   trees = trees.filter(t=>Math.hypot(t.x-portalUp.x,t.y-portalUp.y)>RES*1.5 && Math.hypot(t.x-player.x,t.y-player.y)>RES*1.5);
   // A SCRIPTED dungeon has an objective: the heart (boss) waits on the deepest
   // floor. A free-roam raid has NO quest at all — no heart, just a way deeper on
   // every floor (and the way up to leave whenever).
-  if(hasObjective() && isFinalFloor()) spawnBoss();
+  if(hasObjective() && isFinalFloor()){
+    if(objKind()==='rescue') spawnRescueSoul(rng);   // a lost villager waits in the deepest dark
+    else spawnBoss();
+  }
   else if(!isFinalFloor()) spawnPortalDown(true);
   // (free-roam final floor: no boss, no way down — it's simply the bottom)
   spawnTreasures();
@@ -864,12 +887,21 @@ function startFloor(){
   if(floorIdx===0 && hasObjective()) floater(player.x,player.y-40,objTitle().toUpperCase(),'#e8c065');
   updHud();
 }
+// scan the walkable region for the farthest cell the player can actually path to
+function farReachableCell(){
+  let far=-1, best=null;
+  for(const [y,x] of mainRegion){ const cx=(x+0.5)*RES, cy=(y+0.5)*RES;
+    if(!pathFromPlayer(cx,cy)) continue;
+    const d=Math.hypot(cx-player.x,cy-player.y); if(d>far){ far=d; best={x:cx,y:cy}; } }
+  return best;
+}
 function spawnPortalDown(quiet){
-  let ps;
+  let ps=null;
   for(let i=0;i<200;i++){
-    ps = randRegionCell(null, RES*10, player.x, player.y);
-    if(pathFromPlayer(ps.x, ps.y)) break;
+    const c = randRegionCell(null, RES*10, player.x, player.y);
+    if(pathFromPlayer(c.x, c.y)){ ps=c; break; }
   }
+  if(!ps) ps = farReachableCell() || {x:player.x+RES*6, y:player.y};   // never leave the way down unreachable
   portalDown={x:ps.x, y:ps.y, t:Math.random()*6.28};
   trees = trees.filter(t=>Math.hypot(t.x-portalDown.x,t.y-portalDown.y)>RES*1.5);
   if(!quiet)floater(player.x,player.y-30,'THE WAY DOWN OPENS','#b08fff');
@@ -1415,6 +1447,17 @@ function update(dt){
   treasures=treasures.filter(t=>!t.got);
   $('dTalkBtn').style.display='none';   // no Keeper to talk to any more
 
+  // --- lost souls: reach a rescue NPC to complete a rescue objective ---
+  for(const n of npcs){ n.bob+=dt*3;
+    if(n.rescue && !n.found && Math.hypot(n.x-player.x,n.y-player.y)<player.r+16){
+      n.found=true; rescuedSoul=true; cleansedRun=true;
+      floater(player.x,player.y-30,'FOUND '+String(n.name||'THEM').toUpperCase()+' — TAKE THE WAY UP ▲','#e8c065');
+      if(SFX.quest)SFX.quest(); if(SFX.level)SFX.level();
+    }
+    if(n.found){ const dx=player.x-n.x,dy=player.y-n.y,d=Math.hypot(dx,dy)||1;   // they follow you out
+      if(d>RES*1.3){ const st=Math.min(d,80*dt); if(walkable(n.x+dx/d*st,n.y)) n.x+=dx/d*st; if(walkable(n.x,n.y+dy/d*st)) n.y+=dy/d*st; } }
+  }
+
   // --- portals ---
   portalCd-=dt;
   if(portalUp){
@@ -1582,6 +1625,29 @@ function drawTree(t){
   ctx.fillStyle=`rgb(${pal.grassBase.join(',')})`;
   ctx.beginPath(); ctx.arc(px-2+sway,py-12,7,0,6.28); ctx.fill();
 }
+function drawCavePlant(cp){
+  const px=wx(cp.x), py=wy(cp.y), gy=py+6, pv=cp.pv||0, tt=performance.now();
+  ctx.fillStyle='rgba(0,0,0,0.28)';ctx.beginPath();ctx.ellipse(px,gy,6,2.2,0,0,6.28);ctx.fill();
+  if(cp.glow){const go=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';ctx.globalAlpha=0.3+0.2*Math.sin(tt*0.004+cp.wob);
+    ctx.fillStyle='rgba(120,255,180,0.5)';ctx.beginPath();ctx.arc(px,gy-6,10,0,6.28);ctx.fill();ctx.globalAlpha=1;ctx.globalCompositeOperation=go;}
+  if(pv===0){ for(let m=0;m<3;m++){const mx=px-4+m*4, mh=4+((m*2)%3);
+    ctx.fillStyle='#c8d8b0';ctx.fillRect(mx-0.5,gy-mh,1.6,mh);
+    ctx.fillStyle=cp.glow?'#8affc0':'#9a6ad0';ctx.beginPath();ctx.ellipse(mx+0.3,gy-mh,2.5,1.7,0,Math.PI,0);ctx.fill();} }
+  else if(pv===1){ ctx.fillStyle='#4a6a3a';ctx.beginPath();ctx.ellipse(px,gy-2,5,3,0,0,6.28);ctx.fill();
+    ctx.fillStyle=cp.glow?'#7fe0a0':'#5f8a48';for(let m=0;m<4;m++)ctx.fillRect(px-4+m*2.4,gy-3-((m*3)%3),1.6,2); }
+  else{ ctx.strokeStyle='#5a4a34';ctx.lineWidth=1.2;
+    for(let r=0;r<4;r++){const rx=px-4+r*3;ctx.beginPath();ctx.moveTo(rx,py-10);ctx.lineTo(rx+Math.sin(r+tt*0.001)*1.5,py-4+((r*2)%4));ctx.stroke();}
+    ctx.fillStyle=cp.glow?'#8affc0':'#7a9a5a';for(let r=0;r<3;r++)ctx.fillRect(px-4+r*4,py-6+((r*2)%3),1.4,1.4); }
+}
+function drawDungTech(dt,time){
+  const s=dungTechSprite(dt.kind,dt.variant); if(!s||!s.canvas)return;
+  const px=wx(dt.x), py=wy(dt.y);
+  ctx.drawImage(s.canvas,px-s.ax,py-s.ay);
+  const go=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';
+  ctx.globalAlpha=0.3+0.2*Math.sin(time*0.005+dt.ph);
+  ctx.fillStyle='rgba(60,220,220,0.5)';ctx.beginPath();ctx.arc(px,py-9,8,0,6.28);ctx.fill();
+  ctx.globalAlpha=1;ctx.globalCompositeOperation=go;
+}
 let keeperSprite=null;
 function ensureKeeperSprite(){
   if(keeperSprite && keeperSprite._seed===worldSeed) return keeperSprite;
@@ -1602,6 +1668,13 @@ function drawNpc(n){
   else {
     ctx.fillStyle='#8a6f3f';
     ctx.beginPath(); ctx.moveTo(px-8,py+9); ctx.lineTo(px,py-8); ctx.lineTo(px+8,py+9); ctx.closePath(); ctx.fill();
+  }
+  if(n.rescue){ // a lost soul flagged so they read across the dark
+    const go=ctx.globalCompositeOperation; ctx.globalCompositeOperation='screen';
+    ctx.globalAlpha=0.5+0.3*Math.sin(performance.now()*0.006); ctx.fillStyle='rgba(255,205,90,0.6)';
+    ctx.beginPath(); ctx.arc(px,py-12,10,0,6.28); ctx.fill(); ctx.globalAlpha=1; ctx.globalCompositeOperation=go;
+    ctx.font='9px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ffe08a'; ctx.fillText(n.found?'🙏':'🆘', px, py-16);
+    ctx.font='6.5px Georgia'; ctx.fillStyle='rgba(240,220,180,0.9)'; ctx.fillText(n.name||'', px, py+18);
   }
 }
 function enemySprite(e){
@@ -1739,6 +1812,7 @@ function compassTarget(){
   // the overworld objective, floor by floor: on the deepest floor point at the heart
   // (then the way up once it's put to rest); above it, point at the way down
   if(isFinalFloor()){
+    const rn=npcs.find(n=>n.rescue&&!n.found); if(rn) return {x:rn.x,y:rn.y,g:'🆘'};
     if(boss) return {x:boss.x,y:boss.y,g:'☠'};
     if(cleansedRun&&portalUp) return {x:portalUp.x,y:portalUp.y,g:'▲'};
     return null;
@@ -1849,14 +1923,14 @@ function draw(time){
     ctx.beginPath(); ctx.arc(0,0,s.range-4,a1-0.25,a1); ctx.stroke();
     ctx.restore();
   }
-  drawPortal(portalUp,true);
-  drawPortal(portalDown,false);
   for(const tr of treasures) drawTreasure(tr);
   for(const b of blooms) drawBloom(b);
   for(const d of drops) drawDrop(d);
   const sprites=[];
   for(const s of structures) sprites.push({y:(s.cy+s.h)*RES, f:()=>drawStructure(s)});
   for(const t of trees) if(Math.abs(t.x-player.x)<W && Math.abs(t.y-player.y)<H) sprites.push({y:t.y,f:()=>drawTree(t)});
+  for(const cp of cavePlants) if(Math.abs(cp.x-player.x)<W && Math.abs(cp.y-player.y)<H) sprites.push({y:cp.y,f:()=>drawCavePlant(cp)});
+  for(const dt of dungTech) if(Math.abs(dt.x-player.x)<W && Math.abs(dt.y-player.y)<H) sprites.push({y:dt.y,f:()=>drawDungTech(dt,time)});
   for(const n of npcs) sprites.push({y:n.y,f:()=>drawNpc(n)});
   for(const e of enemies) sprites.push({y:e.y,f:()=>drawEnemy(e)});
   if(!dead && !player.falling) sprites.push({y:player.y,f:()=>drawPlayerChar(time)});
@@ -1870,6 +1944,10 @@ function draw(time){
   }
   ctx.globalAlpha=1;
   drawLighting();                       // atmospheric per-tile darkness over the scene
+  // portals are glowing gateways — draw them ON TOP of the darkness so they read
+  // clearly (their light pools already brighten the surrounding tiles)
+  drawPortal(portalUp,true);
+  drawPortal(portalDown,false);
   ctx.font='bold 16px Courier New'; ctx.textAlign='center';
   for(const f of floaters){
     ctx.globalAlpha=1-f.t/0.9; ctx.fillStyle=f.col;
@@ -1910,7 +1988,7 @@ function syncToHero(){
 }
 function enter(info, onExit){
   dInfo=info; exitCb=onExit; active=true;
-  floorIdx=0; lootBag={food:0,wood:0,stone:0}; totalKills=0; cleansedRun=false;
+  floorIdx=0; lootBag={food:0,wood:0,stone:0}; totalKills=0; cleansedRun=false; rescuedSoul=false;
   augmentsGot=[]; treasures=[];
   stick=null; pending.clear(); mDown=null; touchPts.clear(); pinch=null;
   camZ=camZTarget=1.25;
@@ -1931,7 +2009,8 @@ function exitDungeon(){
   gamePaused=false; dialogQueue=null;
   $('dDialog').style.display='none';
   $('dTalkBtn').style.display='none';
-  const results={dungeon:dInfo?dInfo.ref:null, loot:lootBag, kills:totalKills, cleansed:cleansedRun, floors:floorIdx+1, augments:augmentsGot.slice()};
+  const results={dungeon:dInfo?dInfo.ref:null, loot:lootBag, kills:totalKills, cleansed:cleansedRun, floors:floorIdx+1, augments:augmentsGot.slice(),
+    rescued:rescuedSoul, rescueId:(dInfo&&dInfo.ref&&dInfo.ref.storyObjective&&dInfo.ref.storyObjective.npcId)||null};
   const cb=exitCb; exitCb=null;
   if(cb)cb(results);
 }
@@ -1950,7 +2029,14 @@ return {
   // small debug/cheat surface — used by smoke tests and the curious
   debug:{
     get state(){return {floorIdx,cleansedRun,objective:objTitle(),final:isFinalFloor(),hasDown:!!portalDown,hasBoss:!!boss,keeper:false}},
-    get skin(){return {borrowed:!!T.borrowedSkin, grass:T.grassColor, dirt:T.dirtColor}},
+    get skin(){return {borrowed:!!T.borrowedSkin, grass:T.grassColor, dirt:T.dirtColor, theme:T.worldTheme||null}},
+    get flora(){return {trees:trees.length, cavePlants:cavePlants.length, dungTech:dungTech.length}},
+    get rescue(){return {objKind:objKind(), npcs:npcs.length, rescueNpcs:npcs.filter(n=>n.rescue).length, found:npcs.some(n=>n.rescue&&n.found), rescuedSoul, cleansed:cleansedRun}},
+    reachRescue(){ const n=npcs.find(x=>x.rescue); if(n){ player.x=n.x; player.y=n.y; } return !!n; },
+    get portals(){ return {up:!!portalUp, down:!!portalDown, floor:floorIdx, finalFloor:isFinalFloor(),
+      upReach: portalUp?!!pathFromPlayer(portalUp.x,portalUp.y):null,
+      downReach: portalDown?!!pathFromPlayer(portalDown.x,portalDown.y):null }; },
+    descendToFinal(){ let g=0; while(dInfo&&floorIdx<dInfo.depth-1&&g++<12){ floorIdx++; startFloor(); } return floorIdx; },
     get roster(){return CREATURES?{slime:CREATURES.slime.arch,wisp:CREATURES.wisp.arch,brute:CREATURES.brute.arch,boss:CREATURES.boss.arch}:null},
     get zoom(){return camZ}, set zoom(z){camZTarget=dclamp(z,ZMIN,ZMAX)},
     completeTask(){   // clear the objective: slay the heart on the deepest floor, else cleanse

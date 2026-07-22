@@ -94,7 +94,7 @@ let farmTiles=new Set();
 let farmAband=new Map();     // tile→days a farm plot has gone untended by any living town
 let region,regionsDirty=true;
 let people=[],allById=new Map(),buildings=[];
-let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[],quests=[];
+let dungeons=[],expeditions=[],monsters=[],villages=[],animals=[],flyers=[],camps=[],quests=[],techProps=[];
 let flockSeq=1;
 let civFallen=false,expeditionDay=0;   // settlements can die out; an expedition reseeds a new town
 let simMin=0,dayMark=1,speedIdx=1,nextId=1;
@@ -836,6 +836,47 @@ function buildingSprite(b){
  }
  return s;
 }
+// ---- passive tech scenery (SceneryForge): panels · wires · pipes · screens ----
+let techSpriteCache={}, techPropT=0;
+function techSprite(kind,theme,variant){
+ const key=kind+'/'+theme+'/'+variant;
+ let s=techSpriteCache[key];
+ if(s===undefined){ try{ s=SceneryForge.bake(kind,'v'+variant,theme); }catch(e){ s=null; } techSpriteCache[key]=s; }
+ return s;
+}
+function techTheme(){ return worldTheme==='cyberpunk'?'cyber':'modern'; }
+function techEraActive(){
+ if(typeof SceneryForge==='undefined')return false;
+ if(worldTheme==='cyberpunk'||worldTheme==='modern')return true;
+ return villages.some(v=>villageDev(v)>=3);   // any world, once a proper city rises
+}
+// scatter tech props over open ground around built-up towns (deterministic per town)
+function refreshTechProps(){
+ if(!techEraActive()){techProps.length=0;return;}
+ const theme=techTheme(), minDev=(worldTheme==='cyberpunk'||worldTheme==='modern')?1:3, out=[];
+ for(const v of villages){ const dev=villageDev(v); if(dev<minDev)continue;
+  const n=Math.min(10,2+dev*2), cl=v.claim||{x0:v.cx-8,y0:v.cy-8,x1:v.cx+8,y1:v.cy+8};
+  const rng=U.mulberry32(U.hashStr('tech-'+v.id+'-'+dev+'-'+seed));
+  let placed=0,tries=0;
+  while(placed<n&&tries++<60){
+   const x=clamp(Math.round(cl.x0-1+rng()*(cl.x1-cl.x0+2)),2,W-3), y=clamp(Math.round(cl.y0-1+rng()*(cl.y1-cl.y0+2)),2,H-3);
+   const i=idx(x,y);
+   if(map[i]!==0||bld[i]>=0||nodeAt.has(i)||pavedTiles.has(i)||farmGrid[i]||(typeof water!=='undefined'&&water&&water[i])||dungeonAt(x,y))continue;
+   const kind=SceneryForge.KINDS[(rng()*SceneryForge.KINDS.length)|0], variant=(rng()*4)|0;
+   out.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,kind,variant,theme,glow:(kind==='screen'||kind==='junction'||kind==='panel'),ph:rng()*6.28});
+   placed++;
+  }
+ }
+ techProps=out.slice(0,48);
+}
+function drawTechProp(c,p,t){
+ const s=techSprite(p.kind,p.theme,p.variant); if(!s||!s.canvas)return;
+ c.drawImage(s.canvas,p.x-s.ax,p.y-s.ay);
+ if(p.glow){ const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
+  c.globalAlpha=0.30+0.22*Math.sin(t*0.005+p.ph);
+  c.drawImage(p.theme==='cyber'?GLOW_CYAN:GLOW_BLUE,p.x-9,p.y-19,18,18);
+  c.globalAlpha=1;c.globalCompositeOperation=go; }
+}
 function queuePersonBake(p){p.sprite=null;bakeQueue.push({kind:'person',p})}
 function queueHeroBake(){hero.sprite=null;bakeQueue.push({kind:'hero'})}
 function queueMonsterBakes(){surfMon={};
@@ -896,7 +937,7 @@ function genWorld(){
  rockDmg=new Float32Array(W*H);particles=[];heroStone=0;heroGold=0;heroGems=0;
  modTiles=new Set();pavedTiles=new Set();terrainDirty=true;regionsDirty=true;
  nodeAt=new Map();nodes=[];openTiles=[];
- people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];farmAband=new Map();cityLinks=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
+ people=[];allById=new Map();buildings=[];dungeons=[];expeditions=[];monsters=[];villages=[];camps=[];quests=[];techProps=[];interiorQuest=null;farmAband=new Map();cityLinks=[];trackedQuest=null;Hero.renown=0;socialLog.gift=socialLog.gossip=socialLog.mentor=socialLog.console=socialLog.rival=0;chron=[];usedNames=new Set();graveBlooms=[];carrion=[];companion=null;merchant=null;shrines=[];nextMerchantDay=2;worldEvent=null;nextEventDay=3;curSeasonIdx=-1;heroStam=100;heroDash=null;dashCd=0;charging=false;chargeT=0;
  simMin=DAY*0.30;dayMark=1;nextId=1;deck=[];selected=null;follow=false;cine=false;interior=null;enterTarget=null;civFallen=false;expeditionDay=0;pairLog=new Set();usedBiz=new Set();usedDun=new Set();usedVil=new Set();
  lastInspect=null;bakeQueue=[];heroSlashes=[];
  makeBiome();makeWorldEras();       // this world's colour identity: terrain, plants, fauna, relics
@@ -2757,6 +2798,7 @@ function heroParkTick(dt){
  }else hero._inPark=false;
 }
 function updatePerson(p,dt){
+ if(p.questLost){p.age+=dt/(DAY*2);return}   // spirited away into a ruin/dungeon until rescued
  if(p.inDungeon){p.age+=dt/(DAY*2);return}
  p.age+=dt/(DAY*2);
  p.hunger=clamp(p.hunger+0.055*dt*(p.age<12?0.7:1),0,100);
@@ -4789,7 +4831,7 @@ function paintCellTexture(c,x,y,solidMask){ paintCellTextureTo(c,x,y,solidMask,s
 // derelict/overgrown variants for degraded ruins.
 function bakeInteriorBg(intr){
  const b=intr.b, decay=intr.decay||0;
- const mat = decay===1?'derelict' : decay===2?'overgrown' : TileGen.interiorMatFor(b.tp);
+ const mat = decay===1?'cyber' : decay===2?'ancient' : TileGen.interiorMatFor(b.tp);
  const Wpx=intr.gw*TILE, Hpx=intr.gh*TILE;
  const cv=document.createElement('canvas');cv.width=Wpx;cv.height=Hpx;
  const c=cv.getContext('2d');c.imageSmoothingEnabled=false;
@@ -5801,7 +5843,7 @@ function draw(t){
  }
  // people + the Sage, painter-sorted together — folk who've stepped inside a
  // building are off the overworld entirely (you'll find them in its interior)
- const ppl=people.filter(p=>!p.inDungeon&&!p.inside);
+ const ppl=people.filter(p=>!p.inDungeon&&!p.inside&&!p.questLost);
  const drawables=ppl.map(p=>({y:p.y,f:()=>{
   ctx.save();ctx.translate(p.x,p.y);
   if(p===selected){
@@ -5835,6 +5877,10 @@ function draw(t){
  for(const a of animals){
   if(a.x/TILE<vx0-2||a.x/TILE>vx1+2||a.y/TILE<vy0-2||a.y/TILE>vy1+2)continue;
   drawables.push({y:a.y,f:()=>drawAnimal(ctx,a,t)});
+ }
+ for(const p of techProps){
+  if(p.x/TILE<vx0-2||p.x/TILE>vx1+2||p.y/TILE<vy0-2||p.y/TILE>vy1+2)continue;
+  drawables.push({y:p.y,f:()=>drawTechProp(ctx,p,t)});
  }
  if(!hero.down)drawables.push({y:hero.y,f:()=>drawHero(t)});
  drawables.sort((a,b)=>a.y-b.y);
@@ -6047,40 +6093,164 @@ function makeIntFoe(arch,x,y){
  return {arch,type:statType,x,y,tx:x,ty:y,hp,maxhp:hp,dmg:1,spd:14+M.spd*16,dir:0,dirIdx:0,animClock:R()*4,
   atkCd:0,retarget:0,col:M.col,g:M.g,em:null,sprite:intFoeSprite(arch)};
 }
+/* ===== polygon room generator: ruined interiors are mini-dungeons =====
+   several rooms of varied polygon footprints, joined by hallways in different
+   shapes (straight / L / Z), guaranteed reachable from the door. */
+function _carveCell(solid,si,gw,gh,x,y){ if(x>0&&y>0&&x<gw-1&&y<gh-1)solid[si(x,y)]=0; }
+function carveRoomShape(solid,si,gw,gh,room,rng){
+ const {x,y,w,h,shape}=room, clr=(xx,yy)=>_carveCell(solid,si,gw,gh,xx,yy);
+ if(shape==='plus'){
+  const cxs=x+(w>>2),cxe=x+w-1-(w>>2),cys=y+(h>>2),cye=y+h-1-(h>>2);
+  for(let yy=y;yy<y+h;yy++)for(let xx=cxs;xx<=cxe;xx++)clr(xx,yy);
+  for(let xx=x;xx<x+w;xx++)for(let yy=cys;yy<=cye;yy++)clr(xx,yy);
+ }else if(shape==='T'){
+  const band=Math.max(1,(h/3)|0), cxs=x+(w>>2),cxe=x+w-1-(w>>2);
+  for(let yy=y;yy<y+band;yy++)for(let xx=x;xx<x+w;xx++)clr(xx,yy);
+  for(let yy=y;yy<y+h;yy++)for(let xx=cxs;xx<=cxe;xx++)clr(xx,yy);
+ }else if(shape==='L'){
+  for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)clr(xx,yy);
+  const qw=Math.max(1,w>>1),qh=Math.max(1,h>>1);
+  const cx0=(rng()<.5)?x:x+w-qw, cy0=(rng()<.5)?y:y+h-qh;
+  for(let yy=cy0;yy<cy0+qh;yy++)for(let xx=cx0;xx<cx0+qw;xx++)if(xx>0&&yy>0&&xx<gw-1&&yy<gh-1)solid[si(xx,yy)]=1;
+ }else if(shape==='oct'){
+  for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)clr(xx,yy);
+  for(const[cx,cy] of [[x,y],[x+w-1,y],[x,y+h-1],[x+w-1,y+h-1]])if(cx>0&&cy>0&&cx<gw-1&&cy<gh-1)solid[si(cx,cy)]=1;
+ }else{ for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)clr(xx,yy); }
+ // a guaranteed-open anchor cell for wiring corridors
+ room.ax=room.cx;room.ay=room.cy;
+ if(solid[si(room.cx,room.cy)]!==0){ let done=false;
+  for(let yy=y;yy<y+h&&!done;yy++)for(let xx=x;xx<x+w&&!done;xx++)if(solid[si(xx,yy)]===0){room.ax=xx;room.ay=yy;done=true;} }
+}
+function carveHSeg(solid,si,gw,gh,y,xa,xb,thick){const lo=Math.min(xa,xb),hi=Math.max(xa,xb);
+ for(let x=lo;x<=hi;x++){_carveCell(solid,si,gw,gh,x,y);if(thick)_carveCell(solid,si,gw,gh,x,y+1);}}
+function carveVSeg(solid,si,gw,gh,x,ya,yb,thick){const lo=Math.min(ya,yb),hi=Math.max(ya,yb);
+ for(let y=lo;y<=hi;y++){_carveCell(solid,si,gw,gh,x,y);if(thick)_carveCell(solid,si,gw,gh,x+1,y);}}
+function carvePath(solid,si,gw,gh,x0,y0,x1,y1,rng){
+ const thick=rng()<0.3;
+ if(x0===x1){carveVSeg(solid,si,gw,gh,x0,y0,y1,thick);return;}
+ if(y0===y1){carveHSeg(solid,si,gw,gh,y0,x0,x1,thick);return;}
+ const r=rng();
+ if(r<0.38){carveHSeg(solid,si,gw,gh,y0,x0,x1,thick);carveVSeg(solid,si,gw,gh,x1,y0,y1,thick);}
+ else if(r<0.76){carveVSeg(solid,si,gw,gh,x0,y0,y1,thick);carveHSeg(solid,si,gw,gh,y1,x0,x1,thick);}
+ else{const mx=(x0+x1)>>1;carveHSeg(solid,si,gw,gh,y0,x0,mx,thick);carveVSeg(solid,si,gw,gh,mx,y0,y1,thick);carveHSeg(solid,si,gw,gh,y1,mx,x1,thick);}
+}
+function roomFloorCells(gw,gh,solid,si,room){const out=[];
+ for(let y=room.y;y<room.y+room.h;y++)for(let x=room.x;x<room.x+room.w;x++)
+  if(x>0&&y>0&&x<gw-1&&y<gh-1&&solid[si(x,y)]===0)out.push([x,y]);
+ return out;}
+function carveRoomsInterior(gw,gh,solid,si,dcx,rng){
+ for(let y=1;y<gh-1;y++)for(let x=1;x<gw-1;x++)solid[si(x,y)]=1;   // start solid, then dig
+ solid[si(dcx,gh-1)]=0;solid[si(dcx-1,gh-1)]=0;
+ const rooms=[], SH=['rect','rect','L','plus','T','oct'];
+ const area=(gw-2)*(gh-2), target=clamp(3+Math.round(area/45),4,8);
+ // keep rooms small enough that several fit side-by-side with wall gaps between them
+ const maxRW=clamp(((gw-4)/2)|0,3,5), maxRH=clamp(((gh-4)/2)|0,3,4);
+ let tries=0;
+ while(rooms.length<target && tries++<300){
+  const rw=3+((rng()*Math.max(1,maxRW-2))|0), rh=3+((rng()*Math.max(1,maxRH-2))|0);
+  const rx=1+((rng()*Math.max(1,gw-2-rw))|0), ry=1+((rng()*Math.max(1,gh-4-rh))|0);
+  let ok=true;
+  for(const r of rooms){ if(rx<r.x+r.w+1&&rx+rw+1>r.x&&ry<r.y+r.h+1&&ry+rh+1>r.y){ok=false;break;} }
+  if(!ok)continue;
+  const room={x:rx,y:ry,w:rw,h:rh,cx:rx+(rw>>1),cy:ry+(rh>>1),shape:SH[(rng()*SH.length)|0]};
+  carveRoomShape(solid,si,gw,gh,room,rng); rooms.push(room);
+ }
+ if(!rooms.length){ // tiny footprint fallback: one central hall
+  const room={x:1,y:1,w:gw-2,h:gh-3,cx:gw>>1,cy:gh>>1,shape:'rect'};
+  carveRoomShape(solid,si,gw,gh,room,rng); rooms.push(room);
+ }
+ for(let i=1;i<rooms.length;i++){ let best=0,bd=1e9;
+  for(let j=0;j<i;j++){const d=Math.abs(rooms[i].cx-rooms[j].cx)+Math.abs(rooms[i].cy-rooms[j].cy);if(d<bd){bd=d;best=j;}}
+  carvePath(solid,si,gw,gh,rooms[i].ax,rooms[i].ay,rooms[best].ax,rooms[best].ay,rng); }
+ const extra=(rng()*2)|0;   // a loop or two so it isn't a pure tree
+ for(let e=0;e<extra&&rooms.length>2;e++){const a=(rng()*rooms.length)|0,b=(rng()*rooms.length)|0;if(a!==b)carvePath(solid,si,gw,gh,rooms[a].ax,rooms[a].ay,rooms[b].ax,rooms[b].ay,rng);}
+ solid[si(dcx,gh-2)]=0;   // the entrance lane
+ let near=0,nd=1e9;
+ for(let j=0;j<rooms.length;j++){const d=Math.abs(dcx-rooms[j].ax)+Math.abs((gh-2)-rooms[j].ay);if(d<nd){nd=d;near=j;}}
+ carvePath(solid,si,gw,gh,dcx,gh-2,rooms[near].ax,rooms[near].ay,rng);
+ return rooms;
+}
+// smash a loose partition wall inside a ruined interior
+function breakIntWall(intr,tx,ty){
+ const i=intr.si(tx,ty);
+ intr.wallMask[i]=0; intr.solid[i]=0; if(intr.breakable)intr.breakable[i]=0;
+ if(intr.bg&&typeof TileGen!=='undefined'){ const c=intr.bg.getContext('2d');
+  const img=c.createImageData(TILE,TILE),d=img.data,seed=(intr.b.id||1);
+  for(let ly=0;ly<TILE;ly++)for(let lx=0;lx<TILE;lx++){const gx=tx*TILE+lx,gy=ty*TILE+ly;
+   const col=TileGen.interiorFloorTexel(intr.mat,gx,gy,seed);const p=(ly*TILE+lx)*4;d[p]=col[0];d[p+1]=col[1];d[p+2]=col[2];d[p+3]=255;}
+  c.putImageData(img,tx*TILE,ty*TILE); }
+ for(let s=0;s<9;s++){const a=Math.random()*6.28;particles.push({x:tx*TILE+TILE/2,y:ty*TILE+TILE/2,vx:Math.cos(a)*42,vy:Math.sin(a)*42-18,life:0,max:0.4+Math.random()*0.3,size:1.4+Math.random()*1.7,col:intr.decay===1?'#6a7a90':'#7a6a4a',g:130,spark:false});}
+ for(const[ox,oy] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=tx+ox,ny=ty+oy;
+  if(nx>0&&ny>0&&nx<intr.gw-1&&ny<intr.gh-1&&intr.breakable&&!intr.breakable[intr.si(nx,ny)]&&intr.wallMask[intr.si(nx,ny)]===1){
+   intr.breakable[intr.si(nx,ny)]=1;intr.wallHp[intr.si(nx,ny)]=intr.breakBase;}}
+}
+// the farthest open floor cell from the door — where a quest's prize or captive hides
+function farInteriorCell(intr){
+ let best=[intr.door[0],1], bd=-1;
+ for(let y=1;y<intr.gh-2;y++)for(let x=1;x<intr.gw-1;x++){ if(intr.wallMask[intr.si(x,y)]!==0)continue;
+  const d=Math.abs(x-intr.door[0])+Math.abs(y-(intr.gh-1)); if(d>bd){bd=d;best=[x,y];} }
+ return best;
+}
+// if a sub-area quest is bound to this building, plant its objective inside
+function injectInteriorQuest(intr,b){
+ const q=interiorQuest; if(!q||q.bId!==b.id||q.done)return;
+ const s=farInteriorCell(intr);
+ if(q.kind==='recoverLoot'){
+  intr.loot.push({x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,kind:'relic',relic:q.relic||pick(RELICS),amt:1,got:false,t:0,quest:true});
+ }else if(q.kind==='rescue'){
+  const p=allById.get(q.npcId);
+  intr.occupants.push({pid:q.npcId,name:q.npcName||(p&&p.name)||'the lost soul',sprite:(p&&p.sprite)||null,col:(p&&p.col)||'#c8a25a',
+   x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,tx:0,ty:0,dir:0,animClock:0,wait:1e9,moving:false,quest:true,rescue:true});
+ }
+ // clearRuin needs no plant — the ruin's own foes are the objective
+}
 function makeInterior(b){
  // big civic buildings & towers open into deep, multi-room floors you can wander
  const mega=['apartment','warehouse','venue','factory','highrise','arcology'].includes(b.tp);
  const decay=b.decay||0;                 // 0 lived-in · 1 abandoned-cyber · 2 ancient-ruin
  const cyber=decay===1, ancient=decay===2;
- // an abandoned-cyber floor sprawls the largest — big gutted halls to fight through
- const gw=clamp(b.w*3+4, 9, cyber?28:mega?24:(decay?18:17)), gh=clamp(b.h*3+3, 8, cyber?22:mega?19:(decay?16:13));
+ // a ruin sprawls into a mini-dungeon; give the room generator extra breathing room
+ const useRooms = decay>=1;
+ const gw=clamp(b.w*3+(useRooms?6:4), 10, cyber?30:mega?26:(decay?20:17)), gh=clamp(b.h*3+(useRooms?5:3), 9, cyber?24:mega?21:(decay?18:13));
  const solid=new Uint8Array(gw*gh), si=(x,y)=>y*gw+x;
  for(let x=0;x<gw;x++){solid[si(x,0)]=1;solid[si(x,gh-1)]=1}
  for(let y=0;y<gh;y++){solid[si(0,y)]=1;solid[si(gw-1,y)]=1}
  const dcx=(gw/2)|0;
  solid[si(dcx,gh-1)]=0;solid[si(dcx-1,gh-1)]=0;      // 2-wide doorway on the south wall
- // interior partitions: a central corridor runs from the door to the back, with
- // rooms walled off to either side — a large (or degraded) building holds several
- // rooms to travel between rather than one big hall
- if(mega||decay>=1){
-  const bands = cyber?(gh>=18?4:3) : (gh>=15?3 : gh>=11?2 : 1);
+ const rng=U.mulberry32(U.hashStr('interior-'+b.id+'-'+decay));
+ let rooms=null;
+ if(useRooms){
+  // ruined interiors become mini-dungeons: several polygon rooms + shaped halls
+  rooms=carveRoomsInterior(gw,gh,solid,si,dcx,rng);
+ }else if(mega){
+  // a lived-in tower keeps its tidy partitioned halls (central corridor + rooms)
+  const bands = (gh>=15?3 : gh>=11?2 : 1);
   for(let bnd=1;bnd<=bands;bnd++){
    const wy=Math.round(bnd*gh/(bands+1));
    if(wy<=1||wy>=gh-1)continue;
-   for(let x=1;x<gw-1;x++){ if(x===dcx||x===dcx-1)continue; solid[si(x,wy)]=1; }   // leave the corridor open
+   for(let x=1;x<gw-1;x++){ if(x===dcx||x===dcx-1)continue; solid[si(x,wy)]=1; }
   }
  }
- // snapshot the STRUCTURAL walls (border + partitions) before furniture is added —
- // these become the rock-textured walls when the overworld texture is baked in
+ // snapshot the STRUCTURAL walls before furniture — these become the rock walls
  const wallMask=solid.slice();
+ // destroyable partition walls: interior (non-shell) walls touching open floor can
+ // be smashed with the blade to open new paths through a ruin
+ const breakBase = cyber?26:ancient?20:16;
+ let breakable=null, wallHp=null;
+ if(useRooms){
+  breakable=new Uint8Array(gw*gh); wallHp=new Float32Array(gw*gh);
+  for(let y=1;y<gh-1;y++)for(let x=1;x<gw-1;x++){ if(wallMask[si(x,y)]!==1)continue;
+   let open=false; for(const[ox,oy] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=x+ox,ny=y+oy;if(nx>0&&ny>0&&nx<gw-1&&ny<gh-1&&wallMask[si(nx,ny)]===0){open=true;break;}}
+   if(open){breakable[si(x,y)]=1;wallHp[si(x,y)]=breakBase;} }
+ }
  const FLOORS={biz:'#4a4152',factory:'#3a3d42',venue:'#3a2f45',warehouse:'#48412f',highrise:'#3d4450',apartment:'#4a4038',arcology:'#33404f'};
  const WALLS={biz:'#332c40',factory:'#2a2d32',venue:'#2a2035',warehouse:'#34301f',highrise:'#2c3340',apartment:'#332c26',arcology:'#243140'};
  const floor = cyber?'#161c28' : ancient?'#2a3122' : (FLOORS[b.tp]||'#5a4230');
  const wall  = cyber?'#0d1220' : ancient?'#20291a' : (WALLS[b.tp]||'#3a2f22');
  const intr={b,gw,gh,solid,si,door:[dcx,gh-1],doorGap:[dcx,dcx-1],furniture:[],occupants:[],
-   traps:[],foes:[],loot:[],decay,wallMask,name:(cyber?'the derelict ':ancient?'the overgrown ':'')+(decay?enterLabel(b).replace(/^the /,''):enterLabel(b)),
+   traps:[],foes:[],loot:[],decay,wallMask,breakable,wallHp,breakBase,rooms,
+   name:(cyber?'the derelict ':ancient?'the overgrown ':'')+(decay?enterLabel(b).replace(/^the /,''):enterLabel(b)),
    floor, wall};
- const rng=U.mulberry32(U.hashStr('interior-'+b.id+'-'+decay));
  const rpick=a=>a[(rng()*a.length)|0];
  const put=(x,y,w,h,kind,blk)=>{
   intr.furniture.push({x,y,w,h,kind});
@@ -6089,24 +6259,33 @@ function makeInterior(b){
  const midx=(gw/2|0), midy=(gh/2|0);
  // ---- a degraded floor: hostile & haunted (cyber) or nature-reclaimed (ancient) ----
  if(decay>=1){
+  // scatter the crawl's contents through the ROOMS (never the corridors), so each
+  // chamber holds its own debris, foes, traps and loot
+  const cells=[]; for(const r of (rooms||[]))for(const c of roomFloorCells(gw,gh,solid,si,r))if(c[1]<gh-2)cells.push(c);
+  shuffle(cells); let ci=0; const grab=()=>cells.length?cells[(ci++)%cells.length]:null;
   const debris = cyber?['debris','machine','terminal','wire','crate']:['overgrowth','sapling','rubble','moss','barrel'];
-  for(let k=0;k<(cyber?11:9);k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2)continue; put(s[0],s[1],1,1,rpick(debris),rng()<.45?1:0); }
-  // traps underfoot — cyber floors bristle with more, and deadlier
+  for(let k=0;k<(cyber?11:9);k++){ const s=grab(); if(!s)break; put(s[0],s[1],1,1,rpick(debris),rng()<.35?1:0); }
   const nTrap=cyber?(4+((rng()*3)|0)):(2+((rng()*2)|0));
-  for(let k=0;k<nTrap;k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2||(s[0]===dcx||s[0]===dcx-1))continue;
+  for(let k=0;k<nTrap;k++){ const s=grab(); if(!s)break; if(s[0]===dcx||s[0]===dcx-1)continue;
    intr.traps.push({x:s[0],y:s[1],kind:cyber?'spike':'thorn',ph:rng()*3,cd:0}); }
-  // things that have moved into the halls — cyber constructs vs ancient revenants
   const foePool = cyber?['drone','sentinel','chassis','stalker','drone']:['husk','wraith','mossling','crawler','mossling'];
-  const nFoe=cyber?(2+((rng()*3)|0)):(1+((rng()*2)|0));
-  for(let k=0;k<nFoe;k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2)continue;
+  const nFoe=cyber?(3+((rng()*3)|0)):(2+((rng()*2)|0));
+  for(let k=0;k<nFoe;k++){ const s=grab(); if(!s)break;
    intr.foes.push(makeIntFoe(rpick(foePool), s[0]*TILE+TILE/2, s[1]*TILE+TILE/2)); }
-  // loot spilled through the wreck to reward the crawl
-  const nLoot=2+((rng()*3)|0);
-  for(let k=0;k<nLoot;k++){ const s=freeSpotInt(intr,rng);
+  const nLoot=3+((rng()*3)|0);
+  for(let k=0;k<nLoot;k++){ const s=grab(); if(!s)break;
    const r=rng(), kind=r<.12?'relic':r<.42?'gem':'gold';
    intr.loot.push({x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,kind,amt:kind==='gold'?(3+((rng()*7)|0)):(1+((rng()*2)|0)),relic:kind==='relic'?pick(RELICS):null,got:false,t:rng()*6}); }
-  put(dcx-1,gh-3,2,1,'rug',0);
-  for(let y=1;y<gh-1;y++){solid[si(dcx,y)]=0;solid[si(dcx-1,y)]=0;}   // keep the spine walkable
+  // cave flora reclaims the ruin — thick in an ancient overgrowth, damp sprigs in cyber
+  const nPlant = ancient?(4+((rng()*4)|0)):(1+((rng()*2)|0));
+  for(let k=0;k<nPlant;k++){ const s=grab(); if(!s)break; put(s[0],s[1],1,1,'caveplant',0);
+   const fp=intr.furniture[intr.furniture.length-1]; fp.pv=(rng()*3)|0; fp.glow=rng()<0.5; }
+  // haunted cyber-tech scenery bled through the derelict floor
+  if(cyber&&typeof SceneryForge!=='undefined'){ const nTech=2+((rng()*3)|0);
+   for(let k=0;k<nTech;k++){ const s=grab(); if(!s)break;
+    const kind=SceneryForge.KINDS[(rng()*SceneryForge.KINDS.length)|0];
+    intr.furniture.push({x:s[0],y:s[1],w:1,h:1,kind:'tech',sprite:techSprite(kind,'cyber',(rng()*4)|0)}); } }
+  injectInteriorQuest(intr,b);
   bakeInteriorBg(intr);
   return intr;
  }
@@ -6163,6 +6342,12 @@ function makeInterior(b){
  // the central corridor is kept clear no matter what furniture landed on it, so
  // every room stays reachable from the door
  if(mega)for(let y=1;y<gh-1;y++){solid[si(dcx,y)]=0;solid[si(dcx-1,y)]=0;}
+ // modern civic interiors are dressed with clean tech: screens, panels, conduits
+ if(!decay && ['factory','highrise','arcology','venue'].includes(b.tp) && typeof SceneryForge!=='undefined'){
+  const nTech=2+((rng()*3)|0);
+  for(let k=0;k<nTech;k++){ const s=freeSpotInt(intr,rng); if(s[1]>=gh-2)continue;
+   const kind=SceneryForge.KINDS[(rng()*SceneryForge.KINDS.length)|0];
+   intr.furniture.push({x:s[0],y:s[1],w:1,h:1,kind:'tech',sprite:techSprite(kind,'modern',(rng()*4)|0)}); } }
  // occupants are EXACTLY the folk currently inside this building — the same souls
  // who stepped off the overworld to sleep here. Empty if nobody's home, so the
  // inside always matches the streets outside.
@@ -6173,6 +6358,7 @@ function makeInterior(b){
   intr.occupants.push({pid:o.id,name:o.name,sprite:o.sprite||null,col:o.col,x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,
     tx:0,ty:0,dir:0,animClock:0,wait:rng()*2.5,moving:false});
  }
+ injectInteriorQuest(intr,b);
  bakeInteriorBg(intr);
  return intr;
 }
@@ -6263,6 +6449,15 @@ function updateInteriorScene(rdt){
  if(interior.traps&&interior.traps.length)updateIntTraps(rdt);
  if(interior.loot&&interior.loot.length)collectIntLoot(rdt);
  if(heroSlashes.length)resolveIntSlashes(rdt);
+ // sub-area quest checks: reaching the captive / clearing every foe
+ if(interiorQuest&&!interiorQuest.done&&interior.b.id===interiorQuest.bId){
+  if(interiorQuest.kind==='rescue'){
+   const cap=interior.occupants.find(o=>o.rescue);
+   if(cap&&dist2(cap.x,cap.y,hero.x,hero.y)<(TILE*1.4)**2){ interiorQuest.done=true; cap.freed=true; toast('✦ You found '+(cap.name||'them')+'! Lead them back to the light.'); }
+  }else if(interiorQuest.kind==='clearRuin'){
+   if((!interior.foes||interior.foes.length===0)){ interiorQuest.done=true; toast('✦ The ruin is cleared — nothing stirs.'); }
+  }
+ }
  // stepping into the doorway leads back outside
  if(((hero.y/TILE)|0)>=interior.gh-1)exitInterior();
  uiProxT-=rdt;if(uiProxT<=0){uiProxT=0.2;updateContextButtons()}
@@ -6306,6 +6501,7 @@ function collectIntLoot(rdt){
   lo.t=(lo.t||0)+rdt;
   if(!lo.got&&dist2(lo.x,lo.y,hero.x,hero.y)<(TILE*0.85)**2){
    lo.got=true;
+   if(lo.quest&&interiorQuest&&interiorQuest.kind==='recoverLoot'&&interior&&interior.b.id===interiorQuest.bId){interiorQuest.done=true;toast('✦ You recovered what you came for!');}
    if(lo.kind==='relic'&&lo.relic){ Hero.relics.push(lo.relic); toast('You prised '+lo.relic.g+' '+lo.relic.n+' from the wreckage!'); }
    else if(lo.kind==='gem'){ heroGems+=lo.amt; toast('💎 +'+lo.amt+' gems from the ruins.'); }
    else { heroGold+=lo.amt; toast('🪙 +'+lo.amt+' gold from the ruins.'); }
@@ -6319,6 +6515,23 @@ function resolveIntSlashes(rdt){
  for(const s of heroSlashes){
   s.t+=rdt;
   if(s.t<=0.15){
+   // smash any loose partition wall the blade sweeps across
+   if(intr.breakable){
+    if(!s.hitWalls)s.hitWalls=new Set();
+    const reach=s.range+10;
+    const t0x=Math.max(1,((hero.x-reach)/TILE)|0),t1x=Math.min(intr.gw-2,((hero.x+reach)/TILE)|0);
+    const t0y=Math.max(1,((hero.y-reach)/TILE)|0),t1y=Math.min(intr.gh-2,((hero.y+reach)/TILE)|0);
+    for(let ty=t0y;ty<=t1y;ty++)for(let tx=t0x;tx<=t1x;tx++){
+     const i=intr.si(tx,ty); if(!intr.breakable[i])continue;
+     const wxp=tx*TILE+TILE/2,wyp=ty*TILE+TILE/2,dx=wxp-hero.x,dy=wyp-hero.y,d=Math.hypot(dx,dy);
+     if(d>reach)continue;
+     let da=Math.atan2(dy,dx)-s.ang; da=Math.atan2(Math.sin(da),Math.cos(da));
+     if(Math.abs(da)>s.arc/2+0.35)continue;
+     const key=tx+','+ty; if(s.hitWalls.has(key))continue; s.hitWalls.add(key);
+     intr.wallHp[i]-=s.dmg;
+     if(intr.wallHp[i]<=0)breakIntWall(intr,tx,ty);
+    }
+   }
    for(const f of intr.foes){
     if(f.dead||s.hit.has(f))continue;
     const dx=f.x-hero.x,dy=f.y-hero.y,d=Math.hypot(dx,dy);
@@ -6337,6 +6550,29 @@ function resolveIntSlashes(rdt){
 }
 function drawFurniture(c,f){
  const px=f.x*TILE,py=f.y*TILE,w=f.w*TILE,h=f.h*TILE;
+ if(f.kind==='tech'){
+  const s=f.sprite; if(s&&s.canvas)c.drawImage(s.canvas,px+TILE/2-s.ax,py+TILE-s.ay);
+  return;
+ }
+ if(f.kind==='caveplant'){
+  // glowing fungi / fungal cluster / hanging root — a breath of cave life
+  const cx=px+TILE/2, gy=py+TILE-2, pv=f.pv||0, tt=performance.now();
+  if(f.glow){const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';c.globalAlpha=0.3+0.18*Math.sin(tt*0.004+f.x);
+   c.drawImage(GLOW_GREEN,cx-8,gy-12,16,16);c.globalAlpha=1;c.globalCompositeOperation=go;}
+  if(pv===0){ // capped mushrooms
+   for(let m=0;m<3;m++){const mx=cx-4+m*4, mh=4+((m*2)%3);
+    c.fillStyle='#c8d8b0';c.fillRect(mx-0.5,gy-mh,1.6,mh);
+    c.fillStyle=f.glow?'#8affc0':'#9a6ad0';c.beginPath();c.ellipse(mx+0.3,gy-mh,2.4,1.6,0,Math.PI,0);c.fill();}
+  }else if(pv===1){ // fungal shelf / moss clump
+   c.fillStyle='#4a6a3a';c.beginPath();c.ellipse(cx,gy-2,5,3,0,0,7);c.fill();
+   c.fillStyle=f.glow?'#7fe0a0':'#5f8a48';for(let m=0;m<4;m++)c.fillRect(cx-4+m*2.4,gy-3-((m*3)%3),1.6,2);
+  }else{ // hanging roots from above
+   c.strokeStyle='#5a4a34';c.lineWidth=1.2;
+   for(let r=0;r<4;r++){const rx=px+3+r*3;c.beginPath();c.moveTo(rx,py);c.lineTo(rx+Math.sin(r+tt*0.001)*1.5,py+6+((r*2)%4));c.stroke();}
+   c.fillStyle=f.glow?'#8affc0':'#7a9a5a';for(let r=0;r<3;r++)c.fillRect(px+3+r*4,py+5+((r*2)%3),1.4,1.4);
+  }
+  return;
+ }
  if(f.kind==='rug'){
   c.fillStyle='#7a3b4a';c.fillRect(px+1,py+1,w-2,h-2);
   c.fillStyle='#a8586a';c.fillRect(px+3,py+3,w-6,h-6);
@@ -6482,6 +6718,15 @@ function drawInterior(t){
   for(let y=0;y<intr.gh;y++)for(let x=0;x<intr.gw;x++){
    if(intr.wallMask&&intr.wallMask[intr.si(x,y)]){ctx.fillStyle='rgba(255,255,255,0.06)';ctx.fillRect(x*TILE,y*TILE,TILE,2);}
   }
+  // loose partition walls read as breakable, and show cracks as the blade wears them
+  if(intr.breakable)for(let y=1;y<intr.gh-1;y++)for(let x=1;x<intr.gw-1;x++){
+   const i=intr.si(x,y); if(!intr.breakable[i]||intr.wallMask[i]!==1)continue;
+   const px=x*TILE,py=y*TILE;
+   ctx.strokeStyle='rgba(255,224,140,0.13)';ctx.lineWidth=1;ctx.strokeRect(px+2.5,py+2.5,TILE-5,TILE-5);
+   const dmg=clamp(1-intr.wallHp[i]/intr.breakBase,0,1);
+   if(dmg>0.05){ctx.strokeStyle='rgba(230,96,62,'+(0.28+dmg*0.5)+')';ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(px+4,py+3);ctx.lineTo(px+TILE-5,py+TILE-4);ctx.moveTo(px+TILE-5,py+4);ctx.lineTo(px+6,py+TILE-3);ctx.stroke();}
+  }
   if(intr.decay===1){ctx.fillStyle='rgba(18,24,42,0.22)';ctx.fillRect(0,0,wpx,wph);}        // a touch of gutted-cyber gloom
   else if(intr.decay===2){ctx.fillStyle='rgba(30,58,26,0.12)';ctx.fillRect(0,0,wpx,wph);}   // faint overgrown wash
  }else{
@@ -6533,6 +6778,11 @@ function drawInterior(t){
   else{ // sprite not baked yet — a simple painted stand-in so they're never invisible
    ctx.fillStyle=o.col||'#b48a5a';ctx.beginPath();ctx.ellipse(0,-3,3.4,4.4,0,0,7);ctx.fill();
    ctx.fillStyle='#e8d0b0';ctx.beginPath();ctx.arc(0,-8,2.2,0,7);ctx.fill();
+  }
+  if(o.rescue){ // a captive soul you've come to find — flag them so they read across the gloom
+   const go=ctx.globalCompositeOperation;ctx.globalCompositeOperation='screen';ctx.globalAlpha=0.5+0.3*Math.sin(t*0.006);
+   ctx.drawImage(GLOW_GOLD,-11,-24,22,22);ctx.globalAlpha=1;ctx.globalCompositeOperation=go;
+   ctx.font='9px system-ui';ctx.textAlign='center';ctx.fillStyle='#ffe08a';ctx.fillText(o.freed?'🙏':'🆘',0,-15);
   }
   ctx.restore();
  }});
@@ -7448,7 +7698,7 @@ function reseed(newSeed,theme,params){
  {const wov=$('warm'); if(wov)wov.classList.add('hidden');}
  {const cs=$('charsel'); if(cs)cs.classList.add('hidden');}
  Hero.name='the Sage'; Hero.pc=null;   // each world lets the player choose a new life
- campaign=null; closeStoryCard(); {const sb=$('story');if(sb)sb.classList.add('hidden');}
+ campaign=null; interiorQuest=null; closeStoryCard(); {const sb=$('story');if(sb)sb.classList.add('hidden');}
  seed=(newSeed===undefined)?((Math.random()*2**31)|0):newSeed;
  if(theme)worldTheme=theme;
  if(params)worldParams=Object.assign({buildup:0,flora:.5,fertility:.5,fauna:.5,monsters:.5,treasure:.5,hue:-1,sat:-1},params);
@@ -7616,6 +7866,7 @@ function finishDropIn(){
   tale([],'And so, after '+yrs+' years of seasons, births, feuds and quiet triumphs, a wandering Sage crests the hills and walks down into the living world.',true);
  }
  startCampaign();
+ refreshTechProps();   // dress the tech-era cities with panels, wires & screens
  if(warmDone)warmDone();
 }
 
@@ -7737,6 +7988,9 @@ function traitList(keys){ return (keys||[]).map(t=>TRAITS[t]?TRAITS[t].a:t).join
    quest of escalating chapters (a sign, a soul, a hunt, a descent) that climbs to a
    named boss and a saved world. Fresh setting, villain and lore every world. */
 let campaign=null;
+// a sub-area quest bound to one building/ruin the player must enter:
+// {kind:'recoverLoot'|'clearRuin'|'rescue', bId, npcId, npcName, relic, done}
+let interiorQuest=null;
 const VILLAINS={
  fantasy:[['the Barrow-King','a crowned dead thing risen from the old graves'],['the Thornwitch','a hedge-sovereign who trades in stolen names'],['the Ashen Wyrm','a slow furnace wearing scales'],['the Pale Shepherd','who herds the drowned and the forgotten']],
  cyberpunk:[['the Chrome Warden','a security mind that grew a body and a grudge'],['the Hollow Broker','a data-ghost in a stolen face'],['the Rust Sovereign','a landfill god of cast-off machines'],['the Signal','a hunger loose in the wires']],
@@ -7862,6 +8116,18 @@ function genDungeon(H){
  return {k:'dungeon',dungeonId:d.id,dunName:d.name,mark:[d.x,d.y],
   title:'Descent into '+d.name, intro:'Only one thing can wound {villain}, and it lies in the deep dark of '+d.name+'. Descend, and carry it back into the light.',
   desc:'Descend into '+d.name+'.'};
+}
+// descend a dungeon to find a villager lost in its deepest dark
+function genDungeonRescue(H){
+ const live=dungeons.filter(d=>!d.cleansed); if(!live.length)return null;
+ const home=homeVillage();
+ const pool=people.filter(p=>!p.dead&&!p.inDungeon&&!p.inside&&!p.questLost&&p.age>=12&&(home?p.vid===home.id:true));
+ if(!pool.length)return null;
+ const d=pick(live), p=pick(pool);
+ return {k:'dungrescue', dungeonId:d.id, dunName:d.name, npcId:p.id, figName:p.name, mark:[d.x,d.y],
+  title:'Into the Deep for '+p.name,
+  intro:p.name+' of {home} followed something down into '+d.name+' and never climbed back out. Descend into the dark, find them, and carry them up into the light.',
+  desc:'Find '+p.name+', lost in the deep of '+d.name+'.'};
 }
 function genGather(H){
  const v=homeVillage(); const rebuild=H.ruins.length?pick(H.ruins):null;
@@ -8044,6 +8310,39 @@ function escortStep(p,dt){
   p.moving=true; p.fx=dx>0?1:-1; }
  else p.moving=false;
 }
+/* ---- interior/ruin quests: send the Sage INTO a building or ruin ---- */
+function questRuins(){ return buildings.filter(b=>!b.gone&&b.done&&(b.decay===1||b.decay===2)); }
+function pickQuestRuin(){ const r=questRuins(); return r.length?pick(r):null; }
+function buildingDoorMark(b){ const dt=doorTileOf(b); return [dt[0],dt[1]]; }
+// recover a relic from inside a ruin (or, failing that, a standing civic building)
+function genRuinLoot(H){
+ const b=pickQuestRuin()||buildings.find(x=>!x.gone&&x.done&&!x.decay&&['warehouse','factory','apartment','biz','venue'].includes(x.tp));
+ if(!b)return null;
+ return {k:'ruinloot', bId:b.id, relic:pick(RELICS), mark:buildingDoorMark(b),
+  title:'Salvage in '+enterLabel(b).replace(/^the /,''),
+  intro:'Something worth carrying still lies deep inside '+enterLabel(b)+'. Go in, take it from the dark, and get out alive.',
+  desc:'Recover the relic from inside '+enterLabel(b)+'.'};
+}
+// clear every foe nesting inside a ruin
+function genRuinClear(H){
+ const b=pickQuestRuin(); if(!b)return null;
+ return {k:'ruinclear', bId:b.id, mark:buildingDoorMark(b),
+  title:'Clear out '+enterLabel(b).replace(/^the /,''),
+  intro:'Things out of the dark have nested in '+enterLabel(b)+', and by night they hunt the folk of {home}. Go inside and clear them out, root and branch.',
+  desc:'Clear every foe inside '+enterLabel(b)+'.'};
+}
+// find a villager lost inside a ruin and bring them out
+function genRescue(H){
+ const b=pickQuestRuin(); if(!b)return null;
+ const home=homeVillage();
+ const pool=people.filter(p=>!p.dead&&!p.inDungeon&&!p.inside&&!p.questLost&&p.age>=12&&(home?p.vid===home.id:true));
+ if(!pool.length)return null;
+ const p=pick(pool);
+ return {k:'rescue', bId:b.id, npcId:p.id, figName:p.name, mark:buildingDoorMark(b),
+  title:'The Lost — '+p.name,
+  intro:p.name+' of {home} went into '+enterLabel(b)+' chasing salvage, and never came back out. Go into the dark, find them, and bring them home.',
+  desc:'Find '+p.name+', lost inside '+enterLabel(b)+'.'};
+}
 function genBoss(H){
  return {k:'boss',title:'{villain}',
   intro:'{villain} has risen at last — {villainDesc} — and turns toward {home}. Stand between it and the town, Sage. End this, and the world is saved.',
@@ -8058,7 +8357,8 @@ function buildChapters(){
  if(roles.length)for(const r of roles)chs.push(r);
  else chs.push(genReach(H)||genGather(H));
  const gens=[genNpc,genHunt,genDungeon,genGather,genFeud,genBloom,genGuard,
-   genEscort,genBeast,genTame,genRelic,genTribute,genVigil,genTrade,genRite,genPilgrimage,genChampion];
+   genEscort,genBeast,genTame,genRelic,genTribute,genVigil,genTrade,genRite,genPilgrimage,genChampion,
+   genRuinLoot,genRuinClear,genRescue,genDungeonRescue];   // interior/ruin/dungeon quests: loot, clear, rescue
  shuffle(gens);
  // sagas grow longer as the acts climb (more mid-chapters, capped)
  let lastK=chs[chs.length-1].k, added=0, want=Math.min(9, ri(4,6)+Math.min(4,(campaign.act||1)-1));
@@ -8076,6 +8376,9 @@ function chapterDifficulty(){ return (campaign.tier||0); }
 function activateChapter(){
  const ch=campaign.chapters[campaign.idx]; if(!ch){finishCampaign();return}
  ch.prog=0; ch.done=false;
+ // free any still-lost soul and clear a stale interior objective from the last chapter
+ interiorQuest=null;
+ for(const p of people)if(p.questLost)p.questLost=false;
  const diff=chapterDifficulty();
  if(ch.k==='reach'){ ch.mark=[ch.place.x,ch.place.y]; }
  else if(ch.k==='npc'){ const t=allById.get(ch.targetId); if(!t||t.dead){const g=genNpc(campaign.history);if(g)Object.assign(ch,g);} const t2=allById.get(ch.targetId); if(t2){ch.mark=[(t2.x/TILE)|0,(t2.y/TILE)|0];emote(t2,'❔');} }
@@ -8099,6 +8402,10 @@ function activateChapter(){
  else if(ch.k==='rite'){ const v=villages.find(x=>x.id===ch.festVid)||homeVillage(); if(v){ch.festVid=v.id;v.lastFest=0;v.festival={id:nextId++,endDay:cday()+2,cx:v.cx,cy:v.cy};if(typeof gatherFestival==='function')gatherFestival(v,.85);ch.mark=[Math.round(v.cx),Math.round(v.cy)];} else { advanceChapter(); return; } }
  else if(ch.k==='pilgrimage'){ ch.si=0; ch.mark=[ch.stops[0][0],ch.stops[0][1]]; }
  else if(ch.k==='champion'){ ch._champ=spawnChampion(ch.champName,ch.spot); if(!ch._champ){ advanceChapter(); return; } ch.mark=[(ch._champ.x/TILE)|0,(ch._champ.y/TILE)|0]; }
+ else if(ch.k==='ruinloot'){ let b=buildings.find(x=>x.id===ch.bId&&!x.gone); if(!b){const g=genRuinLoot(campaign.history);if(g)Object.assign(ch,g);b=buildings.find(x=>x.id===ch.bId&&!x.gone);} if(!b){advanceChapter();return;} interiorQuest={kind:'recoverLoot',bId:b.id,relic:ch.relic,done:false}; ch.mark=buildingDoorMark(b); }
+ else if(ch.k==='ruinclear'){ let b=buildings.find(x=>x.id===ch.bId&&!x.gone); if(!b){const g=genRuinClear(campaign.history);if(g)Object.assign(ch,g);b=buildings.find(x=>x.id===ch.bId&&!x.gone);} if(!b){advanceChapter();return;} interiorQuest={kind:'clearRuin',bId:b.id,done:false}; ch.mark=buildingDoorMark(b); }
+ else if(ch.k==='rescue'){ let b=buildings.find(x=>x.id===ch.bId&&!x.gone); let p=allById.get(ch.npcId); if(!b||!p||p.dead){const g=genRescue(campaign.history);if(g)Object.assign(ch,g);b=buildings.find(x=>x.id===ch.bId&&!x.gone);p=allById.get(ch.npcId);} if(!b||!p||p.dead){advanceChapter();return;} p.questLost=true;p.inside=null;p.task=null;p.path=null; interiorQuest={kind:'rescue',bId:b.id,npcId:p.id,npcName:p.name,done:false}; ch.mark=buildingDoorMark(b); emote(p,'🆘'); }
+ else if(ch.k==='dungrescue'){ let d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed)||pickStoryDungeon(); let p=allById.get(ch.npcId); if(!d||!p||p.dead){const g=genDungeonRescue(campaign.history);if(g)Object.assign(ch,g);d=dungeons.find(x=>x.id===ch.dungeonId&&!x.cleansed);p=allById.get(ch.npcId);} if(!d||!p||p.dead){advanceChapter();return;} ch.dungeonId=d.id;ch.mark=[d.x,d.y]; p.questLost=true;p.inside=null;p.task=null;p.path=null; for(const dd of dungeons)dd.storyObjective=null; d.storyObjective={kind:'rescue',label:'Find '+p.name,npcName:p.name,npcId:p.id,chapterIdx:campaign.idx,dungeonId:d.id}; }
  else if(ch.k==='boss'){ const b=spawnBoss(); campaign.boss=b; if(b)ch.mark=[(b.x/TILE)|0,(b.y/TILE)|0]; }
  ch._desc=fillTokens(ch.desc,ch).replace(/{need}/g,ch.need||1);
  const introTxt=fillTokens(ch.intro,ch).replace(/{need}/g,ch.need||1);
@@ -8196,6 +8503,26 @@ function campaignTick(dt){
    if(dist2(hero.x,hero.y,st[0]*TILE+TILE/2,st[1]*TILE+TILE/2)<(2.8*TILE)**2){ ch.si++; if(ch.si>=ch.stops.length)done=true; else { toast('✦ '+ch.stops[ch.si-1][2]+' woken. On to '+ch.stops[ch.si][2]+'.'); updateStoryBanner(); } } } else done=true;
  }
  else if(ch.k==='champion'){ if(!ch._champ||monsters.indexOf(ch._champ)<0)done=true; else ch.mark=[(ch._champ.x/TILE)|0,(ch._champ.y/TILE)|0]; }
+ else if(ch.k==='ruinloot'||ch.k==='ruinclear'){ const b=buildings.find(x=>x.id===ch.bId&&!x.gone); if(b)ch.mark=buildingDoorMark(b); else { advanceChapter(); return; } if(interiorQuest&&interiorQuest.done)done=true; }
+ else if(ch.k==='rescue'){
+  const b=buildings.find(x=>x.id===ch.bId&&!x.gone), p=allById.get(ch.npcId);
+  if(!p||p.dead){ toast('The one you sought is beyond saving.'); done=true; }
+  else if(b)ch.mark=buildingDoorMark(b);
+  if(interiorQuest&&interiorQuest.done&&p&&!p.dead){ // found them: free them back into the light
+   p.questLost=false; p.sleeping=false;
+   const dm=b?buildingDoorMark(b):null, s=dm?nearOpen(dm[0],dm[1]):null;
+   if(s){p.x=s[0]*TILE+TILE/2;p.y=s[1]*TILE+TILE/2;} p.thinkT=simMin+2; emote(p,'🙏');
+   tale([p],'The Sage led '+p.name+' out of the dark and back into '+((homeVillage()||{}).name||'the town')+'.',true);
+   done=true;
+  }
+ }
+ else if(ch.k==='dungrescue'){
+  const td=dungeons.find(x=>x.id===ch.dungeonId), p=allById.get(ch.npcId);
+  if(!p||p.dead){ toast('The one you sought is lost for good.'); done=true; }
+  else { if(td)ch.mark=[td.x,td.y];
+   if(td&&td.cleansed){ p.questLost=false;p.sleeping=false; const s=nearOpen(td.x,td.y); if(s){p.x=s[0]*TILE+TILE/2;p.y=s[1]*TILE+TILE/2;} p.thinkT=simMin+2; emote(p,'🙏');
+    tale([p],'The Sage carried '+p.name+' up out of '+td.name+' and into the light of {home}.',true); done=true; } }
+ }
  else if(ch.k==='boss'){ if(campaign.boss&&monsters.indexOf(campaign.boss)<0)done=true; }
  if(done)advanceChapter();
 }
@@ -8330,6 +8657,7 @@ function frame(t){
  updateMerchant(rdt);
  renownFrameTick(rdt);
  campaignTick(rdt);
+ techPropT-=rdt; if(techPropT<=0){ techPropT=12; refreshTechProps(); }   // keep tech scenery in step with the cities
  if(cine){
   cam.z+=(cineZoomTarget-cam.z)*0.09;
  }
@@ -8582,6 +8910,60 @@ return {
     if(!isWall){openCells++;const ox=hero.x,oy=hero.y;hero.x=x*TILE+TILE/2;hero.y=y*TILE+TILE/2;if(intHeroCanStand(hero.x,hero.y))standable++;hero.x=ox;hero.y=oy;}
    }
    return {wall,furniture:furn,openCells,standable,reachPct:openCells?Math.round(standable/openCells*100):0};
+  },
+  // TEST: mini-dungeon interior stats + connectivity (BFS over open cells from the door)
+  intLayout:()=>{
+   if(!interior)return null; const intr=interior;
+   let floor=0,walls=0,breakable=0;
+   for(let i=0;i<intr.wallMask.length;i++){ if(intr.wallMask[i]===1)walls++; else floor++; if(intr.breakable&&intr.breakable[i])breakable++; }
+   // flood-fill from the door lane
+   const seen=new Uint8Array(intr.gw*intr.gh), q=[[intr.door[0],intr.gh-2]]; let reach=0;
+   const push=(x,y)=>{if(x<0||y<0||x>=intr.gw||y>=intr.gh)return;const i=intr.si(x,y);if(seen[i]||intr.wallMask[i]===1)return;seen[i]=1;q.push([x,y]);};
+   if(intr.wallMask[intr.si(intr.door[0],intr.gh-2)]===0){seen[intr.si(intr.door[0],intr.gh-2)]=1;}
+   while(q.length){const[x,y]=q.pop();const i=intr.si(x,y);if(intr.wallMask[i]===1)continue;if(!seen[i])seen[i]=1;reach++;push(x+1,y);push(x-1,y);push(x,y+1);push(x,y-1);}
+   const fk={}; for(const f of intr.furniture)fk[f.kind]=(fk[f.kind]||0)+1;
+   return {rooms:intr.rooms?intr.rooms.length:0, roomShapes:intr.rooms?intr.rooms.map(r=>r.shape):[], floor, walls, breakable,
+     reachable:reach, connectedPct:floor?Math.round(reach/floor*100):0,
+     foes:intr.foes.length, loot:intr.loot.length, traps:intr.traps.length,
+     mat:intr.mat, tech:fk.tech||0, caveplants:fk.caveplant||0};
+  },
+  techPropCount:()=>techProps.length,
+  // ---- interior/ruin quest test hooks ----
+  interiorQuestState:()=>interiorQuest?{kind:interiorQuest.kind,bId:interiorQuest.bId,done:!!interiorQuest.done,npcName:interiorQuest.npcName}:null,
+  setupInteriorQuest:(kind)=>{
+   let b=buildings.find(x=>!x.gone&&x.done&&(x.decay===1||x.decay===2));
+   if(!b){ b=buildings.find(x=>!x.gone&&x.done&&['warehouse','factory','apartment','highrise','venue','arcology'].includes(x.tp)); if(b)ruinBuilding(b); }
+   if(!b)return null;
+   if(kind==='rescue'){ const p=people.find(x=>!x.dead&&!x.inDungeon&&!x.inside&&!x.questLost&&x.age>=12); if(!p)return null; p.questLost=true;p.inside=null;p.task=null;p.path=null; interiorQuest={kind:'rescue',bId:b.id,npcId:p.id,npcName:p.name,done:false}; return {bId:b.id,npcId:p.id,npc:p.name}; }
+   if(kind==='recoverLoot'){ interiorQuest={kind:'recoverLoot',bId:b.id,relic:pick(RELICS),done:false}; return {bId:b.id}; }
+   if(kind==='clearRuin'){ interiorQuest={kind:'clearRuin',bId:b.id,done:false}; return {bId:b.id}; }
+   return null;
+  },
+  intQuestProbe:()=>interior?{questLoot:interior.loot.filter(l=>l.quest).length, rescue:interior.occupants.filter(o=>o.rescue).length, foes:interior.foes.length}:null,
+  intWarpToQuest:()=>{ if(!interior)return null;
+   const lo=interior.loot.find(l=>l.quest), cap=interior.occupants.find(o=>o.rescue);
+   const tgt=lo||cap; if(!tgt)return null; hero.x=tgt.x; hero.y=tgt.y-(cap?TILE*0.6:0); return {x:(hero.x/TILE)|0,y:(hero.y/TILE)|0};
+  },
+  intClearFoes:()=>{ if(!interior)return null; const n=interior.foes.length; interior.foes.length=0; return n; },
+  setupDungeonRescue:()=>{
+   const live=dungeons.filter(d=>!d.cleansed); if(!live.length)return null;
+   const p=people.find(x=>!x.dead&&!x.inDungeon&&!x.inside&&!x.questLost&&x.age>=12); if(!p)return null;
+   const d=live[0]; for(const dd of dungeons)dd.storyObjective=null;
+   p.questLost=true;p.inside=null;p.task=null;p.path=null;
+   d.storyObjective={kind:'rescue',label:'Find '+p.name,npcName:p.name,npcId:p.id,dungeonId:d.id};
+   return {dungeonId:d.id,depth:d.depth,npcId:p.id,npc:p.name};
+  },
+  simulateDungeonReturn:(res)=>{ returnFromDungeon(res); return true; },
+  techPropKinds:()=>{const k={};for(const p of techProps)k[p.kind]=(k[p.kind]||0)+1;return {theme:techProps[0]&&techProps[0].theme,count:techProps.length,kinds:k};},
+  forceTechProps:()=>{refreshTechProps();return techProps.length;},
+  // TEST: force-break every breakable wall within radius tiles of the hero
+  intSmashNear:(radius)=>{
+   if(!interior||!interior.breakable)return 0; const intr=interior, R=(radius||6);
+   const hx=(hero.x/TILE)|0, hy=(hero.y/TILE)|0; let n=0;
+   for(let ty=Math.max(1,hy-R);ty<=Math.min(intr.gh-2,hy+R);ty++)for(let tx=Math.max(1,hx-R);tx<=Math.min(intr.gw-2,hx+R);tx++){
+    if(intr.breakable[intr.si(tx,ty)]){breakIntWall(intr,tx,ty);n++;}
+   }
+   return n;
   },
   decayedBuildings:()=>buildings.filter(b=>!b.gone&&b.decay).map(b=>({id:b.id,tp:b.tp,decay:b.decay})),
   decayStage:(id)=>{const b=buildings.find(x=>x.id===id);return b?(b.decay||0):null;},

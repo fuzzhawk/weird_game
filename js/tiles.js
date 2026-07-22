@@ -178,6 +178,16 @@ function detail(name, x, y, seed, ts, td, sx, sy){
     return gg<0.42-td*0.2?-1 : gg>0.58+td*0.2?1 : 0; }
   if(name==='dither'){ const b=(x+ (y&1))&1; // ordered 1px dither over noise thresholds
     if(n<td*0.5) return b?-1:0; if(n>1-td*0.5) return b?1:0; return 0; }
+  if(name==='circuit'){ // tech panelling: seam grid, traces down the centres, node flecks
+    const cell=Math.max(3,Math.round(ts)), gx=((x%cell)+cell)%cell, gy=((y%cell)+cell)%cell, h=(cell/2)|0;
+    if(gx===0||gy===0) return -1;                       // dark panel seams
+    if(gx===h||gy===h) return (n>0.55?1:0);             // lit traces
+    return n>0.86?1:(n<0.12?-1:0); }                    // scattered nodes
+  if(name==='cave'){ // dark living rock: soft blotches, dark pits, the odd bright drip
+    const b=vnoise(x/(ts*2.2)+seed*0.02, y/(ts*2.2)+seed*0.03, seed^0xCA5E);
+    if(b<0.26) return -1;
+    if(Math.sin(x*0.9+n*3.0)>0.93) return 1;
+    return b>0.80?1:0; }
   return 0;
 }
 function paintTile(res, mask, seed, pal, style){
@@ -326,12 +336,23 @@ const INTERIOR_MATS = {
   metal:   { floor:mkMat('#4f535b','#666c76','#373b43','woven',2.6,0.5),            wall:mkMat('#3f444d','#575d67','#2b2f37','striate',3,0.4,1.0,0.08) },
   carpet:  { floor:mkMat('#5b3c49','#6f4b59','#442b35','speckle',4,0.34),           wall:mkMat('#3b3046','#4b3e56','#292136','mottle',4,0.3) },
   chrome:  { floor:mkMat('#4a5867','#6c8092','#333f4b','gradient',6,0.4),           wall:mkMat('#3a4450','#586675','#262d35','striate',4,0.3,0.18,1.0) },
-  // ruin variants
+  // ruin variants (legacy names kept as aliases below)
   derelict:{ floor:mkMat('#33383f','#454c55','#22262c','cracked',5,0.5),            wall:mkMat('#2b3038','#3c434d','#1b1f25','striate',3.4,0.42,0.9,0.12) },
   overgrown:{floor:mkMat('#4a5a3a','#5f7448','#33422a','mottle',4.2,0.44),          wall:mkMat('#3a4a30','#4c5e3e','#28331f','pebbled',4,0.4) },
+  // ---- the graphics-engine set: five distinct, richly procedural themes ----
+  // a raw cave dungeon: dark living rock, pits and the occasional wet gleam
+  dungeon: { floor:mkMat('#2c3138','#3a424b','#1b2026','cave',5.2,0.5),             wall:mkMat('#22272e','#333b44','#12171d','cave',5.0,0.5) },
+  // a warm rustic hall: honeyed planks over packed earth
+  rustic:  { floor:mkMat('#8a6a42','#a5825a','#63492c','striate',2.0,0.5,0.06,1.0), wall:mkMat('#6b5236','#82653f','#493725','striate',2.4,0.4,0.06,1.0) },
+  // a clean modern interior: brushed panels & pale composite
+  modern:  { floor:mkMat('#7d8894','#a2b2bf','#5b6570','gradient',6,0.34),          wall:mkMat('#5f6b78','#90a2b2','#444e59','striate',4,0.3,0.16,1.0) },
+  // a haunted cyber-tech floor: black glass shot through with teal circuitry
+  cyber:   { floor:mkMat('#0f1c24','#1f6f6a','#081118','circuit',5,0.55),           wall:mkMat('#0b151c','#175a56','#050c11','circuit',5,0.55) },
+  // an ancient ruin: bone-grey masonry cracked and greened with age
+  ancient: { floor:mkMat('#4a5340','#5f6c4d','#333a2b','cracked',5,0.46),           wall:mkMat('#3c4636','#505c44','#28301f','cracked',4.5,0.44) },
 };
-const INTERIOR_TP_MAT = { home:'wood', shelter:'wood', biz:'tile', warehouse:'concrete',
-  factory:'metal', venue:'carpet', highrise:'chrome', apartment:'tile', arcology:'chrome', grave:'wood' };
+const INTERIOR_TP_MAT = { home:'rustic', shelter:'rustic', biz:'rustic', apartment:'rustic', grave:'rustic',
+  warehouse:'concrete', factory:'modern', venue:'modern', highrise:'modern', arcology:'modern' };
 function matTexel(m, x, y, seed){
   let col=m.base;
   const d=detail(m.treat, x, y, seed, m.ts, m.td, m.sx, m.sy);
