@@ -845,36 +845,44 @@ function techSprite(kind,theme,variant){
  return s;
 }
 function techTheme(){ return worldTheme==='cyberpunk'?'cyber':'modern'; }
-function techEraActive(){
- if(typeof SceneryForge==='undefined')return false;
- if(worldTheme==='cyberpunk'||worldTheme==='modern')return true;
- return villages.some(v=>villageDev(v)>=3);   // any world, once a proper city rises
+// which buildings the tech scenery gathers around: in a cyber/modern world, every
+// standing build; otherwise the big civic/industrial ones and any gutted-cyber ruin
+function isTechyBuilding(b){
+ if(b.gone||!b.done)return false;
+ if(worldTheme==='cyberpunk'||worldTheme==='modern')return !['grave','park'].includes(b.tp);
+ return b.decay===1 || ['factory','highrise','arcology','venue','apartment','warehouse'].includes(b.tp);
 }
-// scatter tech props over open ground around built-up towns (deterministic per town)
+// dress the streets AROUND city buildings with tech props (panels, wires, pipes,
+// screens) — placed on the open ring of tiles hugging each building's footprint
 function refreshTechProps(){
- if(!techEraActive()){techProps.length=0;return;}
- const theme=techTheme(), minDev=(worldTheme==='cyberpunk'||worldTheme==='modern')?1:3, out=[];
- for(const v of villages){ const dev=villageDev(v); if(dev<minDev)continue;
-  const n=Math.min(10,2+dev*2), cl=v.claim||{x0:v.cx-8,y0:v.cy-8,x1:v.cx+8,y1:v.cy+8};
-  const rng=U.mulberry32(U.hashStr('tech-'+v.id+'-'+dev+'-'+seed));
-  let placed=0,tries=0;
-  while(placed<n&&tries++<60){
-   const x=clamp(Math.round(cl.x0-1+rng()*(cl.x1-cl.x0+2)),2,W-3), y=clamp(Math.round(cl.y0-1+rng()*(cl.y1-cl.y0+2)),2,H-3);
+ if(typeof SceneryForge==='undefined'){techProps.length=0;return;}
+ const cyberWorld=(worldTheme==='cyberpunk'), out=[];
+ for(const b of buildings){
+  if(!isTechyBuilding(b))continue;
+  const theme=(cyberWorld||b.decay===1)?'cyber':'modern';
+  const rng=U.mulberry32(U.hashStr('tech-'+b.id+'-'+seed));
+  const ring=[];
+  for(let x=b.x-1;x<=b.x+b.w;x++){ring.push([x,b.y-1]);ring.push([x,b.y+b.h]);}
+  for(let y=b.y;y<b.y+b.h;y++){ring.push([b.x-1,y]);ring.push([b.x+b.w,y]);}
+  shuffle(ring);
+  let placed=0, want=2+((rng()*3)|0);
+  for(const[x,y] of ring){ if(placed>=want)break;
+   if(x<2||y<2||x>=W-2||y>=H-2)continue;
    const i=idx(x,y);
-   if(map[i]!==0||bld[i]>=0||nodeAt.has(i)||pavedTiles.has(i)||farmGrid[i]||(typeof water!=='undefined'&&water&&water[i])||dungeonAt(x,y))continue;
+   if(map[i]!==0||bld[i]>=0||nodeAt.has(i)||farmGrid[i]||(typeof water!=='undefined'&&water&&water[i])||dungeonAt(x,y))continue;
    const kind=SceneryForge.KINDS[(rng()*SceneryForge.KINDS.length)|0], variant=(rng()*4)|0;
-   out.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,kind,variant,theme,glow:(kind==='screen'||kind==='junction'||kind==='panel'),ph:rng()*6.28});
+   out.push({x:x*TILE+TILE/2,y:y*TILE+TILE/2,kind,variant,theme,glow:true,ph:rng()*6.28});
    placed++;
   }
  }
- techProps=out.slice(0,48);
+ techProps=out.slice(0,120);
 }
 function drawTechProp(c,p,t){
  const s=techSprite(p.kind,p.theme,p.variant); if(!s||!s.canvas)return;
  c.drawImage(s.canvas,p.x-s.ax,p.y-s.ay);
  if(p.glow){ const go=c.globalCompositeOperation;c.globalCompositeOperation='screen';
-  c.globalAlpha=0.30+0.22*Math.sin(t*0.005+p.ph);
-  c.drawImage(p.theme==='cyber'?GLOW_CYAN:GLOW_BLUE,p.x-9,p.y-19,18,18);
+  c.globalAlpha=0.40+0.26*Math.sin(t*0.005+p.ph);
+  c.drawImage(p.theme==='cyber'?GLOW_CYAN:GLOW_BLUE,p.x-11,p.y-21,22,22);
   c.globalAlpha=1;c.globalCompositeOperation=go; }
 }
 function queuePersonBake(p){p.sprite=null;bakeQueue.push({kind:'person',p})}
@@ -6099,26 +6107,34 @@ function makeIntFoe(arch,x,y){
 function _carveCell(solid,si,gw,gh,x,y){ if(x>0&&y>0&&x<gw-1&&y<gh-1)solid[si(x,y)]=0; }
 function carveRoomShape(solid,si,gw,gh,room,rng){
  const {x,y,w,h,shape}=room, clr=(xx,yy)=>_carveCell(solid,si,gw,gh,xx,yy);
- if(shape==='plus'){
+ const cx=x+(w-1)/2, cy=y+(h-1)/2, rw=Math.max(1,w/2), rh=Math.max(1,h/2);
+ const nz=(room.x*131+room.y*57)&0xffff;
+ if(shape==='ellipse'){                       // a rounded chamber (curved, non-90° walls)
+  for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++){const nx=(xx-cx)/rw,ny=(yy-cy)/rh;if(nx*nx+ny*ny<=1.04)clr(xx,yy);}
+ }else if(shape==='diamond'){                  // rotated square — 45° diagonal walls
+  for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++){if(Math.abs(xx-cx)/rw+Math.abs(yy-cy)/rh<=1.05)clr(xx,yy);}
+ }else if(shape==='hex'){                       // hexagon — angled walls top & bottom
+  for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++){const nx=Math.abs(xx-cx)/rw,ny=Math.abs(yy-cy)/rh;if(ny<=1.0&&nx*0.55+ny<=1.02)clr(xx,yy);}
+ }else if(shape==='wedge'){                     // angled trapezoid — one slanted side
+  for(let yy=y;yy<y+h;yy++){const t=(yy-y)/((h-1)||1),ins=Math.round((1-t)*w*0.4);for(let xx=x+ins;xx<x+w-ins;xx++)clr(xx,yy);}
+ }else if(shape==='blob'){                      // organic cavern — noisy, irregular edge
+  for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++){const nx=(xx-cx)/rw,ny=(yy-cy)/rh;
+   const n=(TileGen&&TileGen.vnoise)?TileGen.vnoise(xx*0.55,yy*0.55,nz):0;
+   if(nx*nx+ny*ny<=1.05+ (n-0.5)*0.7)clr(xx,yy);}
+ }else if(shape==='plus'){
   const cxs=x+(w>>2),cxe=x+w-1-(w>>2),cys=y+(h>>2),cye=y+h-1-(h>>2);
   for(let yy=y;yy<y+h;yy++)for(let xx=cxs;xx<=cxe;xx++)clr(xx,yy);
   for(let xx=x;xx<x+w;xx++)for(let yy=cys;yy<=cye;yy++)clr(xx,yy);
- }else if(shape==='T'){
-  const band=Math.max(1,(h/3)|0), cxs=x+(w>>2),cxe=x+w-1-(w>>2);
-  for(let yy=y;yy<y+band;yy++)for(let xx=x;xx<x+w;xx++)clr(xx,yy);
-  for(let yy=y;yy<y+h;yy++)for(let xx=cxs;xx<=cxe;xx++)clr(xx,yy);
- }else if(shape==='L'){
-  for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)clr(xx,yy);
-  const qw=Math.max(1,w>>1),qh=Math.max(1,h>>1);
-  const cx0=(rng()<.5)?x:x+w-qw, cy0=(rng()<.5)?y:y+h-qh;
-  for(let yy=cy0;yy<cy0+qh;yy++)for(let xx=cx0;xx<cx0+qw;xx++)if(xx>0&&yy>0&&xx<gw-1&&yy<gh-1)solid[si(xx,yy)]=1;
  }else if(shape==='oct'){
   for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)clr(xx,yy);
-  for(const[cx,cy] of [[x,y],[x+w-1,y],[x,y+h-1],[x+w-1,y+h-1]])if(cx>0&&cy>0&&cx<gw-1&&cy<gh-1)solid[si(cx,cy)]=1;
+  const c=Math.max(1,Math.min(w,h)>>2);         // clip each corner on a 45° diagonal
+  for(let k=0;k<c;k++)for(let j=0;j<c-k;j++){ if(x+j>0&&y+k>0)solid[si(x+j,y+k)]=1;
+   if(x+w-1-j>0&&y+k>0)solid[si(x+w-1-j,y+k)]=1; if(x+j>0&&y+h-1-k>0)solid[si(x+j,y+h-1-k)]=1;
+   if(x+w-1-j>0&&y+h-1-k>0)solid[si(x+w-1-j,y+h-1-k)]=1; }
  }else{ for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)clr(xx,yy); }
  // a guaranteed-open anchor cell for wiring corridors
- room.ax=room.cx;room.ay=room.cy;
- if(solid[si(room.cx,room.cy)]!==0){ let done=false;
+ room.ax=Math.round(cx);room.ay=Math.round(cy);
+ if(solid[si(room.ax,room.ay)]!==0){ let done=false;
   for(let yy=y;yy<y+h&&!done;yy++)for(let xx=x;xx<x+w&&!done;xx++)if(solid[si(xx,yy)]===0){room.ax=xx;room.ay=yy;done=true;} }
 }
 function carveHSeg(solid,si,gw,gh,y,xa,xb,thick){const lo=Math.min(xa,xb),hi=Math.max(xa,xb);
@@ -6141,13 +6157,14 @@ function roomFloorCells(gw,gh,solid,si,room){const out=[];
 function carveRoomsInterior(gw,gh,solid,si,dcx,rng){
  for(let y=1;y<gh-1;y++)for(let x=1;x<gw-1;x++)solid[si(x,y)]=1;   // start solid, then dig
  solid[si(dcx,gh-1)]=0;solid[si(dcx-1,gh-1)]=0;
- const rooms=[], SH=['rect','rect','L','plus','T','oct'];
- const area=(gw-2)*(gh-2), target=clamp(3+Math.round(area/45),4,8);
- // keep rooms small enough that several fit side-by-side with wall gaps between them
- const maxRW=clamp(((gw-4)/2)|0,3,5), maxRH=clamp(((gh-4)/2)|0,3,4);
+ // varied polygonal chambers — mostly curved/angled (non-90°), a few rectilinear
+ const rooms=[], SH=['ellipse','ellipse','diamond','hex','wedge','blob','oct','plus','rect'];
+ const area=(gw-2)*(gh-2), target=clamp(4+Math.round(area/55),5,11);
+ // large rooms: several big polygonal chambers with wall gaps between them
+ const maxRW=clamp(((gw-4)/2)|0,5,10), maxRH=clamp(((gh-4)/2)|0,5,9);
  let tries=0;
- while(rooms.length<target && tries++<300){
-  const rw=3+((rng()*Math.max(1,maxRW-2))|0), rh=3+((rng()*Math.max(1,maxRH-2))|0);
+ while(rooms.length<target && tries++<400){
+  const rw=5+((rng()*Math.max(1,maxRW-4))|0), rh=5+((rng()*Math.max(1,maxRH-4))|0);
   const rx=1+((rng()*Math.max(1,gw-2-rw))|0), ry=1+((rng()*Math.max(1,gh-4-rh))|0);
   let ok=true;
   for(const r of rooms){ if(rx<r.x+r.w+1&&rx+rw+1>r.x&&ry<r.y+r.h+1&&ry+rh+1>r.y){ok=false;break;} }
@@ -6211,7 +6228,9 @@ function makeInterior(b){
  const cyber=decay===1, ancient=decay===2;
  // a ruin sprawls into a mini-dungeon; give the room generator extra breathing room
  const useRooms = decay>=1;
- const gw=clamp(b.w*3+(useRooms?6:4), 10, cyber?30:mega?26:(decay?20:17)), gh=clamp(b.h*3+(useRooms?5:3), 9, cyber?24:mega?21:(decay?18:13));
+ // ruined interiors sprawl into big multi-room mini-dungeons; lived-in ones stay cosy
+ const gw = useRooms ? clamp(b.w*4+14, 20, 46) : clamp(b.w*3+4, 10, mega?26:17);
+ const gh = useRooms ? clamp(b.h*4+12, 18, 40) : clamp(b.h*3+3, 9, mega?21:13);
  const solid=new Uint8Array(gw*gh), si=(x,y)=>y*gw+x;
  for(let x=0;x<gw;x++){solid[si(x,0)]=1;solid[si(x,gh-1)]=1}
  for(let y=0;y<gh;y++){solid[si(0,y)]=1;solid[si(gw-1,y)]=1}
@@ -6263,25 +6282,27 @@ function makeInterior(b){
   // chamber holds its own debris, foes, traps and loot
   const cells=[]; for(const r of (rooms||[]))for(const c of roomFloorCells(gw,gh,solid,si,r))if(c[1]<gh-2)cells.push(c);
   shuffle(cells); let ci=0; const grab=()=>cells.length?cells[(ci++)%cells.length]:null;
+  // counts scale with the (now much larger) floor so big ruins feel full, not empty
+  const sc=clamp((gw*gh)/220,1,4.2);
   const debris = cyber?['debris','machine','terminal','wire','crate']:['overgrowth','sapling','rubble','moss','barrel'];
-  for(let k=0;k<(cyber?11:9);k++){ const s=grab(); if(!s)break; put(s[0],s[1],1,1,rpick(debris),rng()<.35?1:0); }
-  const nTrap=cyber?(4+((rng()*3)|0)):(2+((rng()*2)|0));
+  for(let k=0;k<Math.round((cyber?11:9)*sc);k++){ const s=grab(); if(!s)break; put(s[0],s[1],1,1,rpick(debris),rng()<.35?1:0); }
+  const nTrap=Math.round((cyber?4:2.5)*sc)+((rng()*3)|0);
   for(let k=0;k<nTrap;k++){ const s=grab(); if(!s)break; if(s[0]===dcx||s[0]===dcx-1)continue;
    intr.traps.push({x:s[0],y:s[1],kind:cyber?'spike':'thorn',ph:rng()*3,cd:0}); }
   const foePool = cyber?['drone','sentinel','chassis','stalker','drone']:['husk','wraith','mossling','crawler','mossling'];
-  const nFoe=cyber?(3+((rng()*3)|0)):(2+((rng()*2)|0));
+  const nFoe=Math.round((cyber?3.5:2.5)*sc)+((rng()*3)|0);
   for(let k=0;k<nFoe;k++){ const s=grab(); if(!s)break;
    intr.foes.push(makeIntFoe(rpick(foePool), s[0]*TILE+TILE/2, s[1]*TILE+TILE/2)); }
-  const nLoot=3+((rng()*3)|0);
+  const nLoot=Math.round(3*sc)+((rng()*3)|0);
   for(let k=0;k<nLoot;k++){ const s=grab(); if(!s)break;
-   const r=rng(), kind=r<.12?'relic':r<.42?'gem':'gold';
+   const r=rng(), kind=r<.14?'relic':r<.44?'gem':'gold';
    intr.loot.push({x:s[0]*TILE+TILE/2,y:s[1]*TILE+TILE/2,kind,amt:kind==='gold'?(3+((rng()*7)|0)):(1+((rng()*2)|0)),relic:kind==='relic'?pick(RELICS):null,got:false,t:rng()*6}); }
   // cave flora reclaims the ruin — thick in an ancient overgrowth, damp sprigs in cyber
-  const nPlant = ancient?(4+((rng()*4)|0)):(1+((rng()*2)|0));
+  const nPlant = Math.round((ancient?4:1.5)*sc)+((rng()*3)|0);
   for(let k=0;k<nPlant;k++){ const s=grab(); if(!s)break; put(s[0],s[1],1,1,'caveplant',0);
    const fp=intr.furniture[intr.furniture.length-1]; fp.pv=(rng()*3)|0; fp.glow=rng()<0.5; }
   // haunted cyber-tech scenery bled through the derelict floor
-  if(cyber&&typeof SceneryForge!=='undefined'){ const nTech=2+((rng()*3)|0);
+  if(cyber&&typeof SceneryForge!=='undefined'){ const nTech=Math.round(3*sc)+((rng()*3)|0);
    for(let k=0;k<nTech;k++){ const s=grab(); if(!s)break;
     const kind=SceneryForge.KINDS[(rng()*SceneryForge.KINDS.length)|0];
     intr.furniture.push({x:s[0],y:s[1],w:1,h:1,kind:'tech',sprite:techSprite(kind,'cyber',(rng()*4)|0)}); } }

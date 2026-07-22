@@ -360,6 +360,29 @@ document.addEventListener('mousedown',()=>{ const ac=audio(); if(ac&&ac.state===
 const ROWS=72, COLS=72, RES=T.res;
 const WORLD_W=COLS*RES, WORLD_H=ROWS*RES;
 let field, vgrid, tileMap, variantMap, trees=[], cavePlants=[], dungTech=[];
+// tile-reactive destroyable rock — like the overmap's bramble-rock: blocks the way,
+// crumbles when struck, and sometimes gives up a cache
+let rubble=[], rubbleGrid=new Uint8Array(ROWS*COLS);
+function populateRubble(rng){
+  rubble=[]; rubbleGrid=new Uint8Array(ROWS*COLS);
+  const n = 16 + floorIdx*3 + Math.round((dInfo?dInfo.danger:0.3)*10);
+  for(let i=0;i<n;i++){
+    let cell=null;
+    for(let t=0;t<40;t++){ const c=randRegionCell(rng, RES*2, player.x, player.y);
+      const cx=(c.x/RES)|0, cy=(c.y/RES)|0, ci=cy*COLS+cx;
+      if(cx<1||cy<1||cx>=COLS-1||cy>=ROWS-1) continue;
+      if(highCellArr[ci]||faceCellArr[ci]||blockGrid[ci]||rubbleGrid[ci]) continue;
+      if(tileMap[cy][cx]!==15) continue;                                   // open ground only
+      if(Math.hypot(c.x-player.x,c.y-player.y)<RES*2.5) continue;          // keep the spawn clear
+      if(portalUp&&Math.hypot(c.x-portalUp.x,c.y-portalUp.y)<RES*1.6) continue;
+      if(portalDown&&Math.hypot(c.x-portalDown.x,c.y-portalDown.y)<RES*1.6) continue;
+      cell={cx,cy,ci}; break; }
+    if(!cell) continue;
+    rubbleGrid[cell.ci]=1;
+    const hp=2+((rng()*2)|0);
+    rubble.push({cx:cell.cx, cy:cell.cy, x:(cell.cx+0.5)*RES, y:(cell.cy+0.5)*RES, hp, hpMax:hp, drop:rng()<0.32, flash:0, wob:rng()*6.28});
+  }
+}
 let dungTechCache={};
 function dungTechSprite(kind,variant){ const key=kind+'/'+variant; let s=dungTechCache[key];
   if(s===undefined){ try{ s=(typeof SceneryForge!=='undefined')?SceneryForge.bake(kind,'d'+variant,'cyber'):null; }catch(e){ s=null; } dungTechCache[key]=s; } return s; }
@@ -591,6 +614,7 @@ function walkable(px,py){
   const cx=(px/RES)|0, cy=(py/RES)|0;
   const ci=cy*COLS+cx;
   if(blockGrid[ci]) return false;
+  if(rubbleGrid[ci]) return false;        // destroyable rock blocks until it's smashed
   if(faceCellArr[ci]) return false;
   const m=collMasks[tileMap[cy][cx]];
   return m[((py-cy*RES)|0)*RES + ((px-cx*RES)|0)]===1;
@@ -729,7 +753,9 @@ function grantAugment(x,y){
 function spawnTreasures(){
   treasures=[];
   const rng=mulberry32(hashSeed(worldSeed)^0x7EA51);
-  const n = 7 + floorIdx*2 + Math.round((dInfo?dInfo.danger:0.3)*6);
+  // free-roam raids (no scripted objective) are rewarded with extra caches to justify the dive
+  const freeRoam = !hasObjective();
+  const n = 11 + floorIdx*2 + Math.round((dInfo?dInfo.danger:0.3)*8) + (freeRoam?5:0);
   for(let i=0;i<n;i++){
     let s=null;
     for(let tries=0;tries<80;tries++){
@@ -880,6 +906,7 @@ function startFloor(){
   else if(!isFinalFloor()) spawnPortalDown(true);
   // (free-roam final floor: no boss, no way down — it's simply the bottom)
   spawnTreasures();
+  populateRubble(mulberry32(hashSeed(worldSeed)^0x0BB1E));   // destroyable rock, placed clear of portals
   portalCd=1.5;
   spawnT=2.5;
   player.ifr=1.5;
@@ -1276,10 +1303,12 @@ function update(dt){
 
   // --- spawning ---
   spawnT-=dt;
-  const cap = 8 + Math.min(10,player.level) + floorIdx*2 + (cleansedRun?4:0);
+  // a denser crawl — and denser still on a free-roam raid, so a dive is always worth it
+  const freeRoam = !hasObjective();
+  const cap = 11 + Math.min(12,player.level) + floorIdx*2 + (cleansedRun?4:0) + (freeRoam?6:0);
   if(spawnT<=0 && enemies.length<cap){
     spawnEnemy();
-    spawnT=Math.max(0.6, 2.2-player.level*0.08-floorIdx*0.1);
+    spawnT=Math.max(0.5, 2.0-player.level*0.08-floorIdx*0.1-(freeRoam?0.3:0));
   }
 
   // --- slashes ---
@@ -1305,9 +1334,26 @@ function update(dt){
           }
         }
       }
+      // the blade also shatters destroyable rock it sweeps across
+      if(rubble.length){
+        if(!s.hitRub) s.hitRub=new Set();
+        for(const r of rubble){ if(r.dead||s.hitRub.has(r)) continue;
+          const dx=r.x-player.x, dy=r.y-player.y, d=Math.hypot(dx,dy);
+          if(d<s.range+14){ let da=Math.atan2(dy,dx)-s.ang; da=Math.atan2(Math.sin(da),Math.cos(da));
+            if(Math.abs(da)<s.arc/2+0.2){ s.hitRub.add(r); r.hp--; r.flash=0.12;
+              burst(r.x,r.y,'#b0a48f',6,130); SFX.hit&&SFX.hit();
+              if(r.hp<=0){ r.dead=true; rubbleGrid[r.cy*COLS+r.cx]=0; burst(r.x,r.y,'#8a7a60',16,220); shake=Math.max(shake,5);
+                if(r.drop){ treasures.push({x:r.x, y:r.y, t:0, chrome:Math.random()<0.35, got:false}); }
+              }
+            }
+          }
+        }
+        rubble=rubble.filter(r=>!r.dead);
+      }
     }
   }
   slashes=slashes.filter(s=>s.t<SLASH_TIME*1.8);
+  for(const r of rubble) if(r.flash>0) r.flash-=dt;
 
   // --- enemies ---
   flowTimer-=dt;
@@ -1639,6 +1685,18 @@ function drawCavePlant(cp){
     for(let r=0;r<4;r++){const rx=px-4+r*3;ctx.beginPath();ctx.moveTo(rx,py-10);ctx.lineTo(rx+Math.sin(r+tt*0.001)*1.5,py-4+((r*2)%4));ctx.stroke();}
     ctx.fillStyle=cp.glow?'#8affc0':'#7a9a5a';for(let r=0;r<3;r++)ctx.fillRect(px-4+r*4,py-6+((r*2)%3),1.4,1.4); }
 }
+function drawRubble(r){
+  const px=wx(r.x), py=wy(r.y), fl=(r.flash>0)?0.5:0;
+  ctx.fillStyle='rgba(0,0,0,0.30)'; ctx.beginPath(); ctx.ellipse(px,py+5,7,3,0,0,6.28); ctx.fill();
+  const base=fl?'#b8a892':'#6b6358', lit='#847a6a', drk='#403a31';
+  ctx.fillStyle=base;
+  ctx.beginPath(); ctx.arc(px-3,py,4,0,6.28); ctx.arc(px+3,py-1,4.4,0,6.28); ctx.arc(px+0.5,py+2.5,3.8,0,6.28); ctx.fill();
+  ctx.fillStyle=lit; ctx.beginPath(); ctx.arc(px+2,py-3,1.8,0,6.28); ctx.fill();
+  const dmg=1-r.hp/r.hpMax;
+  if(dmg>0.05){ ctx.strokeStyle='rgba(18,13,9,'+(0.4+dmg*0.45)+')'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(px-3,py-3); ctx.lineTo(px+2,py+3.5); ctx.moveTo(px+3,py-2.5); ctx.lineTo(px-1.5,py+3); ctx.stroke(); }
+  ctx.fillStyle=drk; ctx.fillRect(px-4,py+3,8,1);
+}
 function drawDungTech(dt,time){
   const s=dungTechSprite(dt.kind,dt.variant); if(!s||!s.canvas)return;
   const px=wx(dt.x), py=wy(dt.y);
@@ -1930,6 +1988,7 @@ function draw(time){
   for(const s of structures) sprites.push({y:(s.cy+s.h)*RES, f:()=>drawStructure(s)});
   for(const t of trees) if(Math.abs(t.x-player.x)<W && Math.abs(t.y-player.y)<H) sprites.push({y:t.y,f:()=>drawTree(t)});
   for(const cp of cavePlants) if(Math.abs(cp.x-player.x)<W && Math.abs(cp.y-player.y)<H) sprites.push({y:cp.y,f:()=>drawCavePlant(cp)});
+  for(const r of rubble) if(Math.abs(r.x-player.x)<W && Math.abs(r.y-player.y)<H) sprites.push({y:r.y,f:()=>drawRubble(r)});
   for(const dt of dungTech) if(Math.abs(dt.x-player.x)<W && Math.abs(dt.y-player.y)<H) sprites.push({y:dt.y,f:()=>drawDungTech(dt,time)});
   for(const n of npcs) sprites.push({y:n.y,f:()=>drawNpc(n)});
   for(const e of enemies) sprites.push({y:e.y,f:()=>drawEnemy(e)});
@@ -2031,6 +2090,9 @@ return {
     get state(){return {floorIdx,cleansedRun,objective:objTitle(),final:isFinalFloor(),hasDown:!!portalDown,hasBoss:!!boss,keeper:false}},
     get skin(){return {borrowed:!!T.borrowedSkin, grass:T.grassColor, dirt:T.dirtColor, theme:T.worldTheme||null}},
     get flora(){return {trees:trees.length, cavePlants:cavePlants.length, dungTech:dungTech.length}},
+    get rubbleInfo(){return {count:rubble.length, treasures:treasures.length, enemyCap:(11+Math.min(12,player.level)+floorIdx*2+(cleansedRun?4:0)+(!hasObjective()?6:0)), freeRoam:!hasObjective()}},
+    smashRubble(){ let n=0; for(const r of rubble){ rubbleGrid[r.cy*COLS+r.cx]=0; if(r.drop)treasures.push({x:r.x,y:r.y,t:0,chrome:false,got:false}); n++; } rubble=[]; return n; },
+    reachRubble(){ const r=rubble[0]; if(!r)return false; player.x=r.x+RES*1.4; player.y=r.y; return true; },
     get rescue(){return {objKind:objKind(), npcs:npcs.length, rescueNpcs:npcs.filter(n=>n.rescue).length, found:npcs.some(n=>n.rescue&&n.found), rescuedSoul, cleansed:cleansedRun}},
     reachRescue(){ const n=npcs.find(x=>x.rescue); if(n){ player.x=n.x; player.y=n.y; } return !!n; },
     get portals(){ return {up:!!portalUp, down:!!portalDown, floor:floorIdx, finalFloor:isFinalFloor(),
