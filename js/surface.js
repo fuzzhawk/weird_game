@@ -6830,13 +6830,56 @@ function buildOverworldFPAtlas(){
 function owSolid(cx,cy){ if(cx<0||cy<0||cx>=W||cy>=H) return true; const i=idx(cx,cy); return map[i]!==0 || bld[i]>=0; }
 function owWallTex(cx,cy){ return bld[idx(cx,cy)]>=0?4:3; }
 function owFloorTex(cx,cy){ const i=idx(cx,cy); return (water&&water[i])?2:0; }
+function owNodeCv(n){
+  if(n.t==='rock') return sfpShape('owrock',(g,s)=>{ g.fillStyle='#8b8fa3';
+    g.beginPath(); g.moveTo(s*0.22,s*0.8); g.lineTo(s*0.34,s*0.42); g.lineTo(s*0.6,s*0.36);
+    g.lineTo(s*0.8,s*0.6); g.lineTo(s*0.72,s*0.8); g.closePath(); g.fill();
+    g.fillStyle='rgba(255,255,255,0.22)'; g.fillRect(s*0.4,s*0.46,s*0.12,2); },24);
+  const sp=speciesOf(n), st=nodeStage(n);
+  if(sp&&sp.L&&sp.L[st]) return sp.L[st];
+  if(typeof flora!=='undefined'&&flora){ const key=n.t==='berry'?'berry':n.t==='mush'?'mush':'tree';
+    if(flora[key]){ const vi=(n.x*7+n.y*13)%flora[key].length; return flora[key][vi][st]; } }
+  return null;
+}
 function owSprites(){
   const out=[], R=TILE, hx=hero.x, hy=hero.y, MAXD=(30*TILE)*(30*TILE);
-  const add=(o,sc)=>{ if(!o||o.dead)return; const dx=o.x-hx,dy=o.y-hy; if(dx*dx+dy*dy>MAXD)return;
+  const near=(o)=>{ const dx=o.x-hx,dy=o.y-hy; return dx*dx+dy*dy<=MAXD; };
+  const add=(o,sc)=>{ if(!o||o.dead)return; if(!near(o))return;
     const cv=sfpFrame(o.sprite); if(cv) out.push({x:o.x/R,y:o.y/R,cv,w:cv.width,h:cv.height,scale:sc||1}); };
+  // living things
   for(const p of people) add(p,1);
   for(const a of animals) add(a,0.9);
   for(const m of monsters) add(m,1.05);
+  // flora & rocks — trees, bushes, mushrooms, boulders
+  for(const n of nodes){ const cx=n.x*TILE+TILE/2, cy=n.y*TILE+TILE/2;
+    const dx=cx-hx,dy=cy-hy; if(dx*dx+dy*dy>MAXD)continue;
+    const cv=owNodeCv(n); if(!cv)continue;
+    const sc=n.t==='tree'?1.9:(n.t==='rock'?0.5:0.75);
+    out.push({x:cx/R,y:cy/R,cv,w:cv.width,h:cv.height,scale:sc}); }
+  // birds & insects, drifting above the ground
+  for(const fl of flyers){ const dx=fl.x-hx,dy=fl.y-hy; if(dx*dx+dy*dy>MAXD)continue;
+    const cv=sfpShape('flyer:'+(fl.bug?'b':'w'),(g,s)=>{ g.fillStyle=fl.bug?'#d8c48a':'#2a2a30';
+      g.beginPath(); g.moveTo(s*0.2,s*0.5); g.quadraticCurveTo(s*0.5,s*0.32,s*0.5,s*0.5);
+      g.quadraticCurveTo(s*0.5,s*0.32,s*0.8,s*0.5); g.stroke ? g.fill():g.fill(); },14);
+    out.push({x:fl.x/R,y:fl.y/R,cv,w:cv.width,h:cv.height,scale:0.4,yOff:-1.6}); }
+  // the pedlar's caravan
+  if(merchant&&near(merchant)){ const cv=sfpShape('caravan',(g,s)=>{ g.fillStyle='#6a4a2c';
+    g.fillRect(s*0.2,s*0.4,s*0.6,s*0.34); g.fillStyle='#caa15a'; g.fillRect(s*0.2,s*0.38,s*0.6,s*0.1);
+    g.fillStyle='#2a1c10'; g.beginPath(); g.arc(s*0.34,s*0.78,s*0.08,0,6.28); g.arc(s*0.66,s*0.78,s*0.08,0,6.28); g.fill(); },26);
+    out.push({x:merchant.x/R,y:merchant.y/R,cv,w:cv.width,h:cv.height,scale:1.1}); }
+  // Sage shrines
+  for(const sh of shrines){ const dx=sh.x-hx,dy=sh.y-hy; if(dx*dx+dy*dy>MAXD)continue;
+    const cv=sfpShape('shrine',(g,s)=>{ g.fillStyle='#b9c7d8'; g.fillRect(s*0.4,s*0.3,s*0.2,s*0.5);
+      g.fillStyle='#e8d488'; g.beginPath(); g.arc(s*0.5,s*0.3,s*0.14,0,6.28); g.fill();
+      g.fillStyle='rgba(232,212,136,0.5)'; g.beginPath(); g.arc(s*0.5,s*0.3,s*0.24,0,6.28); g.fill(); },24);
+    out.push({x:sh.x/R,y:sh.y/R,cv,w:cv.width,h:cv.height,scale:1.0}); }
+  // gateways down into the Understory
+  for(const d of dungeons){ const cx=d.x*TILE+TILE/2, cy=d.y*TILE+TILE/2;
+    const dx=cx-hx,dy=cy-hy; if(dx*dx+dy*dy>MAXD)continue;
+    const cv=sfpShape('dungate',(g,s)=>{ g.fillStyle='#0a0a12'; g.beginPath();
+      g.ellipse(s*0.5,s*0.6,s*0.26,s*0.4,0,0,6.28); g.fill();
+      g.strokeStyle='#7de3ff'; g.lineWidth=2; g.shadowColor='#7de3ff'; g.shadowBlur=8; g.stroke(); },28);
+    out.push({x:cx/R,y:cy/R,cv,w:cv.width,h:cv.height,scale:1.3}); }
   return out;
 }
 const overworldFPAdapter={
@@ -9163,6 +9206,18 @@ return {
   fpToggle:()=>{toggleSurfaceFP();return sfpActive;},
   fpSet:(on)=>{setSurfaceFP(on);return sfpActive;},
   fpLook:(dy)=>{sfpYaw+=dy;},
+  fpStandNearFlora:()=>{ // an open cell ringed by trees/bushes with clear sightlines
+    let best=null,bs=-1;
+    for(const n of nodes){ if(n.t==='rock')continue;
+      for(const[dx,dy]of[[2,0],[-2,0],[0,2],[0,-2],[3,0],[-3,0],[0,3],[0,-3]]){
+        const x=n.x+dx,y=n.y+dy,i=idx(x,y);
+        if(x<2||y<2||x>=W-2||y>=H-2)continue;
+        if(map[i]!==0||bld[i]>=0||(water&&water[i]))continue;
+        let score=0; for(const m of nodes){ if(m.t==='rock')continue; const d=(m.x-x)*(m.x-x)+(m.y-y)*(m.y-y); if(d<64)score++; }
+        if(score>bs){bs=score;best=[x,y,n.x,n.y];} } }
+    if(best){ hero.x=best[0]*TILE+TILE/2; hero.y=best[1]*TILE+TILE/2;
+      hero.face=Math.atan2(best[3]-best[1],best[2]-best[0]); }
+    return best?{cell:[best[0],best[1]],flora:bs}:null; },
   fpStandNear:(tx,ty)=>{ let best=null,bd=1e9;
     for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){ const i=idx(x,y);
       if(map[i]!==0||bld[i]>=0||(water&&water[i]))continue;
