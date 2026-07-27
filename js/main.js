@@ -16,9 +16,72 @@ function showSurface(){
 }
 function showDungeon(){
   mode='dungeon';
+  if(Surface.fp)Surface.fp.set(false);     // leave overworld first-person behind
   sui.classList.add('hidden');
   dui.classList.remove('hidden');
   Editor.setOpen(false);
+}
+
+/* ============================================================
+   FIRST-PERSON CONTROLS — one input layer over whichever scene is
+   active. Drag to look, WASD / arrows (or a left-thumb stick) to
+   move along the gaze, tap or space to strike.
+   ============================================================ */
+function activeFP(){
+  const m=(mode==='dungeon')?Dungeon.fp:Surface.fp;
+  return (m&&m.active)?m:null;
+}
+const fpKeys=new Set();
+const MOVEK=['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'];
+addEventListener('keydown',e=>{
+  const k=(e.key||'').toLowerCase();
+  if(MOVEK.includes(k)){ if(activeFP()){ fpKeys.add(k); e.preventDefault(); } }
+  else if((k===' '||k==='enter')){ const fp=activeFP(); if(fp){ fp.strike(); e.preventDefault(); } }
+});
+addEventListener('keyup',e=>fpKeys.delete((e.key||'').toLowerCase()));
+(function bindFPPointer(){
+  const cvFP=document.getElementById('cvFP'); if(!cvFP)return;
+  let lookPtr=null, tap=null;
+  window.__fpMove=null;
+  cvFP.addEventListener('pointerdown',e=>{
+    if(!activeFP())return; try{cvFP.setPointerCapture(e.pointerId);}catch(_){}
+    if(e.clientX<innerWidth*0.4 && !window.__fpMove){ window.__fpMove={id:e.pointerId,ox:e.clientX,oy:e.clientY,x:e.clientX,y:e.clientY}; }
+    else { lookPtr={id:e.pointerId,x:e.clientX,y:e.clientY}; tap={t:performance.now(),moved:0}; }
+    e.preventDefault();
+  });
+  cvFP.addEventListener('pointermove',e=>{
+    const fp=activeFP(); if(!fp)return;
+    if(lookPtr&&e.pointerId===lookPtr.id){ const dx=e.clientX-lookPtr.x, dy=e.clientY-lookPtr.y;
+      lookPtr.x=e.clientX; lookPtr.y=e.clientY; fp.look(dx*0.005,-dy*0.55); if(tap)tap.moved+=Math.abs(dx)+Math.abs(dy); }
+    const mv=window.__fpMove; if(mv&&e.pointerId===mv.id){ mv.x=e.clientX; mv.y=e.clientY; }
+  });
+  const end=e=>{
+    if(lookPtr&&e.pointerId===lookPtr.id){ if(tap&&tap.moved<7&&performance.now()-tap.t<300){ const fp=activeFP(); if(fp)fp.strike(); } lookPtr=null; tap=null; }
+    const mv=window.__fpMove; if(mv&&e.pointerId===mv.id) window.__fpMove=null;
+  };
+  cvFP.addEventListener('pointerup',end);
+  cvFP.addEventListener('pointercancel',end);
+  const sb=document.getElementById('fpStrike');
+  if(sb)sb.addEventListener('pointerdown',e=>{ const fp=activeFP(); if(fp){fp.strike(); e.preventDefault(); e.stopPropagation();} });
+})();
+// fade the control hint a few seconds after first entering first person
+let fpHintTimer=null;
+function fpHintPoke(){ const h=document.getElementById('fpHint'); if(!h)return;
+  h.classList.remove('gone'); clearTimeout(fpHintTimer);
+  fpHintTimer=setTimeout(()=>h.classList.add('gone'),4200); }
+window.fpHintPoke=fpHintPoke;
+let fpLastT=0;
+function applyFPInput(t){
+  const fp=activeFP(); if(!fp){ fpLastT=t; return; }
+  const dt=Math.min(0.05,(t-fpLastT)/1000)||0.016; fpLastT=t;
+  let fwd=0,strafe=0;
+  if(fpKeys.has('w')||fpKeys.has('arrowup'))fwd+=1;
+  if(fpKeys.has('s')||fpKeys.has('arrowdown'))fwd-=1;
+  if(fpKeys.has('d')||fpKeys.has('arrowright'))strafe+=1;
+  if(fpKeys.has('a')||fpKeys.has('arrowleft'))strafe-=1;
+  const mv=window.__fpMove;
+  if(mv){ const R=46; fwd+=Math.max(-1,Math.min(1,-(mv.y-mv.oy)/R)); strafe+=Math.max(-1,Math.min(1,(mv.x-mv.ox)/R)); }
+  if(fwd||strafe){ const L=Math.hypot(fwd,strafe)||1; fp.step(fwd/L,strafe/L,dt); }
 }
 
 Surface.onEnterDungeon=(dun)=>{
@@ -37,6 +100,7 @@ Surface.onEnterDungeon=(dun)=>{
 let loopErrs=0;
 function loop(t){
   try{
+    applyFPInput(t);
     if(mode==='surface')Surface.frame(t);
     else Dungeon.frame(t);
   }catch(e){

@@ -5604,7 +5604,8 @@ function skyAndAmbient(t){
 
 /* ================= main draw ================= */
 function draw(t){
- if(interior){drawInterior(t);return}
+ if(interior){ if(sfpActive){renderInteriorFP();return} drawInterior(t);return }
+ if(sfpActive){ renderOverworldFP(); return }
  const z=cam.z;
  if(cine&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
  else if(follow&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
@@ -6417,6 +6418,7 @@ function enterInterior(b){
  hero.x=dx*TILE+TILE/2;hero.y=(dy-1)*TILE+TILE/2;hero.moving=false;
  cam.x=hero.x;cam.y=hero.y;cam.z=Math.max(2.2,cam.z);
  stick=null;inDialog=false;follow=false;
+ sfpBindOnce(); setSurfaceFP(false); fpShowToggle(true);
  toast('You step inside '+interior.name+'.');
 }
 function exitInterior(){
@@ -6425,6 +6427,7 @@ function exitInterior(){
  const[ddx,ddy]=doorTileOf(b);
  const s=(!b.gone&&nearOpen(ddx,ddy))||[Math.round(hero._sx/TILE)||ddx,Math.round(hero._sy/TILE)||ddy];
  interior=null;
+ setSurfaceFP(false); fpShowToggle(false);
  hero.x=s[0]*TILE+TILE/2;hero.y=s[1]*TILE+TILE/2;hero.moving=false;
  cam.x=hero.x;cam.y=hero.y;if(hero._scz)cam.z=hero._scz;
  stick=null;
@@ -6720,6 +6723,170 @@ function drawIntFoe(c,f,t){
  if(f.hp<f.maxhp){c.fillStyle='#1b1626';c.fillRect(px-9,py-18,18,2);c.fillStyle='#d24a5a';c.fillRect(px-9,py-18,18*clamp(f.hp/f.maxhp,0,1),2);}
  if(f.em&&f.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(f.em.g,px,py-20);}
 }
+/* ============================================================
+   FIRST PERSON — surface-side adapters (building interiors now;
+   the open overworld is added in the next phase). Shares one FP
+   state + the #fpToggle button with the dungeon; only one scene is
+   ever active, so each module guards on its own scene.
+   ============================================================ */
+let sfpActive=false, sfpYaw=0, sfpPitch=0, sfpLW=0, sfpLH=0, sfpBound=false;
+let sfpAtlasI=null, sfpMatI=null;
+const sfpBill=new Map();
+function sfpFrame(spr){
+ if(!spr||!spr.FRAMES)return null;
+ const F=spr.FRAMES.walk||spr.FRAMES.idle||spr.FRAMES.talk||Object.values(spr.FRAMES)[0];
+ if(!F)return null; const arr=F[0]||Object.values(F)[0]; return (arr&&arr[0])||null;
+}
+function sfpShape(key,draw,s){
+ if(sfpBill.has(key))return sfpBill.get(key);
+ s=s||22; const c=document.createElement('canvas'); c.width=s; c.height=s;
+ draw(c.getContext('2d'),s); sfpBill.set(key,c); return c;
+}
+const INT_FP_ATLAS={
+ dungeon:[{base:'#2b2436',dark:'#161122',light:'#463a5c',pattern:'brick'},{base:'#241d2e',dark:'#140f1c',light:'#382c48',pattern:'floor'},{base:'#0c0a12',dark:'#060409',light:'#161122',pattern:'flat'},{base:'#3a2f4a',dark:'#201830',light:'#544a6c',pattern:'rubble'}],
+ rustic:[{base:'#4a3628',dark:'#291c13',light:'#6a4f38',pattern:'brick'},{base:'#3c2e22',dark:'#241a12',light:'#54402e',pattern:'floor'},{base:'#0f0b07',dark:'#070503',light:'#1a130c',pattern:'flat'},{base:'#5a4530',dark:'#332417',light:'#755a3e',pattern:'rubble'}],
+ wood:[{base:'#5a422c',dark:'#332416',light:'#7a5c3c',pattern:'brick'},{base:'#4a3826',dark:'#2c2116',light:'#664e34',pattern:'floor'},{base:'#120c07',dark:'#090603',light:'#20160d',pattern:'flat'},{base:'#6a5238',dark:'#3d2e1e',light:'#8a6c48',pattern:'rubble'}],
+ concrete:[{base:'#40444a',dark:'#25282d',light:'#5c626a',pattern:'brick'},{base:'#34383e',dark:'#202329',light:'#4a4f57',pattern:'grid',accent:'#5a616a'},{base:'#0d0f12',dark:'#070809',light:'#181b1f',pattern:'flat'},{base:'#4a4e56',dark:'#2a2d33',light:'#646a74',pattern:'rubble'}],
+ modern:[{base:'#3a4048',dark:'#20252b',light:'#586472',vein:'#8fb8d8',pattern:'brick'},{base:'#2b3138',dark:'#191d22',light:'#3d4650',pattern:'grid',accent:'#5b7488'},{base:'#0c0f12',dark:'#060809',light:'#161b20',pattern:'flat'},{base:'#454e58',dark:'#262c33',light:'#5f6b78',pattern:'rubble'}],
+ cyber:[{base:'#182028',dark:'#0a1119',light:'#274454',vein:'#6ef0c0',pattern:'brick'},{base:'#111c24',dark:'#0a131a',light:'#1c3240',pattern:'grid',accent:'#2a6f6a'},{base:'#080d12',dark:'#04070a',light:'#12202a',pattern:'flat'},{base:'#173a34',dark:'#0a201c',light:'#2a6f66',vein:'#6ef0c0',pattern:'rubble'}],
+ ancient:[{base:'#3f4636',dark:'#232819',light:'#5c6647',vein:'#9ad86b',pattern:'brick'},{base:'#333a26',dark:'#1f2417',light:'#48512f',pattern:'grass',accent:'#7bb04a'},{base:'#0c0f08',dark:'#060804',light:'#161a0e',pattern:'flat'},{base:'#4a533a',dark:'#2a3020',light:'#65714c',vein:'#9ad86b',pattern:'rubble'}]
+};
+function buildInteriorFPAtlas(mat){
+ const specs=INT_FP_ATLAS[mat]||INT_FP_ATLAS.rustic;
+ sfpAtlasI=FPView.bakeAtlas(specs,(U.hashStr('int-'+mat+'-'+seed)>>>0)||11);
+ sfpMatI=mat;
+}
+function intFPSolid(cx,cy){
+ const intr=interior; if(!intr)return true;
+ if(cx<0||cy<0||cx>=intr.gw||cy>=intr.gh)return true;
+ const m=intr.wallMask||intr.solid; return !!(m&&m[intr.si(cx,cy)]);
+}
+function intFPWallTex(cx,cy){ const intr=interior; return (intr.breakable&&intr.breakable[intr.si(cx,cy)])?3:0; }
+function intFPSprites(){
+ const intr=interior, out=[], R=TILE; if(!intr)return out;
+ for(const f of intr.foes||[]){ if(f.dead)continue; const cv=sfpFrame(f.sprite)||sfpShape('ifoe:'+(f.col||'x'),(g,s)=>{g.fillStyle=f.col||'#a23a5a';g.beginPath();g.ellipse(s/2,s*0.55,s*0.32,s*0.3,0,0,6.28);g.fill();g.fillStyle='#ffe14a';g.fillRect(s*0.4,s*0.42,2,2);g.fillRect(s*0.55,s*0.42,2,2);});
+   out.push({x:f.x/R,y:f.y/R,cv,w:cv.width,h:cv.height,scale:0.95}); }
+ for(const o of intr.occupants||[]){ const cv=sfpFrame(o.sprite); if(cv) out.push({x:o.x/R,y:o.y/R,cv,w:cv.width,h:cv.height,scale:0.95});
+   else { const c2=sfpShape('occ:'+(o.col||'x'),(g,s)=>{g.fillStyle=o.col||'#c8a25a';g.beginPath();g.moveTo(s*0.3,s*0.78);g.lineTo(s/2,s*0.28);g.lineTo(s*0.7,s*0.78);g.closePath();g.fill();}); out.push({x:o.x/R,y:o.y/R,cv:c2,w:c2.width,h:c2.height,scale:0.9}); } }
+ for(const l of intr.loot||[]){ if(l.got)continue; const col=l.kind==='relic'?'#e8b0ff':(l.kind==='gold'?'#ffd166':'#9ad8ff');
+   const cv=sfpShape('iloot:'+col,(g,s)=>{g.fillStyle=col;g.shadowColor=col;g.shadowBlur=6;g.beginPath();g.moveTo(s/2,s*0.3);g.lineTo(s*0.68,s*0.5);g.lineTo(s/2,s*0.7);g.lineTo(s*0.32,s*0.5);g.closePath();g.fill();});
+   out.push({x:l.x/R,y:l.y/R,cv,w:cv.width,h:cv.height,scale:0.45,yOff:-0.2}); }
+ for(const tr of intr.traps||[]){ const cv=sfpShape('itrap:'+tr.kind,(g,s)=>{g.strokeStyle=tr.kind==='spike'?'#ff6a2b':'#9ad86b';g.lineWidth=2;for(let k=-1;k<2;k++){g.beginPath();g.moveTo(s/2+k*5,s*0.8);g.lineTo(s/2+k*5,s*0.4);g.stroke();}});
+   out.push({x:tr.x+0.5,y:tr.y+0.5,cv,w:cv.width,h:cv.height,scale:0.4,yOff:0.05}); }
+ for(const fp of intr.furniture||[]){ if(fp.kind==='tech'&&fp.sprite&&fp.sprite.canvas){ const cv=fp.sprite.canvas;
+     out.push({x:fp.x+(fp.w||1)/2,y:fp.y+(fp.h||1)/2,cv,w:cv.width,h:cv.height,scale:0.8}); }
+   else { const cv=sfpShape('furn:'+fp.kind,(g,s)=>{g.fillStyle='#5a4a38';g.fillRect(s*0.28,s*0.4,s*0.44,s*0.4);g.fillStyle='#3a2f22';g.fillRect(s*0.28,s*0.4,s*0.44,3);});
+     out.push({x:fp.x+(fp.w||1)/2,y:fp.y+(fp.h||1)/2,cv,w:cv.width,h:cv.height,scale:0.7}); } }
+ return out;
+}
+const interiorFPAdapter={
+ outdoor:false, fov:0.72, ceilFallback:2, floorFallback:1,
+ get MW(){return interior?interior.gw:1}, get MH(){return interior?interior.gh:1},
+ get atlas(){return sfpAtlasI},
+ solid:intFPSolid, wallTex:intFPWallTex, floorTex:()=>1, ceilTex:()=>2,
+ light:d=>0.10+1.35/(1+0.11*d*d),
+ cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),
+ sprites:intFPSprites
+};
+function renderInteriorFP(){
+ const mat=interior.mat||'rustic';
+ if(!sfpAtlasI||sfpMatI!==mat) buildInteriorFPAtlas(mat);
+ if(sfpLW!==cw||sfpLH!==ch){ FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch; }
+ FPView.render(interiorFPAdapter);
+ const who=$('fpWho'); if(who) who.textContent=(interior.b&&interior.b.tp?interior.b.tp.toUpperCase():'INTERIOR')+' · '+(interior.mat||'');
+ const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
+}
+/* ---- overworld adapter: sky above the horizon, the world map cast as ground,
+   rock & buildings as walls, people/animals/monsters as billboards ---- */
+let sfpAtlasO=null, sfpOTheme=null;
+const OW_SKY={ fantasy:{hi:[22,30,58],lo:[150,172,196]}, modern:{hi:[30,36,48],lo:[124,142,162]},
+  cyberpunk:{hi:[16,9,28],lo:[92,34,104]} };
+function owSky(t){ const s=OW_SKY[worldTheme]||OW_SKY.fantasy;
+  return [s.hi[0]+(s.lo[0]-s.hi[0])*t, s.hi[1]+(s.lo[1]-s.hi[1])*t, s.hi[2]+(s.lo[2]-s.hi[2])*t]; }
+function buildOverworldFPAtlas(){
+  const cyber=worldTheme==='cyberpunk', modern=worldTheme==='modern';
+  const specs = cyber ? [
+    {base:'#14201c',dark:'#0a130f',light:'#20362c',pattern:'grass',accent:'#2a6f5a'},
+    {base:'#1a1c22',dark:'#0e0f14',light:'#2a2e38',pattern:'grid',accent:'#3a4050'},
+    {base:'#0e2a3a',dark:'#071a26',light:'#155066',pattern:'flat'},
+    {base:'#242430',dark:'#12121a',light:'#3a3a4c',pattern:'rubble'},
+    {base:'#1a2632',dark:'#0a1119',light:'#294a5c',vein:'#6ef0c0',pattern:'brick'}
+  ] : modern ? [
+    {base:'#2f3a2c',dark:'#1c241a',light:'#455438',pattern:'grass',accent:'#5a7048'},
+    {base:'#3a3d42',dark:'#232529',light:'#54585f',pattern:'grid',accent:'#6a7078'},
+    {base:'#1c3a4a',dark:'#0f2530',light:'#2e5c70',pattern:'flat'},
+    {base:'#3a3a40',dark:'#212127',light:'#54545c',pattern:'rubble'},
+    {base:'#3a4048',dark:'#20252b',light:'#586472',vein:'#8fb8d8',pattern:'brick'}
+  ] : [
+    {base:'#3a5a2e',dark:'#22381b',light:'#5a8043',pattern:'grass',accent:'#7bb04a'},
+    {base:'#6a563a',dark:'#443722',light:'#8a7250',pattern:'floor'},
+    {base:'#1e4a5c',dark:'#123240',light:'#2f6c84',pattern:'flat'},
+    {base:'#4a4640',dark:'#2a2824',light:'#66625a',pattern:'rubble'},
+    {base:'#6a4a34',dark:'#3d2a1c',light:'#8a6444',pattern:'brick'}
+  ];
+  sfpAtlasO=FPView.bakeAtlas(specs,(U.hashStr('ow-'+worldTheme+'-'+seed)>>>0)||13);
+  sfpOTheme=worldTheme;
+}
+function owSolid(cx,cy){ if(cx<0||cy<0||cx>=W||cy>=H) return true; const i=idx(cx,cy); return map[i]!==0 || bld[i]>=0; }
+function owWallTex(cx,cy){ return bld[idx(cx,cy)]>=0?4:3; }
+function owFloorTex(cx,cy){ const i=idx(cx,cy); return (water&&water[i])?2:0; }
+function owSprites(){
+  const out=[], R=TILE, hx=hero.x, hy=hero.y, MAXD=(30*TILE)*(30*TILE);
+  const add=(o,sc)=>{ if(!o||o.dead)return; const dx=o.x-hx,dy=o.y-hy; if(dx*dx+dy*dy>MAXD)return;
+    const cv=sfpFrame(o.sprite); if(cv) out.push({x:o.x/R,y:o.y/R,cv,w:cv.width,h:cv.height,scale:sc||1}); };
+  for(const p of people) add(p,1);
+  for(const a of animals) add(a,0.9);
+  for(const m of monsters) add(m,1.05);
+  return out;
+}
+const overworldFPAdapter={
+  outdoor:true, fov:0.72, drawDist:60,
+  get MW(){return W}, get MH(){return H},
+  get atlas(){return sfpAtlasO},
+  solid:owSolid, wallTex:owWallTex, floorTex:owFloorTex, sky:owSky,
+  get fog(){ const s=OW_SKY[worldTheme]||OW_SKY.fantasy; return {near:9,dist:34,col:s.lo}; },
+  light:d=>Math.min(1.18, 0.4+2.0/(1+0.05*d*d)),
+  cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),
+  sprites:owSprites
+};
+function renderOverworldFP(){
+  if(!sfpAtlasO||sfpOTheme!==worldTheme) buildOverworldFPAtlas();
+  if(sfpLW!==cw||sfpLH!==ch){ FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch; }
+  FPView.render(overworldFPAdapter);
+  const who=$('fpWho'); if(who) who.textContent='THE OPEN WORLD';
+  const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
+}
+function sfpRender(){ if(interior)renderInteriorFP(); else renderOverworldFP(); }
+const surfaceFPControl={
+  get active(){ return sfpActive; },
+  set(on){ setSurfaceFP(on); },
+  toggle(){ toggleSurfaceFP(); },
+  look(dyaw,dpitch){ sfpYaw+=dyaw; hero.face=sfpYaw;
+    if(dpitch!==undefined){ const lim=FPView.H*0.4; sfpPitch=Math.max(-lim,Math.min(lim,sfpPitch+dpitch)); } },
+  step(fwd,strafe,dt){ if(!sfpActive||hero.down)return;
+    const spd=HERO_SPEED*(Hero.speedMul||1);
+    const c=Math.cos(sfpYaw), s=Math.sin(sfpYaw);
+    const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
+    moveHero(vx,vy); hero.face=sfpYaw;
+    if(fwd||strafe){ hero.dir=CFHelp.angToDir(sfpYaw); hero.moving=true; hero.anim='walk'; hero.animClock+=dt; } else hero.moving=false; },
+  strike(){ if(sfpActive) heroSlash(sfpYaw); } };
+
+function setSurfaceFP(on){
+ sfpActive=!!on;
+ const ui=$('fpui'), btn=$('fpToggle');
+ if(sfpActive){ sfpYaw=hero.face||0; FPView.mount($('cvFP')); FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch;
+   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); sfpRender(); }
+ else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
+}
+function toggleSurfaceFP(){ setSurfaceFP(!sfpActive); }
+function surfaceFPEligible(){ const sui=$('sui'); return sui && !sui.classList.contains('hidden') && !cine && !selecting && !warming; }
+function sfpBindOnce(){
+ if(sfpBound)return; sfpBound=true;
+ const btn=$('fpToggle'); if(btn) btn.addEventListener('click',()=>{ if(surfaceFPEligible()) toggleSurfaceFP(); });
+ addEventListener('keydown',e=>{ if(surfaceFPEligible()&&(e.key==='v'||e.key==='V')) toggleSurfaceFP(); });
+}
+function fpShowToggle(show){ const b=$('fpToggle'); if(b)b.classList.toggle('hidden',!show); }
+
 function drawInterior(t){
  const intr=interior;
  ctx.setTransform(dpr,0,0,dpr,0,0);
@@ -8693,6 +8860,7 @@ function frame(t){
    if(acts)acts.style.display=show?'flex':'none';
    {const zoom=$('sZoom');if(zoom)zoom.style.display=(!interior&&!cine)?'flex':'none';}
    if($('sDashBtn'))$('sDashBtn').disabled=heroStam<28||dashCd>0;
+   sfpBindOnce(); { const fb=$('fpToggle'); if(fb) fb.classList.toggle('hidden', cine||selecting||warming||hero.down); }
   }
   if(cine&&selected)updateCine();
   if(selected&&!$('charPanel').classList.contains('hidden')){
@@ -8760,6 +8928,7 @@ return {
  skin:()=>surfSkin,   // the current world's ground/rock palette+texture, borrowed by the dungeon
  set onEnterDungeon(fn){onEnterDungeon=fn},
  returnFromDungeon,
+ fp:surfaceFPControl,
  // ---- editor / debug API ----
  api:{
   reseed,
@@ -8991,6 +9160,20 @@ return {
   collapseBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;ruinBuilding(b);return {decay:b.decay||0,ruined:!!b.ruined};},
   advanceDecay:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;if(!b.decay){ruinBuilding(b);}else{decayBuilding(b,Math.min(3,b.decay+1));}return {decay:b.decay||0,ruined:!!b.ruined,solid:struct[idx(b.x,b.y)]===S_RUIN};},
   enterBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b||b.gone||!b.done)return null;if(b.ruined&&!(b.decay===1||b.decay===2))return null;enterInterior(b);return interior?{gw:interior.gw,gh:interior.gh,decay:interior.decay||0,hasBg:!!interior.bg,occupants:interior.occupants.map(o=>o.name),foes:interior.foes?interior.foes.length:0,traps:interior.traps?interior.traps.length:0,loot:interior.loot?interior.loot.length:0,solidCount:Array.prototype.reduce.call(interior.solid,(a,v)=>a+v,0),border:2*(interior.gw+interior.gh)-4}:null;},
+  fpToggle:()=>{toggleSurfaceFP();return sfpActive;},
+  fpSet:(on)=>{setSurfaceFP(on);return sfpActive;},
+  fpLook:(dy)=>{sfpYaw+=dy;},
+  fpStandNear:(tx,ty)=>{ let best=null,bd=1e9;
+    for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){ const i=idx(x,y);
+      if(map[i]!==0||bld[i]>=0||(water&&water[i]))continue;
+      const d=(x-tx)*(x-tx)+(y-ty)*(y-ty); if(d<bd){bd=d;best=[x,y];} }
+    if(best){hero.x=best[0]*TILE+TILE/2;hero.y=best[1]*TILE+TILE/2;} return best; },
+  fpCenterHero:()=>{ if(!interior)return false; const cxr=interior.gw/2, cyr=interior.gh/2; let best=null,bd=1e9;
+    const m=interior.wallMask||interior.solid;
+    for(let y=1;y<interior.gh-1;y++)for(let x=1;x<interior.gw-1;x++){ if(m[interior.si(x,y)])continue;
+      const d=(x-cxr)*(x-cxr)+(y-cyr)*(y-cyr); if(d<bd){bd=d;best=[x,y];} }
+    if(best){hero.x=best[0]*TILE+TILE/2;hero.y=best[1]*TILE+TILE/2;} return !!best; },
+  fpInfo:()=>({active:sfpActive,scene:interior?'interior':'overworld',yaw:+sfpYaw.toFixed(2),pitch:+sfpPitch.toFixed(1),atlas:!!(interior?sfpAtlasI:sfpAtlasO),mat:interior?sfpMatI:worldTheme,sprites:!sfpActive?0:(interior?intFPSprites().length:owSprites().length),fpw:FPView.W,fph:FPView.H}),
   exitBuilding:()=>{if(interior)exitInterior();return !interior;},
   farmCount:()=>farmTiles.size,
   farmAbandonSet:(radius)=>{ // TEST: convert some open tiles far from villages into farm plots to exercise decay

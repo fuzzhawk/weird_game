@@ -13,6 +13,22 @@ canvas{image-rendering:pixelated}
 button{background:rgba(30,38,26,.88);border:1px solid #3c4f33;color:#e8e2d5;border-radius:10px;padding:7px 11px;font-size:13px;line-height:1;cursor:pointer}
 button:active{transform:translateY(1px)}
 
+/* ================= FIRST PERSON ================= */
+#fpui{position:fixed;inset:0;z-index:40;background:#05040a}
+#cvFP{position:fixed;inset:0;width:100%;height:100%;image-rendering:pixelated;touch-action:none}
+#fpHud{position:fixed;inset:0;pointer-events:none;z-index:41}
+#fpVign{position:absolute;inset:0;box-shadow:inset 0 0 140px 30px rgba(0,0,0,.72)}
+#fpCross{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,.62);font-size:22px;font-weight:700;text-shadow:0 0 3px #000}
+#fpWho{position:absolute;top:calc(8px + env(safe-area-inset-top));left:0;right:0;text-align:center;font-size:13px;letter-spacing:.06em;color:#cfe6c4;text-shadow:0 1px 2px #000}
+#fpHp{position:absolute;bottom:calc(12px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;font-size:15px;color:#ff8fa3;text-shadow:0 1px 2px #000}
+#fpToggle{position:fixed;z-index:45;right:8px;bottom:calc(70px + env(safe-area-inset-bottom));font-size:12px;letter-spacing:.08em;opacity:.9}
+#fpToggle.on{background:linear-gradient(#0f3a30,#0a2620);color:#6ef0c0;border-color:#1d7a63}
+#fpStrike{position:absolute;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));pointer-events:auto;z-index:42;
+  font-size:13px;letter-spacing:.1em;padding:14px 16px;border-radius:44px;background:linear-gradient(#7a2130,#4a141d);border:1px solid #2a0d12;color:#ffd9de;box-shadow:0 2px 0 #2a0d12}
+#fpStrike:active{transform:translateY(1px);box-shadow:none}
+#fpHint{position:absolute;left:0;right:0;bottom:calc(46px + env(safe-area-inset-bottom));text-align:center;font-size:10px;letter-spacing:.06em;color:rgba(220,230,220,.5);transition:opacity .6s;pointer-events:none}
+#fpHint.gone{opacity:0}
+
 /* ================= SURFACE (the garden) ================= */
 #cvS{position:fixed;inset:0;touch-action:none}
 #top{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 10px;padding-top:calc(8px + env(safe-area-inset-top));background:linear-gradient(rgba(10,16,9,.9),rgba(10,16,9,0));z-index:5;pointer-events:none}
@@ -564,6 +580,20 @@ button:active{transform:translateY(1px)}
   </div>
   <div class="grp" id="edSelected"></div>
 </div>
+
+<!-- ================= FIRST PERSON ================= -->
+<div id="fpui" class="hidden">
+  <canvas id="cvFP"></canvas>
+  <div id="fpHud">
+    <div id="fpVign"></div>
+    <div id="fpCross">+</div>
+    <div id="fpWho">&nbsp;</div>
+    <div id="fpHp"></div>
+    <div id="fpHint">drag to look · WASD / left-thumb to move · tap to strike</div>
+    <button id="fpStrike">STRIKE</button>
+  </div>
+</div>
+<button id="fpToggle" class="hidden" title="First person">FP</button>
 
 <script>
 /* ==== inlined from js/core.js ==== */
@@ -2293,6 +2323,255 @@ const BuildingForge = (function(){
  return {worldStyle, recipe, bake};
 })();
 if(typeof window!=='undefined')window.BuildingForge=BuildingForge;
+
+</script>
+<script>
+/* ==== inlined from js/fp.js ==== */
+'use strict';
+/* ============================================================
+   SEED & SAGE — fp.js
+   FPView: a reusable first-person renderer, adapted from the
+   UNDERKEEP raycaster. A single DDA column caster drives every
+   environment (dungeon, building interior, overworld) through a
+   thin per-environment ADAPTER. Indoor adapters cast a ceiling;
+   the outdoor adapter sets {outdoor:true} and gets a sky gradient.
+
+   An adapter is a plain object exposing:
+     MW, MH            grid size in tiles
+     outdoor           bool — sky instead of ceiling
+     atlas             {pix:Uint8ClampedArray, TS, NTEX}
+     solid(cx,cy)      -> truthy if the cell is a wall
+     wallTex(cx,cy,s)  -> atlas tile index for a wall column (s=side)
+     floorTex(cx,cy)   -> atlas tile index for the floor
+     ceilTex(cx,cy)    -> atlas tile index for the ceiling (indoor)
+     glowAt(cx,cy)     -> {amt, col:[r,g,b]} | null  (emissive floor)
+     sky(t)            -> [r,g,b] for a sky row, t in 0..1 (outdoor)
+     fog               -> {dist, col:[r,g,b]} | null
+     light(d)          -> brightness multiplier at distance d
+     cam()             -> {x, y, yaw, pitch}  (x,y in TILE units)
+     fov               -> half-plane scale (default 0.72)
+     sprites()         -> [{x, y, cv, w, h, sx?, sw?, tint?}] world tiles
+   ============================================================ */
+const FPView = (function(){
+  const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+  const hexv=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+  const mix=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+  /* ---- shared texture atlas baker ----
+     specs: [{base,dark,light,vein?,brick?,pattern?,accent?}]
+     returns {pix, TS, NTEX} — a (TS*NTEX) x TS RGBA image, tiles laid left→right */
+  function bakeAtlas(specs, seed){
+    const TS=32, NTEX=specs.length;
+    const c=document.createElement('canvas'); c.width=TS*NTEX; c.height=TS;
+    const g=c.getContext('2d'); const img=g.createImageData(TS*NTEX,TS); const d=img.data;
+    const R=mulberry32(seed||99);
+    const put=(i,x,y,col)=>{const o=((y*TS*NTEX)+(i*TS+x))*4;d[o]=col[0];d[o+1]=col[1];d[o+2]=col[2];d[o+3]=255;};
+    specs.forEach((s,i)=>{
+      const b=hexv(s.base), dk=hexv(s.dark), lt=hexv(s.light), vn=s.vein?hexv(s.vein):null,
+            ac=s.accent?hexv(s.accent):null;
+      for(let y=0;y<TS;y++)for(let x=0;x<TS;x++){
+        let n=R()*0.35+(Math.sin(x*0.9+y*0.4)*0.5+0.5)*0.25;
+        let col=mix(dk,lt,clamp(n+0.25,0,1));
+        const pat=s.pattern||(s.brick?'brick':'rubble');
+        if(pat==='brick'){
+          const row=Math.floor(y/8), off=(row%2)*8, bx=(x+off)%16, by=y%8;
+          if(by===0||bx===0) col=mix(col,dk,0.75);
+          if(by===1||bx===1) col=mix(col,lt,0.35);
+        }else if(pat==='rubble'){
+          const bx=Math.floor(x/6), by=Math.floor(y/6);
+          const q=mulberry32(bx*73+by*131+i*17)();
+          col=mix(col,b,0.5+q*0.4);
+          if(x%6===0||y%6===0) col=mix(col,dk,0.5);
+        }else if(pat==='floor'){
+          col=mix(mix(dk,lt,R()*0.55+0.2),b,0.45);
+        }else if(pat==='grid'){
+          col=mix(mix(dk,lt,R()*0.5+0.4),b,0.4);
+          if(ac&&(x%8===0||y%8===0)) col=mix(col,ac,0.28);
+        }else if(pat==='grass'){
+          col=mix(mix(dk,lt,R()*0.5+0.3),b,0.5);
+          if((x*7+y*3)%13<2 && ac) col=mix(col,ac,0.35);
+        }else if(pat==='flat'){
+          col=mix(b, R()<0.5?dk:lt, R()*0.18);
+        }
+        if(vn){
+          const v=Math.sin((x*0.55+y*0.31)+Math.cos(y*0.21)*2.2);
+          if(v>0.93) col=mix(col,vn,0.85); else if(v>0.86) col=mix(col,vn,0.35);
+        }
+        put(i,x,y,col);
+      }
+    });
+    g.putImageData(img,0,0);
+    return {pix:img.data, TS, NTEX, canvas:c};
+  }
+
+  /* ---- renderer state ---- */
+  let cv=null, cx2=null, FPW=256, FPH=160, fpImg=null, fpBuf=null, zbuf=null;
+  let mounted=false;
+
+  function mount(canvasEl){
+    cv=canvasEl; cx2=cv.getContext('2d'); cx2.imageSmoothingEnabled=false; mounted=true;
+  }
+  function resize(w,h){
+    if(!mounted)return;
+    FPH=Math.min(200,Math.max(120,Math.round(h/3)));
+    FPW=Math.min(440,Math.round(FPH*(w/h)));
+    cv.width=FPW; cv.height=FPH;
+    fpImg=cx2.createImageData(FPW,FPH); fpBuf=fpImg.data;
+    zbuf=new Float32Array(FPW);
+    cx2.imageSmoothingEnabled=false;
+  }
+
+  const defLight=d=>0.05+1.25/(1+0.13*d*d);
+
+  function render(A){
+    if(!mounted||!fpBuf||!A)return;
+    const cam=A.cam(); const px=cam.x, py=cam.y;
+    const dirX=Math.cos(cam.yaw), dirY=Math.sin(cam.yaw);
+    const fov=A.fov||0.72;
+    const planeX=-dirY*fov, planeY=dirX*fov;
+    const horizon=(FPH*0.5+(cam.pitch||0))|0;
+    const posZ=0.5*FPH;
+    const d=fpBuf;
+    const AT=A.atlas, TS=AT.TS, AW=TS*AT.NTEX, PIX=AT.pix;
+    const MW=A.MW, MH=A.MH;
+    const light=A.light||defLight;
+    const outdoor=!!A.outdoor;
+    const fog=A.fog||null;
+    const applyFog=(r,g,b,dist)=>{
+      if(!fog)return [r,g,b];
+      let f=clamp((dist-(fog.near||0))/(fog.dist||20),0,1); f*=f;
+      return [r+(fog.col[0]-r)*f, g+(fog.col[1]-g)*f, b+(fog.col[2]-b)*f];
+    };
+
+    for(let x=0;x<FPW;x++){
+      const camX=2*x/FPW-1;
+      const rdx=dirX+planeX*camX, rdy=dirY+planeY*camX;
+      let mapX=px|0, mapY=py|0;
+      const ddx=rdx===0?1e30:Math.abs(1/rdx), ddy=rdy===0?1e30:Math.abs(1/rdy);
+      let stepX,stepY,sdx,sdy;
+      if(rdx<0){stepX=-1;sdx=(px-mapX)*ddx;}else{stepX=1;sdx=(mapX+1-px)*ddx;}
+      if(rdy<0){stepY=-1;sdy=(py-mapY)*ddy;}else{stepY=1;sdy=(mapY+1-py)*ddy;}
+      let side=0,hit=0,guard=0,cxi=mapX,cyi=mapY;
+      const maxGuard=outdoor?(A.drawDist||64):170;
+      while(!hit&&guard++<maxGuard){
+        if(sdx<sdy){sdx+=ddx;mapX+=stepX;side=0;}else{sdy+=ddy;mapY+=stepY;side=1;}
+        if(mapX<0||mapY<0||mapX>=MW||mapY>=MH){hit=2;break;}
+        if(A.solid(mapX,mapY)){hit=1;cxi=mapX;cyi=mapY;break;}
+      }
+      let dist=side===0?(sdx-ddx):(sdy-ddy);
+      if(dist<0.02)dist=0.02;
+      zbuf[x]=dist;
+      let lh=(FPH/dist)|0;
+      let y0=horizon-(lh>>1), y1=horizon+(lh>>1);
+      if(hit!==1){y0=y1=horizon;}
+      const dy0=clamp(y0,0,FPH), dy1=clamp(y1,0,FPH);
+
+      // ---- wall column ----
+      if(hit===1){
+        const tex=A.wallTex(cxi,cyi,side);
+        let wallX=side===0?py+dist*rdy:px+dist*rdx; wallX-=Math.floor(wallX);
+        let tx=(wallX*TS)|0;
+        if((side===0&&rdx>0)||(side===1&&rdy<0))tx=TS-tx-1;
+        let lit=light(dist)*(side===1?0.74:1);
+        const stepT=TS/lh, base=tex*TS+tx;
+        let texPos=(dy0-horizon+(lh>>1))*stepT;
+        for(let y=dy0;y<dy1;y++){
+          let ty=texPos|0; if(ty<0)ty=0; else if(ty>=TS)ty=TS-1; texPos+=stepT;
+          const s=(ty*AW+base)*4, o=(y*FPW+x)*4;
+          let r=PIX[s]*lit, gg=PIX[s+1]*lit, b=PIX[s+2]*lit;
+          if(fog){const c2=applyFog(r,gg,b,dist);r=c2[0];gg=c2[1];b=c2[2];}
+          d[o]=r>255?255:r; d[o+1]=gg>255?255:gg; d[o+2]=b>255?255:b; d[o+3]=255;
+        }
+      }
+
+      // ---- floor (below the wall) ----
+      for(let y=Math.max(dy1,horizon+1);y<FPH;y++){
+        const p=y-horizon, rowD=posZ/p;
+        const fxw=px+rowD*rdx, fyw=py+rowD*rdy;
+        const fcx=fxw|0, fcy=fyw|0;
+        let ftex=A.floorFallback||0, glow=null;
+        if(fcx>=0&&fcy>=0&&fcx<MW&&fcy<MH){
+          ftex=A.floorTex(fcx,fcy);
+          if(A.glowAt)glow=A.glowAt(fcx,fcy);
+        }
+        const tx=((fxw-fcx)*TS)|0, ty=((fyw-fcy)*TS)|0;
+        const s=(ty*AW+ftex*TS+tx)*4, o=(y*FPW+x)*4;
+        const lit=light(rowD);
+        let r=PIX[s]*lit, gg=PIX[s+1]*lit, b=PIX[s+2]*lit;
+        if(glow&&glow.amt){const em=glow.amt*70;r+=em*glow.col[0];gg+=em*glow.col[1];b+=em*glow.col[2];}
+        if(fog){const c2=applyFog(r,gg,b,rowD);r=c2[0];gg=c2[1];b=c2[2];}
+        d[o]=r>255?255:r; d[o+1]=gg>255?255:gg; d[o+2]=b>255?255:b; d[o+3]=255;
+      }
+
+      // ---- ceiling / sky (above the wall) ----
+      const topEnd=Math.min(dy0,horizon)-1;
+      if(outdoor){
+        for(let y=topEnd;y>=0;y--){
+          const t=y/Math.max(1,horizon);
+          const sc=A.sky?A.sky(clamp(t,0,1)):[20,24,40];
+          const o=(y*FPW+x)*4;
+          d[o]=sc[0]; d[o+1]=sc[1]; d[o+2]=sc[2]; d[o+3]=255;
+        }
+      }else{
+        for(let y=topEnd;y>=0;y--){
+          const p=horizon-y, rowD=posZ/p;
+          const fxw=px+rowD*rdx, fyw=py+rowD*rdy;
+          const fcx=fxw|0, fcy=fyw|0;
+          let ctex=A.ceilTex?(fcx>=0&&fcy>=0&&fcx<MW&&fcy<MH?A.ceilTex(fcx,fcy):A.ceilFallback||0):A.ceilFallback||0;
+          const tx=((fxw-fcx)*TS)|0, ty=((fyw-fcy)*TS)|0;
+          const s=(ty*AW+ctex*TS+tx)*4, o=(y*FPW+x)*4;
+          const lit=light(rowD)*0.55;
+          d[o]=PIX[s]*lit; d[o+1]=PIX[s+1]*lit; d[o+2]=PIX[s+2]*lit; d[o+3]=255;
+        }
+      }
+    }
+
+    cx2.putImageData(fpImg,0,0);
+
+    // ---- billboards: per-column drawImage slices, z-tested ----
+    const invDet=1/(planeX*dirY-dirX*planeY);
+    const list=A.sprites?A.sprites():[];
+    const bill=[];
+    for(const b of list){
+      const sx=b.x-px, sy=b.y-py; const dd=sx*sx+sy*sy;
+      const tY=invDet*(-planeY*sx+planeX*sy);
+      if(tY<0.2)continue;
+      const tX=invDet*(dirY*sx-dirX*sy);
+      bill.push({b,tX,tY,dd});
+    }
+    bill.sort((p,q)=>q.tY-p.tY);
+    for(const it of bill){
+      const b=it.b, tX=it.tX, tY=it.tY;
+      const scr=((FPW/2)*(1+tX/tY))|0;
+      const scale=(b.scale||1);
+      const hpx=Math.abs((FPH/tY)*0.95*scale);
+      const wpx=hpx*(b.w/b.h);
+      const feet=horizon+(0.5*FPH)/tY + (b.yOff||0)*(FPH/tY);
+      const top=feet-hpx;
+      const x0=Math.max(0,Math.floor(scr-wpx/2)), x1=Math.min(FPW-1,Math.ceil(scr+wpx/2));
+      const srcW=b.sw||b.cv.width, srcX0=b.sx||0, srcH=b.cv.height;
+      const lit=light(tY);
+      for(let x=x0;x<=x1;x++){
+        if(tY>=zbuf[x])continue;
+        const u=((x-(scr-wpx/2))/wpx*srcW)|0;
+        if(u<0||u>=srcW)continue;
+        cx2.drawImage(b.cv, srcX0+u, 0, 1, srcH, x, top, 1, hpx);
+        // distance / backlight dimming to match wall falloff
+        const dim=1-clamp(lit,0,1);
+        if(dim>0.02){ cx2.globalAlpha=dim*0.85; cx2.fillStyle=b.tint||'#05040a';
+          cx2.fillRect(x,top,1,hpx); cx2.globalAlpha=1; }
+      }
+    }
+
+    if(A.overlay)A.overlay(cx2,FPW,FPH,cam);
+  }
+
+  return { mount, resize, render, bakeAtlas,
+           get W(){return FPW}, get H(){return FPH}, get canvas(){return cv} };
+})();
+if(typeof window!=='undefined')window.FPView=FPView;
 
 </script>
 <script>
@@ -9053,7 +9332,8 @@ function skyAndAmbient(t){
 
 /* ================= main draw ================= */
 function draw(t){
- if(interior){drawInterior(t);return}
+ if(interior){ if(sfpActive){renderInteriorFP();return} drawInterior(t);return }
+ if(sfpActive){ renderOverworldFP(); return }
  const z=cam.z;
  if(cine&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
  else if(follow&&selected&&!selected.dead){cam.x+=(selected.x-cam.x)*0.08;cam.y+=(selected.y-cam.y)*0.08}
@@ -9866,6 +10146,7 @@ function enterInterior(b){
  hero.x=dx*TILE+TILE/2;hero.y=(dy-1)*TILE+TILE/2;hero.moving=false;
  cam.x=hero.x;cam.y=hero.y;cam.z=Math.max(2.2,cam.z);
  stick=null;inDialog=false;follow=false;
+ sfpBindOnce(); setSurfaceFP(false); fpShowToggle(true);
  toast('You step inside '+interior.name+'.');
 }
 function exitInterior(){
@@ -9874,6 +10155,7 @@ function exitInterior(){
  const[ddx,ddy]=doorTileOf(b);
  const s=(!b.gone&&nearOpen(ddx,ddy))||[Math.round(hero._sx/TILE)||ddx,Math.round(hero._sy/TILE)||ddy];
  interior=null;
+ setSurfaceFP(false); fpShowToggle(false);
  hero.x=s[0]*TILE+TILE/2;hero.y=s[1]*TILE+TILE/2;hero.moving=false;
  cam.x=hero.x;cam.y=hero.y;if(hero._scz)cam.z=hero._scz;
  stick=null;
@@ -10169,6 +10451,170 @@ function drawIntFoe(c,f,t){
  if(f.hp<f.maxhp){c.fillStyle='#1b1626';c.fillRect(px-9,py-18,18,2);c.fillStyle='#d24a5a';c.fillRect(px-9,py-18,18*clamp(f.hp/f.maxhp,0,1),2);}
  if(f.em&&f.em.until>performance.now()){c.font='9px system-ui';c.textAlign='center';c.fillText(f.em.g,px,py-20);}
 }
+/* ============================================================
+   FIRST PERSON — surface-side adapters (building interiors now;
+   the open overworld is added in the next phase). Shares one FP
+   state + the #fpToggle button with the dungeon; only one scene is
+   ever active, so each module guards on its own scene.
+   ============================================================ */
+let sfpActive=false, sfpYaw=0, sfpPitch=0, sfpLW=0, sfpLH=0, sfpBound=false;
+let sfpAtlasI=null, sfpMatI=null;
+const sfpBill=new Map();
+function sfpFrame(spr){
+ if(!spr||!spr.FRAMES)return null;
+ const F=spr.FRAMES.walk||spr.FRAMES.idle||spr.FRAMES.talk||Object.values(spr.FRAMES)[0];
+ if(!F)return null; const arr=F[0]||Object.values(F)[0]; return (arr&&arr[0])||null;
+}
+function sfpShape(key,draw,s){
+ if(sfpBill.has(key))return sfpBill.get(key);
+ s=s||22; const c=document.createElement('canvas'); c.width=s; c.height=s;
+ draw(c.getContext('2d'),s); sfpBill.set(key,c); return c;
+}
+const INT_FP_ATLAS={
+ dungeon:[{base:'#2b2436',dark:'#161122',light:'#463a5c',pattern:'brick'},{base:'#241d2e',dark:'#140f1c',light:'#382c48',pattern:'floor'},{base:'#0c0a12',dark:'#060409',light:'#161122',pattern:'flat'},{base:'#3a2f4a',dark:'#201830',light:'#544a6c',pattern:'rubble'}],
+ rustic:[{base:'#4a3628',dark:'#291c13',light:'#6a4f38',pattern:'brick'},{base:'#3c2e22',dark:'#241a12',light:'#54402e',pattern:'floor'},{base:'#0f0b07',dark:'#070503',light:'#1a130c',pattern:'flat'},{base:'#5a4530',dark:'#332417',light:'#755a3e',pattern:'rubble'}],
+ wood:[{base:'#5a422c',dark:'#332416',light:'#7a5c3c',pattern:'brick'},{base:'#4a3826',dark:'#2c2116',light:'#664e34',pattern:'floor'},{base:'#120c07',dark:'#090603',light:'#20160d',pattern:'flat'},{base:'#6a5238',dark:'#3d2e1e',light:'#8a6c48',pattern:'rubble'}],
+ concrete:[{base:'#40444a',dark:'#25282d',light:'#5c626a',pattern:'brick'},{base:'#34383e',dark:'#202329',light:'#4a4f57',pattern:'grid',accent:'#5a616a'},{base:'#0d0f12',dark:'#070809',light:'#181b1f',pattern:'flat'},{base:'#4a4e56',dark:'#2a2d33',light:'#646a74',pattern:'rubble'}],
+ modern:[{base:'#3a4048',dark:'#20252b',light:'#586472',vein:'#8fb8d8',pattern:'brick'},{base:'#2b3138',dark:'#191d22',light:'#3d4650',pattern:'grid',accent:'#5b7488'},{base:'#0c0f12',dark:'#060809',light:'#161b20',pattern:'flat'},{base:'#454e58',dark:'#262c33',light:'#5f6b78',pattern:'rubble'}],
+ cyber:[{base:'#182028',dark:'#0a1119',light:'#274454',vein:'#6ef0c0',pattern:'brick'},{base:'#111c24',dark:'#0a131a',light:'#1c3240',pattern:'grid',accent:'#2a6f6a'},{base:'#080d12',dark:'#04070a',light:'#12202a',pattern:'flat'},{base:'#173a34',dark:'#0a201c',light:'#2a6f66',vein:'#6ef0c0',pattern:'rubble'}],
+ ancient:[{base:'#3f4636',dark:'#232819',light:'#5c6647',vein:'#9ad86b',pattern:'brick'},{base:'#333a26',dark:'#1f2417',light:'#48512f',pattern:'grass',accent:'#7bb04a'},{base:'#0c0f08',dark:'#060804',light:'#161a0e',pattern:'flat'},{base:'#4a533a',dark:'#2a3020',light:'#65714c',vein:'#9ad86b',pattern:'rubble'}]
+};
+function buildInteriorFPAtlas(mat){
+ const specs=INT_FP_ATLAS[mat]||INT_FP_ATLAS.rustic;
+ sfpAtlasI=FPView.bakeAtlas(specs,(U.hashStr('int-'+mat+'-'+seed)>>>0)||11);
+ sfpMatI=mat;
+}
+function intFPSolid(cx,cy){
+ const intr=interior; if(!intr)return true;
+ if(cx<0||cy<0||cx>=intr.gw||cy>=intr.gh)return true;
+ const m=intr.wallMask||intr.solid; return !!(m&&m[intr.si(cx,cy)]);
+}
+function intFPWallTex(cx,cy){ const intr=interior; return (intr.breakable&&intr.breakable[intr.si(cx,cy)])?3:0; }
+function intFPSprites(){
+ const intr=interior, out=[], R=TILE; if(!intr)return out;
+ for(const f of intr.foes||[]){ if(f.dead)continue; const cv=sfpFrame(f.sprite)||sfpShape('ifoe:'+(f.col||'x'),(g,s)=>{g.fillStyle=f.col||'#a23a5a';g.beginPath();g.ellipse(s/2,s*0.55,s*0.32,s*0.3,0,0,6.28);g.fill();g.fillStyle='#ffe14a';g.fillRect(s*0.4,s*0.42,2,2);g.fillRect(s*0.55,s*0.42,2,2);});
+   out.push({x:f.x/R,y:f.y/R,cv,w:cv.width,h:cv.height,scale:0.95}); }
+ for(const o of intr.occupants||[]){ const cv=sfpFrame(o.sprite); if(cv) out.push({x:o.x/R,y:o.y/R,cv,w:cv.width,h:cv.height,scale:0.95});
+   else { const c2=sfpShape('occ:'+(o.col||'x'),(g,s)=>{g.fillStyle=o.col||'#c8a25a';g.beginPath();g.moveTo(s*0.3,s*0.78);g.lineTo(s/2,s*0.28);g.lineTo(s*0.7,s*0.78);g.closePath();g.fill();}); out.push({x:o.x/R,y:o.y/R,cv:c2,w:c2.width,h:c2.height,scale:0.9}); } }
+ for(const l of intr.loot||[]){ if(l.got)continue; const col=l.kind==='relic'?'#e8b0ff':(l.kind==='gold'?'#ffd166':'#9ad8ff');
+   const cv=sfpShape('iloot:'+col,(g,s)=>{g.fillStyle=col;g.shadowColor=col;g.shadowBlur=6;g.beginPath();g.moveTo(s/2,s*0.3);g.lineTo(s*0.68,s*0.5);g.lineTo(s/2,s*0.7);g.lineTo(s*0.32,s*0.5);g.closePath();g.fill();});
+   out.push({x:l.x/R,y:l.y/R,cv,w:cv.width,h:cv.height,scale:0.45,yOff:-0.2}); }
+ for(const tr of intr.traps||[]){ const cv=sfpShape('itrap:'+tr.kind,(g,s)=>{g.strokeStyle=tr.kind==='spike'?'#ff6a2b':'#9ad86b';g.lineWidth=2;for(let k=-1;k<2;k++){g.beginPath();g.moveTo(s/2+k*5,s*0.8);g.lineTo(s/2+k*5,s*0.4);g.stroke();}});
+   out.push({x:tr.x+0.5,y:tr.y+0.5,cv,w:cv.width,h:cv.height,scale:0.4,yOff:0.05}); }
+ for(const fp of intr.furniture||[]){ if(fp.kind==='tech'&&fp.sprite&&fp.sprite.canvas){ const cv=fp.sprite.canvas;
+     out.push({x:fp.x+(fp.w||1)/2,y:fp.y+(fp.h||1)/2,cv,w:cv.width,h:cv.height,scale:0.8}); }
+   else { const cv=sfpShape('furn:'+fp.kind,(g,s)=>{g.fillStyle='#5a4a38';g.fillRect(s*0.28,s*0.4,s*0.44,s*0.4);g.fillStyle='#3a2f22';g.fillRect(s*0.28,s*0.4,s*0.44,3);});
+     out.push({x:fp.x+(fp.w||1)/2,y:fp.y+(fp.h||1)/2,cv,w:cv.width,h:cv.height,scale:0.7}); } }
+ return out;
+}
+const interiorFPAdapter={
+ outdoor:false, fov:0.72, ceilFallback:2, floorFallback:1,
+ get MW(){return interior?interior.gw:1}, get MH(){return interior?interior.gh:1},
+ get atlas(){return sfpAtlasI},
+ solid:intFPSolid, wallTex:intFPWallTex, floorTex:()=>1, ceilTex:()=>2,
+ light:d=>0.10+1.35/(1+0.11*d*d),
+ cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),
+ sprites:intFPSprites
+};
+function renderInteriorFP(){
+ const mat=interior.mat||'rustic';
+ if(!sfpAtlasI||sfpMatI!==mat) buildInteriorFPAtlas(mat);
+ if(sfpLW!==cw||sfpLH!==ch){ FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch; }
+ FPView.render(interiorFPAdapter);
+ const who=$('fpWho'); if(who) who.textContent=(interior.b&&interior.b.tp?interior.b.tp.toUpperCase():'INTERIOR')+' · '+(interior.mat||'');
+ const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
+}
+/* ---- overworld adapter: sky above the horizon, the world map cast as ground,
+   rock & buildings as walls, people/animals/monsters as billboards ---- */
+let sfpAtlasO=null, sfpOTheme=null;
+const OW_SKY={ fantasy:{hi:[22,30,58],lo:[150,172,196]}, modern:{hi:[30,36,48],lo:[124,142,162]},
+  cyberpunk:{hi:[16,9,28],lo:[92,34,104]} };
+function owSky(t){ const s=OW_SKY[worldTheme]||OW_SKY.fantasy;
+  return [s.hi[0]+(s.lo[0]-s.hi[0])*t, s.hi[1]+(s.lo[1]-s.hi[1])*t, s.hi[2]+(s.lo[2]-s.hi[2])*t]; }
+function buildOverworldFPAtlas(){
+  const cyber=worldTheme==='cyberpunk', modern=worldTheme==='modern';
+  const specs = cyber ? [
+    {base:'#14201c',dark:'#0a130f',light:'#20362c',pattern:'grass',accent:'#2a6f5a'},
+    {base:'#1a1c22',dark:'#0e0f14',light:'#2a2e38',pattern:'grid',accent:'#3a4050'},
+    {base:'#0e2a3a',dark:'#071a26',light:'#155066',pattern:'flat'},
+    {base:'#242430',dark:'#12121a',light:'#3a3a4c',pattern:'rubble'},
+    {base:'#1a2632',dark:'#0a1119',light:'#294a5c',vein:'#6ef0c0',pattern:'brick'}
+  ] : modern ? [
+    {base:'#2f3a2c',dark:'#1c241a',light:'#455438',pattern:'grass',accent:'#5a7048'},
+    {base:'#3a3d42',dark:'#232529',light:'#54585f',pattern:'grid',accent:'#6a7078'},
+    {base:'#1c3a4a',dark:'#0f2530',light:'#2e5c70',pattern:'flat'},
+    {base:'#3a3a40',dark:'#212127',light:'#54545c',pattern:'rubble'},
+    {base:'#3a4048',dark:'#20252b',light:'#586472',vein:'#8fb8d8',pattern:'brick'}
+  ] : [
+    {base:'#3a5a2e',dark:'#22381b',light:'#5a8043',pattern:'grass',accent:'#7bb04a'},
+    {base:'#6a563a',dark:'#443722',light:'#8a7250',pattern:'floor'},
+    {base:'#1e4a5c',dark:'#123240',light:'#2f6c84',pattern:'flat'},
+    {base:'#4a4640',dark:'#2a2824',light:'#66625a',pattern:'rubble'},
+    {base:'#6a4a34',dark:'#3d2a1c',light:'#8a6444',pattern:'brick'}
+  ];
+  sfpAtlasO=FPView.bakeAtlas(specs,(U.hashStr('ow-'+worldTheme+'-'+seed)>>>0)||13);
+  sfpOTheme=worldTheme;
+}
+function owSolid(cx,cy){ if(cx<0||cy<0||cx>=W||cy>=H) return true; const i=idx(cx,cy); return map[i]!==0 || bld[i]>=0; }
+function owWallTex(cx,cy){ return bld[idx(cx,cy)]>=0?4:3; }
+function owFloorTex(cx,cy){ const i=idx(cx,cy); return (water&&water[i])?2:0; }
+function owSprites(){
+  const out=[], R=TILE, hx=hero.x, hy=hero.y, MAXD=(30*TILE)*(30*TILE);
+  const add=(o,sc)=>{ if(!o||o.dead)return; const dx=o.x-hx,dy=o.y-hy; if(dx*dx+dy*dy>MAXD)return;
+    const cv=sfpFrame(o.sprite); if(cv) out.push({x:o.x/R,y:o.y/R,cv,w:cv.width,h:cv.height,scale:sc||1}); };
+  for(const p of people) add(p,1);
+  for(const a of animals) add(a,0.9);
+  for(const m of monsters) add(m,1.05);
+  return out;
+}
+const overworldFPAdapter={
+  outdoor:true, fov:0.72, drawDist:60,
+  get MW(){return W}, get MH(){return H},
+  get atlas(){return sfpAtlasO},
+  solid:owSolid, wallTex:owWallTex, floorTex:owFloorTex, sky:owSky,
+  get fog(){ const s=OW_SKY[worldTheme]||OW_SKY.fantasy; return {near:9,dist:34,col:s.lo}; },
+  light:d=>Math.min(1.18, 0.4+2.0/(1+0.05*d*d)),
+  cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),
+  sprites:owSprites
+};
+function renderOverworldFP(){
+  if(!sfpAtlasO||sfpOTheme!==worldTheme) buildOverworldFPAtlas();
+  if(sfpLW!==cw||sfpLH!==ch){ FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch; }
+  FPView.render(overworldFPAdapter);
+  const who=$('fpWho'); if(who) who.textContent='THE OPEN WORLD';
+  const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
+}
+function sfpRender(){ if(interior)renderInteriorFP(); else renderOverworldFP(); }
+const surfaceFPControl={
+  get active(){ return sfpActive; },
+  set(on){ setSurfaceFP(on); },
+  toggle(){ toggleSurfaceFP(); },
+  look(dyaw,dpitch){ sfpYaw+=dyaw; hero.face=sfpYaw;
+    if(dpitch!==undefined){ const lim=FPView.H*0.4; sfpPitch=Math.max(-lim,Math.min(lim,sfpPitch+dpitch)); } },
+  step(fwd,strafe,dt){ if(!sfpActive||hero.down)return;
+    const spd=HERO_SPEED*(Hero.speedMul||1);
+    const c=Math.cos(sfpYaw), s=Math.sin(sfpYaw);
+    const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
+    moveHero(vx,vy); hero.face=sfpYaw;
+    if(fwd||strafe){ hero.dir=CFHelp.angToDir(sfpYaw); hero.moving=true; hero.anim='walk'; hero.animClock+=dt; } else hero.moving=false; },
+  strike(){ if(sfpActive) heroSlash(sfpYaw); } };
+
+function setSurfaceFP(on){
+ sfpActive=!!on;
+ const ui=$('fpui'), btn=$('fpToggle');
+ if(sfpActive){ sfpYaw=hero.face||0; FPView.mount($('cvFP')); FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch;
+   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); sfpRender(); }
+ else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
+}
+function toggleSurfaceFP(){ setSurfaceFP(!sfpActive); }
+function surfaceFPEligible(){ const sui=$('sui'); return sui && !sui.classList.contains('hidden') && !cine && !selecting && !warming; }
+function sfpBindOnce(){
+ if(sfpBound)return; sfpBound=true;
+ const btn=$('fpToggle'); if(btn) btn.addEventListener('click',()=>{ if(surfaceFPEligible()) toggleSurfaceFP(); });
+ addEventListener('keydown',e=>{ if(surfaceFPEligible()&&(e.key==='v'||e.key==='V')) toggleSurfaceFP(); });
+}
+function fpShowToggle(show){ const b=$('fpToggle'); if(b)b.classList.toggle('hidden',!show); }
+
 function drawInterior(t){
  const intr=interior;
  ctx.setTransform(dpr,0,0,dpr,0,0);
@@ -12142,6 +12588,7 @@ function frame(t){
    if(acts)acts.style.display=show?'flex':'none';
    {const zoom=$('sZoom');if(zoom)zoom.style.display=(!interior&&!cine)?'flex':'none';}
    if($('sDashBtn'))$('sDashBtn').disabled=heroStam<28||dashCd>0;
+   sfpBindOnce(); { const fb=$('fpToggle'); if(fb) fb.classList.toggle('hidden', cine||selecting||warming||hero.down); }
   }
   if(cine&&selected)updateCine();
   if(selected&&!$('charPanel').classList.contains('hidden')){
@@ -12209,6 +12656,7 @@ return {
  skin:()=>surfSkin,   // the current world's ground/rock palette+texture, borrowed by the dungeon
  set onEnterDungeon(fn){onEnterDungeon=fn},
  returnFromDungeon,
+ fp:surfaceFPControl,
  // ---- editor / debug API ----
  api:{
   reseed,
@@ -12440,6 +12888,20 @@ return {
   collapseBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;ruinBuilding(b);return {decay:b.decay||0,ruined:!!b.ruined};},
   advanceDecay:(id)=>{const b=buildings.find(x=>x.id===id);if(!b)return null;if(!b.decay){ruinBuilding(b);}else{decayBuilding(b,Math.min(3,b.decay+1));}return {decay:b.decay||0,ruined:!!b.ruined,solid:struct[idx(b.x,b.y)]===S_RUIN};},
   enterBuilding:(id)=>{const b=buildings.find(x=>x.id===id);if(!b||b.gone||!b.done)return null;if(b.ruined&&!(b.decay===1||b.decay===2))return null;enterInterior(b);return interior?{gw:interior.gw,gh:interior.gh,decay:interior.decay||0,hasBg:!!interior.bg,occupants:interior.occupants.map(o=>o.name),foes:interior.foes?interior.foes.length:0,traps:interior.traps?interior.traps.length:0,loot:interior.loot?interior.loot.length:0,solidCount:Array.prototype.reduce.call(interior.solid,(a,v)=>a+v,0),border:2*(interior.gw+interior.gh)-4}:null;},
+  fpToggle:()=>{toggleSurfaceFP();return sfpActive;},
+  fpSet:(on)=>{setSurfaceFP(on);return sfpActive;},
+  fpLook:(dy)=>{sfpYaw+=dy;},
+  fpStandNear:(tx,ty)=>{ let best=null,bd=1e9;
+    for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){ const i=idx(x,y);
+      if(map[i]!==0||bld[i]>=0||(water&&water[i]))continue;
+      const d=(x-tx)*(x-tx)+(y-ty)*(y-ty); if(d<bd){bd=d;best=[x,y];} }
+    if(best){hero.x=best[0]*TILE+TILE/2;hero.y=best[1]*TILE+TILE/2;} return best; },
+  fpCenterHero:()=>{ if(!interior)return false; const cxr=interior.gw/2, cyr=interior.gh/2; let best=null,bd=1e9;
+    const m=interior.wallMask||interior.solid;
+    for(let y=1;y<interior.gh-1;y++)for(let x=1;x<interior.gw-1;x++){ if(m[interior.si(x,y)])continue;
+      const d=(x-cxr)*(x-cxr)+(y-cyr)*(y-cyr); if(d<bd){bd=d;best=[x,y];} }
+    if(best){hero.x=best[0]*TILE+TILE/2;hero.y=best[1]*TILE+TILE/2;} return !!best; },
+  fpInfo:()=>({active:sfpActive,scene:interior?'interior':'overworld',yaw:+sfpYaw.toFixed(2),pitch:+sfpPitch.toFixed(1),atlas:!!(interior?sfpAtlasI:sfpAtlasO),mat:interior?sfpMatI:worldTheme,sprites:!sfpActive?0:(interior?intFPSprites().length:owSprites().length),fpw:FPView.W,fph:FPView.H}),
   exitBuilding:()=>{if(interior)exitInterior();return !interior;},
   farmCount:()=>farmTiles.size,
   farmAbandonSet:(radius)=>{ // TEST: convert some open tiles far from villages into farm plots to exercise decay
@@ -14577,12 +15039,16 @@ function enter(info, onExit){
   startFloor();
   updateCamera(true);
   last=performance.now();
+  fpBindOnce(); setDungeonFP(false);
+  const fb=$('fpToggle'); if(fb) fb.classList.remove('hidden');
   $('dHint').style.opacity=1;
   setTimeout(()=>{ $('dHint').style.opacity=0; },8000);
 }
 function exitDungeon(){
   if(!active)return;
   active=false;
+  setDungeonFP(false);
+  { const fb=$('fpToggle'); if(fb) fb.classList.add('hidden'); }
   syncToHero();
   gamePaused=false; dialogQueue=null;
   $('dDialog').style.display='none';
@@ -14592,6 +15058,139 @@ function exitDungeon(){
   const cb=exitCb; exitCb=null;
   if(cb)cb(results);
 }
+/* ============================================================
+   FIRST PERSON — dungeon adapter over the shared FPView raycaster.
+   A wall is any high/face/block cell; open tiles floor-cast, with a
+   low dark ceiling. Enemies, loot, rubble, flora and portals become
+   z-buffered billboards. Toggled freely with the FP button or 'V'.
+   ============================================================ */
+let fpActive=false, fpAtlas=null, fpAtlasTheme=null, fpYaw=0, fpPitch=0;
+let fpLastW=0, fpLastH=0, fpBound=false;
+const fpBill=new Map();
+
+function buildDungeonFPAtlas(){
+  const cyber=(T.worldTheme==='cyberpunk');
+  const specs = cyber ? [
+    {base:'#1a2630',dark:'#0a1119',light:'#294a5c',vein:'#6ef0c0',pattern:'rubble'}, // 0 wall
+    {base:'#12202a',dark:'#0a141b',light:'#1d3644',pattern:'grid',accent:'#2a6f6a'}, // 1 floor
+    {base:'#0a0f14',dark:'#05080b',light:'#12202a',pattern:'flat'},                  // 2 ceiling
+    {base:'#173a34',dark:'#0a201c',light:'#2a6f66',pattern:'rubble'}                 // 3 structure
+  ] : [
+    {base:'#3a2a22',dark:'#1c1410',light:'#5a4436',pattern:'rubble'},                // 0 wall
+    {base:'#463a2e',dark:'#2b2119',light:'#63523d',pattern:'floor'},                 // 1 floor
+    {base:'#0e0b08',dark:'#070504',light:'#1a140e',pattern:'flat'},                  // 2 ceiling
+    {base:'#4a3b30',dark:'#241a12',light:'#66513c',pattern:'rubble'}                 // 3 structure
+  ];
+  fpAtlas=FPView.bakeAtlas(specs, (hashSeed(worldSeed)>>>0)||7);
+  fpAtlasTheme=T.worldTheme||'default';
+}
+function fpSolid(cx,cy){
+  if(cx<0||cy<0||cx>=COLS||cy>=ROWS) return true;
+  const i=cy*COLS+cx;
+  return !!(highCellArr[i]||faceCellArr[i]||blockGrid[i]);
+}
+function fpWallTex(cx,cy){ return blockGrid[cy*COLS+cx]?3:0; }
+function fpFloorTex(){ return 1; }
+function fpCeilTex(){ return 2; }
+function fpGlow(cx,cy){
+  const p=portalDown||portalUp;
+  if(portalDown&&Math.hypot((cx+0.5)*RES-portalDown.x,(cy+0.5)*RES-portalDown.y)<RES*2)
+    return {amt:0.5,col:[0.3,1,0.9]};
+  if(portalUp&&Math.hypot((cx+0.5)*RES-portalUp.x,(cy+0.5)*RES-portalUp.y)<RES*2)
+    return {amt:0.4,col:[1,0.85,0.4]};
+  return null;
+}
+function fpStaticFrame(spr){
+  if(!spr||!spr.FRAMES) return null;
+  const F=spr.FRAMES.walk||spr.FRAMES.idle||spr.FRAMES.talk||Object.values(spr.FRAMES)[0];
+  if(!F) return null;
+  const arr=F[0]||Object.values(F)[0];
+  return (arr&&arr[0])||null;
+}
+function fpCachedShape(key,draw,s){
+  if(fpBill.has(key)) return fpBill.get(key);
+  s=s||22; const c=document.createElement('canvas'); c.width=s; c.height=s;
+  const g=c.getContext('2d'); draw(g,s);
+  fpBill.set(key,c); return c;
+}
+function fpBillEnemy(e){
+  const spr=enemySprite(e);
+  if(spr){ const f=fpStaticFrame(spr); if(f)return f; }
+  const col=e.isBoss?'#a63a5f':(e.big?'#c04a7e':(e.wisp?'#5fb0d0':'#8f4ac0'));
+  return fpCachedShape('blob:'+col,(g,s)=>{ g.fillStyle=col; g.beginPath();
+    g.arc(s/2,s*0.55,s*0.36,0,6.28); g.fill();
+    g.fillStyle='#0b0810'; g.fillRect(s*0.38,s*0.42,2,2); g.fillRect(s*0.56,s*0.42,2,2); });
+}
+function dungeonFPSprites(){
+  const out=[], R=RES;
+  for(const e of enemies){ if(e.dead)continue; const cv=fpBillEnemy(e); if(cv)
+    out.push({x:e.x/R,y:e.y/R,cv,w:cv.width,h:cv.height,scale:e.isBoss?1.6:(e.big?1.15:0.9)}); }
+  for(const tr of treasures){ if(tr.got)continue; const col=tr.chrome?'#7de3ff':'#ffd166';
+    const cv=fpCachedShape('gem:'+col,(g,s)=>{ g.fillStyle=col; g.shadowColor=col; g.shadowBlur=6;
+      g.beginPath(); g.moveTo(s/2,s*0.28); g.lineTo(s*0.7,s*0.5); g.lineTo(s/2,s*0.72); g.lineTo(s*0.3,s*0.5); g.closePath(); g.fill(); });
+    out.push({x:tr.x/R,y:tr.y/R,cv,w:cv.width,h:cv.height,scale:0.5,yOff:-0.22}); }
+  for(const r of rubble){ const cv=fpCachedShape('rub',(g,s)=>{ g.fillStyle='#6a5a4c';
+    g.beginPath(); g.moveTo(s*0.2,s*0.78); g.lineTo(s*0.34,s*0.4); g.lineTo(s*0.6,s*0.34);
+    g.lineTo(s*0.8,s*0.6); g.lineTo(s*0.74,s*0.8); g.closePath(); g.fill();
+    g.fillStyle='#4a3d33'; g.fillRect(s*0.4,s*0.5,s*0.16,2); });
+    out.push({x:r.x/R,y:r.y/R,cv,w:cv.width,h:cv.height,scale:0.6}); }
+  for(const cp of cavePlants){ const cv=fpCachedShape('flora',(g,s)=>{ g.strokeStyle='#5fae6a';
+    g.lineWidth=2; for(let k=-1;k<2;k++){ g.beginPath(); g.moveTo(s/2,s*0.8);
+    g.quadraticCurveTo(s/2+k*6,s*0.5,s/2+k*9,s*0.28); g.stroke(); }
+    g.fillStyle='#8fe0a0'; g.beginPath(); g.arc(s/2,s*0.26,3,0,6.28); g.fill(); });
+    out.push({x:cp.x/R,y:cp.y/R,cv,w:cv.width,h:cv.height,scale:0.7}); }
+  for(const n of npcs){ const spr=ensureKeeperSprite(); const f=fpStaticFrame(spr);
+    if(f) out.push({x:n.x/R,y:n.y/R,cv:f,w:f.width,h:f.height,scale:0.95}); }
+  for(const p of [portalDown,portalUp]){ if(!p)continue; const up=(p===portalUp);
+    const col=up?'#ffd166':'#6ef0c0';
+    const cv=fpCachedShape('portal:'+col,(g,s)=>{ g.strokeStyle=col; g.lineWidth=3; g.shadowColor=col;
+      g.shadowBlur=10; g.beginPath(); g.ellipse(s/2,s*0.5,s*0.28,s*0.42,0,0,6.28); g.stroke(); },28);
+    out.push({x:p.x/R,y:p.y/R,cv,w:cv.width,h:cv.height,scale:1.5}); }
+  return out;
+}
+const dungeonFPAdapter={
+  outdoor:false, fov:0.72, ceilFallback:2, floorFallback:1,
+  get MW(){return COLS}, get MH(){return ROWS},
+  get atlas(){return fpAtlas},
+  solid:fpSolid, wallTex:fpWallTex, floorTex:fpFloorTex, ceilTex:fpCeilTex, glowAt:fpGlow,
+  light:d=>0.06+1.3/(1+0.14*d*d),
+  cam:()=>({x:player.x/RES,y:player.y/RES,yaw:fpYaw,pitch:fpPitch}),
+  sprites:dungeonFPSprites
+};
+function renderDungeonFP(){
+  if(!fpAtlas||fpAtlasTheme!==(T.worldTheme||'default')) buildDungeonFPAtlas();
+  if(fpLastW!==W||fpLastH!==H){ FPView.resize(W,H); fpLastW=W; fpLastH=H; }
+  FPView.render(dungeonFPAdapter);
+  const who=$('fpWho'); if(who) who.textContent=(dInfo?dInfo.name:'THE UNDERSTORY')+' · floor '+(floorIdx+1);
+  const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,player.hp));
+}
+function setDungeonFP(on){
+  fpActive=!!on;
+  const ui=$('fpui'), btn=$('fpToggle');
+  if(fpActive){ fpYaw=player.face||0; FPView.mount($('cvFP')); FPView.resize(W,H); fpLastW=W; fpLastH=H;
+    if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); renderDungeonFP(); }
+  else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
+}
+function toggleDungeonFP(){ setDungeonFP(!fpActive); }
+const dungeonFPControl={
+  get active(){ return fpActive; },
+  set(on){ setDungeonFP(on); },
+  toggle(){ toggleDungeonFP(); },
+  look(dyaw,dpitch){ fpYaw+=dyaw; player.face=fpYaw;
+    if(dpitch!==undefined){ const lim=FPView.H*0.4; fpPitch=Math.max(-lim,Math.min(lim,fpPitch+dpitch)); } },
+  step(fwd,strafe,dt){ if(!fpActive||player.falling||dead)return;
+    const spd=PLAYER_SPEED*player.speedMul*(buffs.swift>0?1.45:1);
+    const c=Math.cos(fpYaw), s=Math.sin(fpYaw);
+    const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
+    moveWithCollision(player, vx, vy); player.face=fpYaw;
+    if(fwd||strafe){ player.dir=CFHelp.angToDir(fpYaw); player.anim='walk'; player.animClock+=dt; } },
+  strike(){ if(fpActive) doSlash(fpYaw); } };
+function fpBindOnce(){
+  if(fpBound) return; fpBound=true;
+  const btn=$('fpToggle'); if(btn) btn.addEventListener('click',()=>{ if(active) toggleDungeonFP(); });
+  addEventListener('keydown',e=>{ if(active&&(e.key==='v'||e.key==='V')) toggleDungeonFP(); });
+}
+
 let last=performance.now();
 function frame(now){
   if(!active)return;
@@ -14599,10 +15198,12 @@ function frame(now){
   promotePending();
   if(hitstop>0){ hitstop-=dt; dt*=0.12; }
   if(!gamePaused) update(dt);
-  if(active) draw(now/1000);
+  if(!active) return;
+  if(fpActive) renderDungeonFP(); else draw(now/1000);
 }
 return {
   enter, frame, exit:exitDungeon,
+  fp:dungeonFPControl,
   get active(){return active},
   // small debug/cheat surface — used by smoke tests and the curious
   debug:{
@@ -14611,6 +15212,13 @@ return {
     get flora(){return {trees:trees.length, cavePlants:cavePlants.length, dungTech:dungTech.length}},
     get rubbleInfo(){return {count:rubble.length, treasures:treasures.length, enemyCap:(11+Math.min(12,player.level)+floorIdx*2+(cleansedRun?4:0)+(!hasObjective()?6:0)), freeRoam:!hasObjective()}},
     smashRubble(){ let n=0; for(const r of rubble){ rubbleGrid[r.cy*COLS+r.cx]=0; if(r.drop)treasures.push({x:r.x,y:r.y,t:0,chrome:false,got:false}); n++; } rubble=[]; return n; },
+    fpToggle(){ toggleDungeonFP(); return fpActive; },
+    fpSet(on){ setDungeonFP(on); return fpActive; },
+    get fpActive(){ return fpActive; },
+    fpLook(dy){ fpYaw+=dy; },
+    fpPitchBy(dp){ fpPitch=Math.max(-FPView.H*0.4,Math.min(FPView.H*0.4,fpPitch+dp)); },
+    get fpInfo(){ return {active:fpActive, yaw:+fpYaw.toFixed(2), pitch:+fpPitch.toFixed(1),
+      atlas:!!fpAtlas, sprites:fpActive?dungeonFPSprites().length:0, fpw:FPView.W, fph:FPView.H}; },
     reachRubble(){ const r=rubble[0]; if(!r)return false; player.x=r.x+RES*1.4; player.y=r.y; return true; },
     get rescue(){return {objKind:objKind(), npcs:npcs.length, rescueNpcs:npcs.filter(n=>n.rescue).length, found:npcs.some(n=>n.rescue&&n.found), rescuedSoul, cleansed:cleansedRun}},
     reachRescue(){ const n=npcs.find(x=>x.rescue); if(n){ player.x=n.x; player.y=n.y; } return !!n; },
@@ -15051,9 +15659,72 @@ function showSurface(){
 }
 function showDungeon(){
   mode='dungeon';
+  if(Surface.fp)Surface.fp.set(false);     // leave overworld first-person behind
   sui.classList.add('hidden');
   dui.classList.remove('hidden');
   Editor.setOpen(false);
+}
+
+/* ============================================================
+   FIRST-PERSON CONTROLS — one input layer over whichever scene is
+   active. Drag to look, WASD / arrows (or a left-thumb stick) to
+   move along the gaze, tap or space to strike.
+   ============================================================ */
+function activeFP(){
+  const m=(mode==='dungeon')?Dungeon.fp:Surface.fp;
+  return (m&&m.active)?m:null;
+}
+const fpKeys=new Set();
+const MOVEK=['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'];
+addEventListener('keydown',e=>{
+  const k=(e.key||'').toLowerCase();
+  if(MOVEK.includes(k)){ if(activeFP()){ fpKeys.add(k); e.preventDefault(); } }
+  else if((k===' '||k==='enter')){ const fp=activeFP(); if(fp){ fp.strike(); e.preventDefault(); } }
+});
+addEventListener('keyup',e=>fpKeys.delete((e.key||'').toLowerCase()));
+(function bindFPPointer(){
+  const cvFP=document.getElementById('cvFP'); if(!cvFP)return;
+  let lookPtr=null, tap=null;
+  window.__fpMove=null;
+  cvFP.addEventListener('pointerdown',e=>{
+    if(!activeFP())return; try{cvFP.setPointerCapture(e.pointerId);}catch(_){}
+    if(e.clientX<innerWidth*0.4 && !window.__fpMove){ window.__fpMove={id:e.pointerId,ox:e.clientX,oy:e.clientY,x:e.clientX,y:e.clientY}; }
+    else { lookPtr={id:e.pointerId,x:e.clientX,y:e.clientY}; tap={t:performance.now(),moved:0}; }
+    e.preventDefault();
+  });
+  cvFP.addEventListener('pointermove',e=>{
+    const fp=activeFP(); if(!fp)return;
+    if(lookPtr&&e.pointerId===lookPtr.id){ const dx=e.clientX-lookPtr.x, dy=e.clientY-lookPtr.y;
+      lookPtr.x=e.clientX; lookPtr.y=e.clientY; fp.look(dx*0.005,-dy*0.55); if(tap)tap.moved+=Math.abs(dx)+Math.abs(dy); }
+    const mv=window.__fpMove; if(mv&&e.pointerId===mv.id){ mv.x=e.clientX; mv.y=e.clientY; }
+  });
+  const end=e=>{
+    if(lookPtr&&e.pointerId===lookPtr.id){ if(tap&&tap.moved<7&&performance.now()-tap.t<300){ const fp=activeFP(); if(fp)fp.strike(); } lookPtr=null; tap=null; }
+    const mv=window.__fpMove; if(mv&&e.pointerId===mv.id) window.__fpMove=null;
+  };
+  cvFP.addEventListener('pointerup',end);
+  cvFP.addEventListener('pointercancel',end);
+  const sb=document.getElementById('fpStrike');
+  if(sb)sb.addEventListener('pointerdown',e=>{ const fp=activeFP(); if(fp){fp.strike(); e.preventDefault(); e.stopPropagation();} });
+})();
+// fade the control hint a few seconds after first entering first person
+let fpHintTimer=null;
+function fpHintPoke(){ const h=document.getElementById('fpHint'); if(!h)return;
+  h.classList.remove('gone'); clearTimeout(fpHintTimer);
+  fpHintTimer=setTimeout(()=>h.classList.add('gone'),4200); }
+window.fpHintPoke=fpHintPoke;
+let fpLastT=0;
+function applyFPInput(t){
+  const fp=activeFP(); if(!fp){ fpLastT=t; return; }
+  const dt=Math.min(0.05,(t-fpLastT)/1000)||0.016; fpLastT=t;
+  let fwd=0,strafe=0;
+  if(fpKeys.has('w')||fpKeys.has('arrowup'))fwd+=1;
+  if(fpKeys.has('s')||fpKeys.has('arrowdown'))fwd-=1;
+  if(fpKeys.has('d')||fpKeys.has('arrowright'))strafe+=1;
+  if(fpKeys.has('a')||fpKeys.has('arrowleft'))strafe-=1;
+  const mv=window.__fpMove;
+  if(mv){ const R=46; fwd+=Math.max(-1,Math.min(1,-(mv.y-mv.oy)/R)); strafe+=Math.max(-1,Math.min(1,(mv.x-mv.ox)/R)); }
+  if(fwd||strafe){ const L=Math.hypot(fwd,strafe)||1; fp.step(fwd/L,strafe/L,dt); }
 }
 
 Surface.onEnterDungeon=(dun)=>{
@@ -15072,6 +15743,7 @@ Surface.onEnterDungeon=(dun)=>{
 let loopErrs=0;
 function loop(t){
   try{
+    applyFPInput(t);
     if(mode==='surface')Surface.frame(t);
     else Dungeon.frame(t);
   }catch(e){

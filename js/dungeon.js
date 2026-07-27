@@ -2058,12 +2058,16 @@ function enter(info, onExit){
   startFloor();
   updateCamera(true);
   last=performance.now();
+  fpBindOnce(); setDungeonFP(false);
+  const fb=$('fpToggle'); if(fb) fb.classList.remove('hidden');
   $('dHint').style.opacity=1;
   setTimeout(()=>{ $('dHint').style.opacity=0; },8000);
 }
 function exitDungeon(){
   if(!active)return;
   active=false;
+  setDungeonFP(false);
+  { const fb=$('fpToggle'); if(fb) fb.classList.add('hidden'); }
   syncToHero();
   gamePaused=false; dialogQueue=null;
   $('dDialog').style.display='none';
@@ -2073,6 +2077,139 @@ function exitDungeon(){
   const cb=exitCb; exitCb=null;
   if(cb)cb(results);
 }
+/* ============================================================
+   FIRST PERSON — dungeon adapter over the shared FPView raycaster.
+   A wall is any high/face/block cell; open tiles floor-cast, with a
+   low dark ceiling. Enemies, loot, rubble, flora and portals become
+   z-buffered billboards. Toggled freely with the FP button or 'V'.
+   ============================================================ */
+let fpActive=false, fpAtlas=null, fpAtlasTheme=null, fpYaw=0, fpPitch=0;
+let fpLastW=0, fpLastH=0, fpBound=false;
+const fpBill=new Map();
+
+function buildDungeonFPAtlas(){
+  const cyber=(T.worldTheme==='cyberpunk');
+  const specs = cyber ? [
+    {base:'#1a2630',dark:'#0a1119',light:'#294a5c',vein:'#6ef0c0',pattern:'rubble'}, // 0 wall
+    {base:'#12202a',dark:'#0a141b',light:'#1d3644',pattern:'grid',accent:'#2a6f6a'}, // 1 floor
+    {base:'#0a0f14',dark:'#05080b',light:'#12202a',pattern:'flat'},                  // 2 ceiling
+    {base:'#173a34',dark:'#0a201c',light:'#2a6f66',pattern:'rubble'}                 // 3 structure
+  ] : [
+    {base:'#3a2a22',dark:'#1c1410',light:'#5a4436',pattern:'rubble'},                // 0 wall
+    {base:'#463a2e',dark:'#2b2119',light:'#63523d',pattern:'floor'},                 // 1 floor
+    {base:'#0e0b08',dark:'#070504',light:'#1a140e',pattern:'flat'},                  // 2 ceiling
+    {base:'#4a3b30',dark:'#241a12',light:'#66513c',pattern:'rubble'}                 // 3 structure
+  ];
+  fpAtlas=FPView.bakeAtlas(specs, (hashSeed(worldSeed)>>>0)||7);
+  fpAtlasTheme=T.worldTheme||'default';
+}
+function fpSolid(cx,cy){
+  if(cx<0||cy<0||cx>=COLS||cy>=ROWS) return true;
+  const i=cy*COLS+cx;
+  return !!(highCellArr[i]||faceCellArr[i]||blockGrid[i]);
+}
+function fpWallTex(cx,cy){ return blockGrid[cy*COLS+cx]?3:0; }
+function fpFloorTex(){ return 1; }
+function fpCeilTex(){ return 2; }
+function fpGlow(cx,cy){
+  const p=portalDown||portalUp;
+  if(portalDown&&Math.hypot((cx+0.5)*RES-portalDown.x,(cy+0.5)*RES-portalDown.y)<RES*2)
+    return {amt:0.5,col:[0.3,1,0.9]};
+  if(portalUp&&Math.hypot((cx+0.5)*RES-portalUp.x,(cy+0.5)*RES-portalUp.y)<RES*2)
+    return {amt:0.4,col:[1,0.85,0.4]};
+  return null;
+}
+function fpStaticFrame(spr){
+  if(!spr||!spr.FRAMES) return null;
+  const F=spr.FRAMES.walk||spr.FRAMES.idle||spr.FRAMES.talk||Object.values(spr.FRAMES)[0];
+  if(!F) return null;
+  const arr=F[0]||Object.values(F)[0];
+  return (arr&&arr[0])||null;
+}
+function fpCachedShape(key,draw,s){
+  if(fpBill.has(key)) return fpBill.get(key);
+  s=s||22; const c=document.createElement('canvas'); c.width=s; c.height=s;
+  const g=c.getContext('2d'); draw(g,s);
+  fpBill.set(key,c); return c;
+}
+function fpBillEnemy(e){
+  const spr=enemySprite(e);
+  if(spr){ const f=fpStaticFrame(spr); if(f)return f; }
+  const col=e.isBoss?'#a63a5f':(e.big?'#c04a7e':(e.wisp?'#5fb0d0':'#8f4ac0'));
+  return fpCachedShape('blob:'+col,(g,s)=>{ g.fillStyle=col; g.beginPath();
+    g.arc(s/2,s*0.55,s*0.36,0,6.28); g.fill();
+    g.fillStyle='#0b0810'; g.fillRect(s*0.38,s*0.42,2,2); g.fillRect(s*0.56,s*0.42,2,2); });
+}
+function dungeonFPSprites(){
+  const out=[], R=RES;
+  for(const e of enemies){ if(e.dead)continue; const cv=fpBillEnemy(e); if(cv)
+    out.push({x:e.x/R,y:e.y/R,cv,w:cv.width,h:cv.height,scale:e.isBoss?1.6:(e.big?1.15:0.9)}); }
+  for(const tr of treasures){ if(tr.got)continue; const col=tr.chrome?'#7de3ff':'#ffd166';
+    const cv=fpCachedShape('gem:'+col,(g,s)=>{ g.fillStyle=col; g.shadowColor=col; g.shadowBlur=6;
+      g.beginPath(); g.moveTo(s/2,s*0.28); g.lineTo(s*0.7,s*0.5); g.lineTo(s/2,s*0.72); g.lineTo(s*0.3,s*0.5); g.closePath(); g.fill(); });
+    out.push({x:tr.x/R,y:tr.y/R,cv,w:cv.width,h:cv.height,scale:0.5,yOff:-0.22}); }
+  for(const r of rubble){ const cv=fpCachedShape('rub',(g,s)=>{ g.fillStyle='#6a5a4c';
+    g.beginPath(); g.moveTo(s*0.2,s*0.78); g.lineTo(s*0.34,s*0.4); g.lineTo(s*0.6,s*0.34);
+    g.lineTo(s*0.8,s*0.6); g.lineTo(s*0.74,s*0.8); g.closePath(); g.fill();
+    g.fillStyle='#4a3d33'; g.fillRect(s*0.4,s*0.5,s*0.16,2); });
+    out.push({x:r.x/R,y:r.y/R,cv,w:cv.width,h:cv.height,scale:0.6}); }
+  for(const cp of cavePlants){ const cv=fpCachedShape('flora',(g,s)=>{ g.strokeStyle='#5fae6a';
+    g.lineWidth=2; for(let k=-1;k<2;k++){ g.beginPath(); g.moveTo(s/2,s*0.8);
+    g.quadraticCurveTo(s/2+k*6,s*0.5,s/2+k*9,s*0.28); g.stroke(); }
+    g.fillStyle='#8fe0a0'; g.beginPath(); g.arc(s/2,s*0.26,3,0,6.28); g.fill(); });
+    out.push({x:cp.x/R,y:cp.y/R,cv,w:cv.width,h:cv.height,scale:0.7}); }
+  for(const n of npcs){ const spr=ensureKeeperSprite(); const f=fpStaticFrame(spr);
+    if(f) out.push({x:n.x/R,y:n.y/R,cv:f,w:f.width,h:f.height,scale:0.95}); }
+  for(const p of [portalDown,portalUp]){ if(!p)continue; const up=(p===portalUp);
+    const col=up?'#ffd166':'#6ef0c0';
+    const cv=fpCachedShape('portal:'+col,(g,s)=>{ g.strokeStyle=col; g.lineWidth=3; g.shadowColor=col;
+      g.shadowBlur=10; g.beginPath(); g.ellipse(s/2,s*0.5,s*0.28,s*0.42,0,0,6.28); g.stroke(); },28);
+    out.push({x:p.x/R,y:p.y/R,cv,w:cv.width,h:cv.height,scale:1.5}); }
+  return out;
+}
+const dungeonFPAdapter={
+  outdoor:false, fov:0.72, ceilFallback:2, floorFallback:1,
+  get MW(){return COLS}, get MH(){return ROWS},
+  get atlas(){return fpAtlas},
+  solid:fpSolid, wallTex:fpWallTex, floorTex:fpFloorTex, ceilTex:fpCeilTex, glowAt:fpGlow,
+  light:d=>0.06+1.3/(1+0.14*d*d),
+  cam:()=>({x:player.x/RES,y:player.y/RES,yaw:fpYaw,pitch:fpPitch}),
+  sprites:dungeonFPSprites
+};
+function renderDungeonFP(){
+  if(!fpAtlas||fpAtlasTheme!==(T.worldTheme||'default')) buildDungeonFPAtlas();
+  if(fpLastW!==W||fpLastH!==H){ FPView.resize(W,H); fpLastW=W; fpLastH=H; }
+  FPView.render(dungeonFPAdapter);
+  const who=$('fpWho'); if(who) who.textContent=(dInfo?dInfo.name:'THE UNDERSTORY')+' · floor '+(floorIdx+1);
+  const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,player.hp));
+}
+function setDungeonFP(on){
+  fpActive=!!on;
+  const ui=$('fpui'), btn=$('fpToggle');
+  if(fpActive){ fpYaw=player.face||0; FPView.mount($('cvFP')); FPView.resize(W,H); fpLastW=W; fpLastH=H;
+    if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); renderDungeonFP(); }
+  else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
+}
+function toggleDungeonFP(){ setDungeonFP(!fpActive); }
+const dungeonFPControl={
+  get active(){ return fpActive; },
+  set(on){ setDungeonFP(on); },
+  toggle(){ toggleDungeonFP(); },
+  look(dyaw,dpitch){ fpYaw+=dyaw; player.face=fpYaw;
+    if(dpitch!==undefined){ const lim=FPView.H*0.4; fpPitch=Math.max(-lim,Math.min(lim,fpPitch+dpitch)); } },
+  step(fwd,strafe,dt){ if(!fpActive||player.falling||dead)return;
+    const spd=PLAYER_SPEED*player.speedMul*(buffs.swift>0?1.45:1);
+    const c=Math.cos(fpYaw), s=Math.sin(fpYaw);
+    const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
+    moveWithCollision(player, vx, vy); player.face=fpYaw;
+    if(fwd||strafe){ player.dir=CFHelp.angToDir(fpYaw); player.anim='walk'; player.animClock+=dt; } },
+  strike(){ if(fpActive) doSlash(fpYaw); } };
+function fpBindOnce(){
+  if(fpBound) return; fpBound=true;
+  const btn=$('fpToggle'); if(btn) btn.addEventListener('click',()=>{ if(active) toggleDungeonFP(); });
+  addEventListener('keydown',e=>{ if(active&&(e.key==='v'||e.key==='V')) toggleDungeonFP(); });
+}
+
 let last=performance.now();
 function frame(now){
   if(!active)return;
@@ -2080,10 +2217,12 @@ function frame(now){
   promotePending();
   if(hitstop>0){ hitstop-=dt; dt*=0.12; }
   if(!gamePaused) update(dt);
-  if(active) draw(now/1000);
+  if(!active) return;
+  if(fpActive) renderDungeonFP(); else draw(now/1000);
 }
 return {
   enter, frame, exit:exitDungeon,
+  fp:dungeonFPControl,
   get active(){return active},
   // small debug/cheat surface — used by smoke tests and the curious
   debug:{
@@ -2092,6 +2231,13 @@ return {
     get flora(){return {trees:trees.length, cavePlants:cavePlants.length, dungTech:dungTech.length}},
     get rubbleInfo(){return {count:rubble.length, treasures:treasures.length, enemyCap:(11+Math.min(12,player.level)+floorIdx*2+(cleansedRun?4:0)+(!hasObjective()?6:0)), freeRoam:!hasObjective()}},
     smashRubble(){ let n=0; for(const r of rubble){ rubbleGrid[r.cy*COLS+r.cx]=0; if(r.drop)treasures.push({x:r.x,y:r.y,t:0,chrome:false,got:false}); n++; } rubble=[]; return n; },
+    fpToggle(){ toggleDungeonFP(); return fpActive; },
+    fpSet(on){ setDungeonFP(on); return fpActive; },
+    get fpActive(){ return fpActive; },
+    fpLook(dy){ fpYaw+=dy; },
+    fpPitchBy(dp){ fpPitch=Math.max(-FPView.H*0.4,Math.min(FPView.H*0.4,fpPitch+dp)); },
+    get fpInfo(){ return {active:fpActive, yaw:+fpYaw.toFixed(2), pitch:+fpPitch.toFixed(1),
+      atlas:!!fpAtlas, sprites:fpActive?dungeonFPSprites().length:0, fpw:FPView.W, fph:FPView.H}; },
     reachRubble(){ const r=rubble[0]; if(!r)return false; player.x=r.x+RES*1.4; player.y=r.y; return true; },
     get rescue(){return {objKind:objKind(), npcs:npcs.length, rescueNpcs:npcs.filter(n=>n.rescue).length, found:npcs.some(n=>n.rescue&&n.found), rescuedSoul, cleansed:cleansedRun}},
     reachRescue(){ const n=npcs.find(x=>x.rescue); if(n){ player.x=n.x; player.y=n.y; } return !!n; },
