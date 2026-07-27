@@ -23,6 +23,11 @@ button:active{transform:translateY(1px)}
 #fpHp{position:absolute;bottom:calc(12px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;font-size:15px;color:#ff8fa3;text-shadow:0 1px 2px #000}
 #fpToggle{position:fixed;z-index:45;right:8px;bottom:calc(70px + env(safe-area-inset-bottom));font-size:12px;letter-spacing:.08em;opacity:.9}
 #fpToggle.on{background:linear-gradient(#0f3a30,#0a2620);color:#6ef0c0;border-color:#1d7a63}
+#fpStrike{position:absolute;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));pointer-events:auto;z-index:42;
+  font-size:13px;letter-spacing:.1em;padding:14px 16px;border-radius:44px;background:linear-gradient(#7a2130,#4a141d);border:1px solid #2a0d12;color:#ffd9de;box-shadow:0 2px 0 #2a0d12}
+#fpStrike:active{transform:translateY(1px);box-shadow:none}
+#fpHint{position:absolute;left:0;right:0;bottom:calc(46px + env(safe-area-inset-bottom));text-align:center;font-size:10px;letter-spacing:.06em;color:rgba(220,230,220,.5);transition:opacity .6s;pointer-events:none}
+#fpHint.gone{opacity:0}
 
 /* ================= SURFACE (the garden) ================= */
 #cvS{position:fixed;inset:0;touch-action:none}
@@ -584,6 +589,8 @@ button:active{transform:translateY(1px)}
     <div id="fpCross">+</div>
     <div id="fpWho">&nbsp;</div>
     <div id="fpHp"></div>
+    <div id="fpHint">drag to look · WASD / left-thumb to move · tap to strike</div>
+    <button id="fpStrike">STRIKE</button>
   </div>
 </div>
 <button id="fpToggle" class="hidden" title="First person">FP</button>

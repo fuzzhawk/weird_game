@@ -2179,8 +2179,6 @@ const dungeonFPAdapter={
 function renderDungeonFP(){
   if(!fpAtlas||fpAtlasTheme!==(T.worldTheme||'default')) buildDungeonFPAtlas();
   if(fpLastW!==W||fpLastH!==H){ FPView.resize(W,H); fpLastW=W; fpLastH=H; }
-  let dd=(player.face||0)-fpYaw; while(dd>Math.PI)dd-=6.283185; while(dd<-Math.PI)dd+=6.283185;
-  fpYaw+=dd*0.25;
   FPView.render(dungeonFPAdapter);
   const who=$('fpWho'); if(who) who.textContent=(dInfo?dInfo.name:'THE UNDERSTORY')+' · floor '+(floorIdx+1);
   const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,player.hp));
@@ -2189,10 +2187,23 @@ function setDungeonFP(on){
   fpActive=!!on;
   const ui=$('fpui'), btn=$('fpToggle');
   if(fpActive){ fpYaw=player.face||0; FPView.mount($('cvFP')); FPView.resize(W,H); fpLastW=W; fpLastH=H;
-    if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); renderDungeonFP(); }
+    if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); renderDungeonFP(); }
   else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
 }
 function toggleDungeonFP(){ setDungeonFP(!fpActive); }
+const dungeonFPControl={
+  get active(){ return fpActive; },
+  set(on){ setDungeonFP(on); },
+  toggle(){ toggleDungeonFP(); },
+  look(dyaw,dpitch){ fpYaw+=dyaw; player.face=fpYaw;
+    if(dpitch!==undefined){ const lim=FPView.H*0.4; fpPitch=Math.max(-lim,Math.min(lim,fpPitch+dpitch)); } },
+  step(fwd,strafe,dt){ if(!fpActive||player.falling||dead)return;
+    const spd=PLAYER_SPEED*player.speedMul*(buffs.swift>0?1.45:1);
+    const c=Math.cos(fpYaw), s=Math.sin(fpYaw);
+    const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
+    moveWithCollision(player, vx, vy); player.face=fpYaw;
+    if(fwd||strafe){ player.dir=CFHelp.angToDir(fpYaw); player.anim='walk'; player.animClock+=dt; } },
+  strike(){ if(fpActive) doSlash(fpYaw); } };
 function fpBindOnce(){
   if(fpBound) return; fpBound=true;
   const btn=$('fpToggle'); if(btn) btn.addEventListener('click',()=>{ if(active) toggleDungeonFP(); });
@@ -2211,6 +2222,7 @@ function frame(now){
 }
 return {
   enter, frame, exit:exitDungeon,
+  fp:dungeonFPControl,
   get active(){return active},
   // small debug/cheat surface — used by smoke tests and the curious
   debug:{

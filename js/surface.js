@@ -6745,6 +6745,8 @@ function sfpShape(key,draw,s){
 const INT_FP_ATLAS={
  dungeon:[{base:'#2b2436',dark:'#161122',light:'#463a5c',pattern:'brick'},{base:'#241d2e',dark:'#140f1c',light:'#382c48',pattern:'floor'},{base:'#0c0a12',dark:'#060409',light:'#161122',pattern:'flat'},{base:'#3a2f4a',dark:'#201830',light:'#544a6c',pattern:'rubble'}],
  rustic:[{base:'#4a3628',dark:'#291c13',light:'#6a4f38',pattern:'brick'},{base:'#3c2e22',dark:'#241a12',light:'#54402e',pattern:'floor'},{base:'#0f0b07',dark:'#070503',light:'#1a130c',pattern:'flat'},{base:'#5a4530',dark:'#332417',light:'#755a3e',pattern:'rubble'}],
+ wood:[{base:'#5a422c',dark:'#332416',light:'#7a5c3c',pattern:'brick'},{base:'#4a3826',dark:'#2c2116',light:'#664e34',pattern:'floor'},{base:'#120c07',dark:'#090603',light:'#20160d',pattern:'flat'},{base:'#6a5238',dark:'#3d2e1e',light:'#8a6c48',pattern:'rubble'}],
+ concrete:[{base:'#40444a',dark:'#25282d',light:'#5c626a',pattern:'brick'},{base:'#34383e',dark:'#202329',light:'#4a4f57',pattern:'grid',accent:'#5a616a'},{base:'#0d0f12',dark:'#070809',light:'#181b1f',pattern:'flat'},{base:'#4a4e56',dark:'#2a2d33',light:'#646a74',pattern:'rubble'}],
  modern:[{base:'#3a4048',dark:'#20252b',light:'#586472',vein:'#8fb8d8',pattern:'brick'},{base:'#2b3138',dark:'#191d22',light:'#3d4650',pattern:'grid',accent:'#5b7488'},{base:'#0c0f12',dark:'#060809',light:'#161b20',pattern:'flat'},{base:'#454e58',dark:'#262c33',light:'#5f6b78',pattern:'rubble'}],
  cyber:[{base:'#182028',dark:'#0a1119',light:'#274454',vein:'#6ef0c0',pattern:'brick'},{base:'#111c24',dark:'#0a131a',light:'#1c3240',pattern:'grid',accent:'#2a6f6a'},{base:'#080d12',dark:'#04070a',light:'#12202a',pattern:'flat'},{base:'#173a34',dark:'#0a201c',light:'#2a6f66',vein:'#6ef0c0',pattern:'rubble'}],
  ancient:[{base:'#3f4636',dark:'#232819',light:'#5c6647',vein:'#9ad86b',pattern:'brick'},{base:'#333a26',dark:'#1f2417',light:'#48512f',pattern:'grass',accent:'#7bb04a'},{base:'#0c0f08',dark:'#060804',light:'#161a0e',pattern:'flat'},{base:'#4a533a',dark:'#2a3020',light:'#65714c',vein:'#9ad86b',pattern:'rubble'}]
@@ -6790,7 +6792,6 @@ function renderInteriorFP(){
  const mat=interior.mat||'rustic';
  if(!sfpAtlasI||sfpMatI!==mat) buildInteriorFPAtlas(mat);
  if(sfpLW!==cw||sfpLH!==ch){ FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch; }
- let dd=(hero.face||0)-sfpYaw; while(dd>Math.PI)dd-=6.283185; while(dd<-Math.PI)dd+=6.283185; sfpYaw+=dd*0.25;
  FPView.render(interiorFPAdapter);
  const who=$('fpWho'); if(who) who.textContent=(interior.b&&interior.b.tp?interior.b.tp.toUpperCase():'INTERIOR')+' · '+(interior.mat||'');
  const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
@@ -6851,18 +6852,30 @@ const overworldFPAdapter={
 function renderOverworldFP(){
   if(!sfpAtlasO||sfpOTheme!==worldTheme) buildOverworldFPAtlas();
   if(sfpLW!==cw||sfpLH!==ch){ FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch; }
-  let dd=(hero.face||0)-sfpYaw; while(dd>Math.PI)dd-=6.283185; while(dd<-Math.PI)dd+=6.283185; sfpYaw+=dd*0.25;
   FPView.render(overworldFPAdapter);
   const who=$('fpWho'); if(who) who.textContent='THE OPEN WORLD';
   const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
 }
 function sfpRender(){ if(interior)renderInteriorFP(); else renderOverworldFP(); }
+const surfaceFPControl={
+  get active(){ return sfpActive; },
+  set(on){ setSurfaceFP(on); },
+  toggle(){ toggleSurfaceFP(); },
+  look(dyaw,dpitch){ sfpYaw+=dyaw; hero.face=sfpYaw;
+    if(dpitch!==undefined){ const lim=FPView.H*0.4; sfpPitch=Math.max(-lim,Math.min(lim,sfpPitch+dpitch)); } },
+  step(fwd,strafe,dt){ if(!sfpActive||hero.down)return;
+    const spd=HERO_SPEED*(Hero.speedMul||1);
+    const c=Math.cos(sfpYaw), s=Math.sin(sfpYaw);
+    const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
+    moveHero(vx,vy); hero.face=sfpYaw;
+    if(fwd||strafe){ hero.dir=CFHelp.angToDir(sfpYaw); hero.moving=true; hero.anim='walk'; hero.animClock+=dt; } else hero.moving=false; },
+  strike(){ if(sfpActive) heroSlash(sfpYaw); } };
 
 function setSurfaceFP(on){
  sfpActive=!!on;
  const ui=$('fpui'), btn=$('fpToggle');
  if(sfpActive){ sfpYaw=hero.face||0; FPView.mount($('cvFP')); FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch;
-   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); sfpRender(); }
+   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); sfpRender(); }
  else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
 }
 function toggleSurfaceFP(){ setSurfaceFP(!sfpActive); }
@@ -8915,6 +8928,7 @@ return {
  skin:()=>surfSkin,   // the current world's ground/rock palette+texture, borrowed by the dungeon
  set onEnterDungeon(fn){onEnterDungeon=fn},
  returnFromDungeon,
+ fp:surfaceFPControl,
  // ---- editor / debug API ----
  api:{
   reseed,

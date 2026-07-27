@@ -23,6 +23,11 @@ button:active{transform:translateY(1px)}
 #fpHp{position:absolute;bottom:calc(12px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;font-size:15px;color:#ff8fa3;text-shadow:0 1px 2px #000}
 #fpToggle{position:fixed;z-index:45;right:8px;bottom:calc(70px + env(safe-area-inset-bottom));font-size:12px;letter-spacing:.08em;opacity:.9}
 #fpToggle.on{background:linear-gradient(#0f3a30,#0a2620);color:#6ef0c0;border-color:#1d7a63}
+#fpStrike{position:absolute;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));pointer-events:auto;z-index:42;
+  font-size:13px;letter-spacing:.1em;padding:14px 16px;border-radius:44px;background:linear-gradient(#7a2130,#4a141d);border:1px solid #2a0d12;color:#ffd9de;box-shadow:0 2px 0 #2a0d12}
+#fpStrike:active{transform:translateY(1px);box-shadow:none}
+#fpHint{position:absolute;left:0;right:0;bottom:calc(46px + env(safe-area-inset-bottom));text-align:center;font-size:10px;letter-spacing:.06em;color:rgba(220,230,220,.5);transition:opacity .6s;pointer-events:none}
+#fpHint.gone{opacity:0}
 
 /* ================= SURFACE (the garden) ================= */
 #cvS{position:fixed;inset:0;touch-action:none}
@@ -584,6 +589,8 @@ button:active{transform:translateY(1px)}
     <div id="fpCross">+</div>
     <div id="fpWho">&nbsp;</div>
     <div id="fpHp"></div>
+    <div id="fpHint">drag to look · WASD / left-thumb to move · tap to strike</div>
+    <button id="fpStrike">STRIKE</button>
   </div>
 </div>
 <button id="fpToggle" class="hidden" title="First person">FP</button>
@@ -10466,6 +10473,8 @@ function sfpShape(key,draw,s){
 const INT_FP_ATLAS={
  dungeon:[{base:'#2b2436',dark:'#161122',light:'#463a5c',pattern:'brick'},{base:'#241d2e',dark:'#140f1c',light:'#382c48',pattern:'floor'},{base:'#0c0a12',dark:'#060409',light:'#161122',pattern:'flat'},{base:'#3a2f4a',dark:'#201830',light:'#544a6c',pattern:'rubble'}],
  rustic:[{base:'#4a3628',dark:'#291c13',light:'#6a4f38',pattern:'brick'},{base:'#3c2e22',dark:'#241a12',light:'#54402e',pattern:'floor'},{base:'#0f0b07',dark:'#070503',light:'#1a130c',pattern:'flat'},{base:'#5a4530',dark:'#332417',light:'#755a3e',pattern:'rubble'}],
+ wood:[{base:'#5a422c',dark:'#332416',light:'#7a5c3c',pattern:'brick'},{base:'#4a3826',dark:'#2c2116',light:'#664e34',pattern:'floor'},{base:'#120c07',dark:'#090603',light:'#20160d',pattern:'flat'},{base:'#6a5238',dark:'#3d2e1e',light:'#8a6c48',pattern:'rubble'}],
+ concrete:[{base:'#40444a',dark:'#25282d',light:'#5c626a',pattern:'brick'},{base:'#34383e',dark:'#202329',light:'#4a4f57',pattern:'grid',accent:'#5a616a'},{base:'#0d0f12',dark:'#070809',light:'#181b1f',pattern:'flat'},{base:'#4a4e56',dark:'#2a2d33',light:'#646a74',pattern:'rubble'}],
  modern:[{base:'#3a4048',dark:'#20252b',light:'#586472',vein:'#8fb8d8',pattern:'brick'},{base:'#2b3138',dark:'#191d22',light:'#3d4650',pattern:'grid',accent:'#5b7488'},{base:'#0c0f12',dark:'#060809',light:'#161b20',pattern:'flat'},{base:'#454e58',dark:'#262c33',light:'#5f6b78',pattern:'rubble'}],
  cyber:[{base:'#182028',dark:'#0a1119',light:'#274454',vein:'#6ef0c0',pattern:'brick'},{base:'#111c24',dark:'#0a131a',light:'#1c3240',pattern:'grid',accent:'#2a6f6a'},{base:'#080d12',dark:'#04070a',light:'#12202a',pattern:'flat'},{base:'#173a34',dark:'#0a201c',light:'#2a6f66',vein:'#6ef0c0',pattern:'rubble'}],
  ancient:[{base:'#3f4636',dark:'#232819',light:'#5c6647',vein:'#9ad86b',pattern:'brick'},{base:'#333a26',dark:'#1f2417',light:'#48512f',pattern:'grass',accent:'#7bb04a'},{base:'#0c0f08',dark:'#060804',light:'#161a0e',pattern:'flat'},{base:'#4a533a',dark:'#2a3020',light:'#65714c',vein:'#9ad86b',pattern:'rubble'}]
@@ -10511,7 +10520,6 @@ function renderInteriorFP(){
  const mat=interior.mat||'rustic';
  if(!sfpAtlasI||sfpMatI!==mat) buildInteriorFPAtlas(mat);
  if(sfpLW!==cw||sfpLH!==ch){ FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch; }
- let dd=(hero.face||0)-sfpYaw; while(dd>Math.PI)dd-=6.283185; while(dd<-Math.PI)dd+=6.283185; sfpYaw+=dd*0.25;
  FPView.render(interiorFPAdapter);
  const who=$('fpWho'); if(who) who.textContent=(interior.b&&interior.b.tp?interior.b.tp.toUpperCase():'INTERIOR')+' · '+(interior.mat||'');
  const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
@@ -10572,18 +10580,30 @@ const overworldFPAdapter={
 function renderOverworldFP(){
   if(!sfpAtlasO||sfpOTheme!==worldTheme) buildOverworldFPAtlas();
   if(sfpLW!==cw||sfpLH!==ch){ FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch; }
-  let dd=(hero.face||0)-sfpYaw; while(dd>Math.PI)dd-=6.283185; while(dd<-Math.PI)dd+=6.283185; sfpYaw+=dd*0.25;
   FPView.render(overworldFPAdapter);
   const who=$('fpWho'); if(who) who.textContent='THE OPEN WORLD';
   const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
 }
 function sfpRender(){ if(interior)renderInteriorFP(); else renderOverworldFP(); }
+const surfaceFPControl={
+  get active(){ return sfpActive; },
+  set(on){ setSurfaceFP(on); },
+  toggle(){ toggleSurfaceFP(); },
+  look(dyaw,dpitch){ sfpYaw+=dyaw; hero.face=sfpYaw;
+    if(dpitch!==undefined){ const lim=FPView.H*0.4; sfpPitch=Math.max(-lim,Math.min(lim,sfpPitch+dpitch)); } },
+  step(fwd,strafe,dt){ if(!sfpActive||hero.down)return;
+    const spd=HERO_SPEED*(Hero.speedMul||1);
+    const c=Math.cos(sfpYaw), s=Math.sin(sfpYaw);
+    const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
+    moveHero(vx,vy); hero.face=sfpYaw;
+    if(fwd||strafe){ hero.dir=CFHelp.angToDir(sfpYaw); hero.moving=true; hero.anim='walk'; hero.animClock+=dt; } else hero.moving=false; },
+  strike(){ if(sfpActive) heroSlash(sfpYaw); } };
 
 function setSurfaceFP(on){
  sfpActive=!!on;
  const ui=$('fpui'), btn=$('fpToggle');
  if(sfpActive){ sfpYaw=hero.face||0; FPView.mount($('cvFP')); FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch;
-   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); sfpRender(); }
+   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); sfpRender(); }
  else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
 }
 function toggleSurfaceFP(){ setSurfaceFP(!sfpActive); }
@@ -12636,6 +12656,7 @@ return {
  skin:()=>surfSkin,   // the current world's ground/rock palette+texture, borrowed by the dungeon
  set onEnterDungeon(fn){onEnterDungeon=fn},
  returnFromDungeon,
+ fp:surfaceFPControl,
  // ---- editor / debug API ----
  api:{
   reseed,
@@ -15139,8 +15160,6 @@ const dungeonFPAdapter={
 function renderDungeonFP(){
   if(!fpAtlas||fpAtlasTheme!==(T.worldTheme||'default')) buildDungeonFPAtlas();
   if(fpLastW!==W||fpLastH!==H){ FPView.resize(W,H); fpLastW=W; fpLastH=H; }
-  let dd=(player.face||0)-fpYaw; while(dd>Math.PI)dd-=6.283185; while(dd<-Math.PI)dd+=6.283185;
-  fpYaw+=dd*0.25;
   FPView.render(dungeonFPAdapter);
   const who=$('fpWho'); if(who) who.textContent=(dInfo?dInfo.name:'THE UNDERSTORY')+' · floor '+(floorIdx+1);
   const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,player.hp));
@@ -15149,10 +15168,23 @@ function setDungeonFP(on){
   fpActive=!!on;
   const ui=$('fpui'), btn=$('fpToggle');
   if(fpActive){ fpYaw=player.face||0; FPView.mount($('cvFP')); FPView.resize(W,H); fpLastW=W; fpLastH=H;
-    if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); renderDungeonFP(); }
+    if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); renderDungeonFP(); }
   else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
 }
 function toggleDungeonFP(){ setDungeonFP(!fpActive); }
+const dungeonFPControl={
+  get active(){ return fpActive; },
+  set(on){ setDungeonFP(on); },
+  toggle(){ toggleDungeonFP(); },
+  look(dyaw,dpitch){ fpYaw+=dyaw; player.face=fpYaw;
+    if(dpitch!==undefined){ const lim=FPView.H*0.4; fpPitch=Math.max(-lim,Math.min(lim,fpPitch+dpitch)); } },
+  step(fwd,strafe,dt){ if(!fpActive||player.falling||dead)return;
+    const spd=PLAYER_SPEED*player.speedMul*(buffs.swift>0?1.45:1);
+    const c=Math.cos(fpYaw), s=Math.sin(fpYaw);
+    const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
+    moveWithCollision(player, vx, vy); player.face=fpYaw;
+    if(fwd||strafe){ player.dir=CFHelp.angToDir(fpYaw); player.anim='walk'; player.animClock+=dt; } },
+  strike(){ if(fpActive) doSlash(fpYaw); } };
 function fpBindOnce(){
   if(fpBound) return; fpBound=true;
   const btn=$('fpToggle'); if(btn) btn.addEventListener('click',()=>{ if(active) toggleDungeonFP(); });
@@ -15171,6 +15203,7 @@ function frame(now){
 }
 return {
   enter, frame, exit:exitDungeon,
+  fp:dungeonFPControl,
   get active(){return active},
   // small debug/cheat surface — used by smoke tests and the curious
   debug:{
@@ -15626,9 +15659,72 @@ function showSurface(){
 }
 function showDungeon(){
   mode='dungeon';
+  if(Surface.fp)Surface.fp.set(false);     // leave overworld first-person behind
   sui.classList.add('hidden');
   dui.classList.remove('hidden');
   Editor.setOpen(false);
+}
+
+/* ============================================================
+   FIRST-PERSON CONTROLS — one input layer over whichever scene is
+   active. Drag to look, WASD / arrows (or a left-thumb stick) to
+   move along the gaze, tap or space to strike.
+   ============================================================ */
+function activeFP(){
+  const m=(mode==='dungeon')?Dungeon.fp:Surface.fp;
+  return (m&&m.active)?m:null;
+}
+const fpKeys=new Set();
+const MOVEK=['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'];
+addEventListener('keydown',e=>{
+  const k=(e.key||'').toLowerCase();
+  if(MOVEK.includes(k)){ if(activeFP()){ fpKeys.add(k); e.preventDefault(); } }
+  else if((k===' '||k==='enter')){ const fp=activeFP(); if(fp){ fp.strike(); e.preventDefault(); } }
+});
+addEventListener('keyup',e=>fpKeys.delete((e.key||'').toLowerCase()));
+(function bindFPPointer(){
+  const cvFP=document.getElementById('cvFP'); if(!cvFP)return;
+  let lookPtr=null, tap=null;
+  window.__fpMove=null;
+  cvFP.addEventListener('pointerdown',e=>{
+    if(!activeFP())return; try{cvFP.setPointerCapture(e.pointerId);}catch(_){}
+    if(e.clientX<innerWidth*0.4 && !window.__fpMove){ window.__fpMove={id:e.pointerId,ox:e.clientX,oy:e.clientY,x:e.clientX,y:e.clientY}; }
+    else { lookPtr={id:e.pointerId,x:e.clientX,y:e.clientY}; tap={t:performance.now(),moved:0}; }
+    e.preventDefault();
+  });
+  cvFP.addEventListener('pointermove',e=>{
+    const fp=activeFP(); if(!fp)return;
+    if(lookPtr&&e.pointerId===lookPtr.id){ const dx=e.clientX-lookPtr.x, dy=e.clientY-lookPtr.y;
+      lookPtr.x=e.clientX; lookPtr.y=e.clientY; fp.look(dx*0.005,-dy*0.55); if(tap)tap.moved+=Math.abs(dx)+Math.abs(dy); }
+    const mv=window.__fpMove; if(mv&&e.pointerId===mv.id){ mv.x=e.clientX; mv.y=e.clientY; }
+  });
+  const end=e=>{
+    if(lookPtr&&e.pointerId===lookPtr.id){ if(tap&&tap.moved<7&&performance.now()-tap.t<300){ const fp=activeFP(); if(fp)fp.strike(); } lookPtr=null; tap=null; }
+    const mv=window.__fpMove; if(mv&&e.pointerId===mv.id) window.__fpMove=null;
+  };
+  cvFP.addEventListener('pointerup',end);
+  cvFP.addEventListener('pointercancel',end);
+  const sb=document.getElementById('fpStrike');
+  if(sb)sb.addEventListener('pointerdown',e=>{ const fp=activeFP(); if(fp){fp.strike(); e.preventDefault(); e.stopPropagation();} });
+})();
+// fade the control hint a few seconds after first entering first person
+let fpHintTimer=null;
+function fpHintPoke(){ const h=document.getElementById('fpHint'); if(!h)return;
+  h.classList.remove('gone'); clearTimeout(fpHintTimer);
+  fpHintTimer=setTimeout(()=>h.classList.add('gone'),4200); }
+window.fpHintPoke=fpHintPoke;
+let fpLastT=0;
+function applyFPInput(t){
+  const fp=activeFP(); if(!fp){ fpLastT=t; return; }
+  const dt=Math.min(0.05,(t-fpLastT)/1000)||0.016; fpLastT=t;
+  let fwd=0,strafe=0;
+  if(fpKeys.has('w')||fpKeys.has('arrowup'))fwd+=1;
+  if(fpKeys.has('s')||fpKeys.has('arrowdown'))fwd-=1;
+  if(fpKeys.has('d')||fpKeys.has('arrowright'))strafe+=1;
+  if(fpKeys.has('a')||fpKeys.has('arrowleft'))strafe-=1;
+  const mv=window.__fpMove;
+  if(mv){ const R=46; fwd+=Math.max(-1,Math.min(1,-(mv.y-mv.oy)/R)); strafe+=Math.max(-1,Math.min(1,(mv.x-mv.ox)/R)); }
+  if(fwd||strafe){ const L=Math.hypot(fwd,strafe)||1; fp.step(fwd/L,strafe/L,dt); }
 }
 
 Surface.onEnterDungeon=(dun)=>{
@@ -15647,6 +15743,7 @@ Surface.onEnterDungeon=(dun)=>{
 let loopErrs=0;
 function loop(t){
   try{
+    applyFPInput(t);
     if(mode==='surface')Surface.frame(t);
     else Dungeon.frame(t);
   }catch(e){
