@@ -15087,9 +15087,11 @@ function buildDungeonFPAtlas(){
 function fpSolid(cx,cy){
   if(cx<0||cy<0||cx>=COLS||cy>=ROWS) return true;
   const i=cy*COLS+cx;
-  return !!(highCellArr[i]||faceCellArr[i]||blockGrid[i]);
+  // a wall is anything that isn't fully-open cave floor: the surrounding rock
+  // (tileMap!==15), raised plateaus, cliff faces and structure blocks.
+  return tileMap[cy][cx]!==15 || !!(highCellArr[i]||blockGrid[i]);
 }
-function fpWallTex(cx,cy){ return blockGrid[cy*COLS+cx]?3:0; }
+function fpWallTex(cx,cy){ const i=cy*COLS+cx; return blockGrid[i]?3:(highCellArr[i]||faceCellArr[i]?0:0); }
 function fpFloorTex(){ return 1; }
 function fpCeilTex(){ return 2; }
 function fpGlow(cx,cy){
@@ -15219,6 +15221,16 @@ return {
     fpPitchBy(dp){ fpPitch=Math.max(-FPView.H*0.4,Math.min(FPView.H*0.4,fpPitch+dp)); },
     get fpInfo(){ return {active:fpActive, yaw:+fpYaw.toFixed(2), pitch:+fpPitch.toFixed(1),
       atlas:!!fpAtlas, sprites:fpActive?dungeonFPSprites().length:0, fpw:FPView.W, fph:FPView.H}; },
+    get fpSolidCounts(){ let wall=0,open=0; for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+      if(fpSolid(x,y))wall++; else open++; } return {wall,open,total:ROWS*COLS}; },
+    fpToWall(){ // stand in the open floor cell adjacent to the nearest solid, facing it
+      const pcx=(player.x/RES)|0, pcy=(player.y/RES)|0; let best=null,bd=1e9,bdir=0;
+      for(let y=1;y<ROWS-1;y++)for(let x=1;x<COLS-1;x++){ if(!fpSolid(x,y))continue;
+        const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+        for(const[dx,dy]of dirs){ const ox=x+dx,oy=y+dy; if(fpSolid(ox,oy))continue;
+          const d=(ox-pcx)*(ox-pcx)+(oy-pcy)*(oy-pcy); if(d<bd){bd=d;best=[ox,oy];bdir=Math.atan2(-dy,-dx);} } }
+      if(best){ player.x=(best[0]+0.5)*RES; player.y=(best[1]+0.5)*RES; player.face=bdir; fpYaw=bdir; }
+      return best?{cell:best,face:+bdir.toFixed(2)}:null; },
     reachRubble(){ const r=rubble[0]; if(!r)return false; player.x=r.x+RES*1.4; player.y=r.y; return true; },
     get rescue(){return {objKind:objKind(), npcs:npcs.length, rescueNpcs:npcs.filter(n=>n.rescue).length, found:npcs.some(n=>n.rescue&&n.found), rescuedSoul, cleansed:cleansedRun}},
     reachRescue(){ const n=npcs.find(x=>x.rescue); if(n){ player.x=n.x; player.y=n.y; } return !!n; },
