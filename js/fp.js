@@ -112,7 +112,7 @@ const FPView = (function(){
     const fog=A.fog||null;
     const applyFog=(r,g,b,dist)=>{
       if(!fog)return [r,g,b];
-      let f=clamp((dist-fog.near||0)/(fog.dist),0,1); f*=f;
+      let f=clamp((dist-(fog.near||0))/(fog.dist||20),0,1); f*=f;
       return [r+(fog.col[0]-r)*f, g+(fog.col[1]-g)*f, b+(fog.col[2]-b)*f];
     };
 
@@ -125,7 +125,7 @@ const FPView = (function(){
       if(rdx<0){stepX=-1;sdx=(px-mapX)*ddx;}else{stepX=1;sdx=(mapX+1-px)*ddx;}
       if(rdy<0){stepY=-1;sdy=(py-mapY)*ddy;}else{stepY=1;sdy=(mapY+1-py)*ddy;}
       let side=0,hit=0,guard=0,cxi=mapX,cyi=mapY;
-      const maxGuard=outdoor?220:170;
+      const maxGuard=outdoor?(A.drawDist||64):170;
       while(!hit&&guard++<maxGuard){
         if(sdx<sdy){sdx+=ddx;mapX+=stepX;side=0;}else{sdy+=ddy;mapY+=stepY;side=1;}
         if(mapX<0||mapY<0||mapX>=MW||mapY>=MH){hit=2;break;}
