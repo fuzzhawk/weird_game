@@ -6784,6 +6784,11 @@ const interiorFPAdapter={
  get MW(){return interior?interior.gw:1}, get MH(){return interior?interior.gh:1},
  get atlas(){return sfpAtlasI},
  solid:intFPSolid, wallTex:intFPWallTex, floorTex:()=>1, ceilTex:()=>2,
+ wallHeight:(cx,cy)=>{ const intr=interior; return (intr&&intr.breakable&&intr.breakable[intr.si(cx,cy)])?0.85:1.15; },
+ floorBuf:()=>{ const intr=interior; if(!intr||!intr.bg)return null;
+   if(!intr._fpFloor){ try{ const g=intr.bg.getContext('2d'); const im=g.getImageData(0,0,intr.bg.width,intr.bg.height);
+     intr._fpFloor={data:im.data,w:intr.bg.width,h:intr.bg.height,scale:TILE}; }catch(e){ intr._fpFloor=null; } }
+   return intr._fpFloor; },
  light:d=>0.10+1.35/(1+0.11*d*d),
  cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),
  sprites:intFPSprites
@@ -6830,6 +6835,27 @@ function buildOverworldFPAtlas(){
 function owSolid(cx,cy){ if(cx<0||cy<0||cx>=W||cy>=H) return true; const i=idx(cx,cy); return map[i]!==0 || bld[i]>=0; }
 function owWallTex(cx,cy){ return bld[idx(cx,cy)]>=0?4:3; }
 function owFloorTex(cx,cy){ const i=idx(cx,cy); return (water&&water[i])?2:0; }
+function owWallHeight(cx,cy){
+  const i=idx(cx,cy), bi=bld[i];
+  if(bi>=0){ const b=buildings[bi];
+    if(b&&BMETA[b.tp]){ const st=BMETA[b.tp].stories||1; return 0.9+st*0.55; } // towers rise
+    return 1.6; }
+  if(struct[i]===S_WALL) return 1.3;                 // village ramparts
+  if(struct[i]===S_RUIN) return 1.1;
+  return 1.0;                                        // bramble-rock
+}
+// the real 2D ground, sampled straight from the top-down terrain canvas
+let owFloorCache=null, owFloorAt=0;
+function owFloorBuf(){
+  if(typeof tcv==='undefined'||!tcv) return null;
+  const now=performance.now();
+  if(!owFloorCache || now-owFloorAt>900 || terrainDirty){
+    try{ const g=tcv.getContext('2d'); const im=g.getImageData(0,0,tcv.width,tcv.height);
+      owFloorCache={data:im.data,w:tcv.width,h:tcv.height,scale:tcv.width/W}; owFloorAt=now;
+    }catch(e){ owFloorCache=null; }
+  }
+  return owFloorCache;
+}
 function owNodeCv(n){
   if(n.t==='rock') return sfpShape('owrock',(g,s)=>{ g.fillStyle='#8b8fa3';
     g.beginPath(); g.moveTo(s*0.22,s*0.8); g.lineTo(s*0.34,s*0.42); g.lineTo(s*0.6,s*0.36);
@@ -6886,7 +6912,7 @@ const overworldFPAdapter={
   outdoor:true, fov:0.72, drawDist:60,
   get MW(){return W}, get MH(){return H},
   get atlas(){return sfpAtlasO},
-  solid:owSolid, wallTex:owWallTex, floorTex:owFloorTex, sky:owSky,
+  solid:owSolid, wallTex:owWallTex, floorTex:owFloorTex, wallHeight:owWallHeight, floorBuf:owFloorBuf, sky:owSky,
   get fog(){ const s=OW_SKY[worldTheme]||OW_SKY.fantasy; return {near:9,dist:34,col:s.lo}; },
   light:d=>Math.min(1.18, 0.4+2.0/(1+0.05*d*d)),
   cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),

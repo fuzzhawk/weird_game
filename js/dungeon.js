@@ -2111,6 +2111,11 @@ function fpSolid(cx,cy){
   return tileMap[cy][cx]!==15 || !!(highCellArr[i]||blockGrid[i]);
 }
 function fpWallTex(cx,cy){ const i=cy*COLS+cx; return blockGrid[i]?3:(highCellArr[i]||faceCellArr[i]?0:0); }
+function fpWallHeight(cx,cy){ const i=cy*COLS+cx;
+  if(blockGrid[i]) return 2.0;            // structures
+  if(highCellArr[i]) return 2.4;          // raised plateaus loom
+  if(faceCellArr[i]) return 1.6;          // cliff faces
+  return 1.2; }                           // surrounding rock
 function fpFloorTex(){ return 1; }
 function fpCeilTex(){ return 2; }
 function fpGlow(cx,cy){
@@ -2173,7 +2178,7 @@ const dungeonFPAdapter={
   outdoor:false, fov:0.72, ceilFallback:2, floorFallback:1,
   get MW(){return COLS}, get MH(){return ROWS},
   get atlas(){return fpAtlas},
-  solid:fpSolid, wallTex:fpWallTex, floorTex:fpFloorTex, ceilTex:fpCeilTex, glowAt:fpGlow,
+  solid:fpSolid, wallTex:fpWallTex, floorTex:fpFloorTex, ceilTex:fpCeilTex, glowAt:fpGlow, wallHeight:fpWallHeight,
   light:d=>0.06+1.3/(1+0.14*d*d),
   cam:()=>({x:player.x/RES,y:player.y/RES,yaw:fpYaw,pitch:fpPitch}),
   sprites:dungeonFPSprites
