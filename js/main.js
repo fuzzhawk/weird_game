@@ -37,6 +37,7 @@ addEventListener('keydown',e=>{
   const k=(e.key||'').toLowerCase();
   if(MOVEK.includes(k)){ if(activeFP()){ fpKeys.add(k); e.preventDefault(); } }
   else if((k===' '||k==='enter')){ const fp=activeFP(); if(fp){ fp.strike(); e.preventDefault(); } }
+  else if(k==='e'||k==='f'){ const fp=activeFP(); if(fp&&fp.interact){ fp.interact(); e.preventDefault(); } }
 });
 addEventListener('keyup',e=>fpKeys.delete((e.key||'').toLowerCase()));
 (function bindFPPointer(){
@@ -63,6 +64,8 @@ addEventListener('keyup',e=>fpKeys.delete((e.key||'').toLowerCase()));
   cvFP.addEventListener('pointercancel',end);
   const sb=document.getElementById('fpStrike');
   if(sb)sb.addEventListener('pointerdown',e=>{ const fp=activeFP(); if(fp){fp.strike(); e.preventDefault(); e.stopPropagation();} });
+  const ub=document.getElementById('fpUseBtn');
+  if(ub)ub.addEventListener('pointerdown',e=>{ const fp=activeFP(); if(fp&&fp.interact){fp.interact(); e.preventDefault(); e.stopPropagation();} });
 })();
 // fade the control hint a few seconds after first entering first person
 let fpHintTimer=null;

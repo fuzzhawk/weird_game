@@ -95,6 +95,23 @@ const FPView = (function(){
   }
 
   const defLight=d=>0.05+1.25/(1+0.13*d*d);
+  let lastFov=0.72, lastHorizon=80;
+  // project a world point (x,y in TILE units, z = height in tiles) to screen space
+  function projectPoint(cam, x, y, z){
+    const yaw=cam.yaw, fov=lastFov;
+    const dirX=Math.cos(yaw), dirY=Math.sin(yaw);
+    const planeX=-dirY*fov, planeY=dirX*fov;
+    const sx=x-cam.x, sy=y-cam.y;
+    const invDet=1/(planeX*dirY-dirX*planeY);
+    const tX=invDet*(dirY*sx-dirX*sy);
+    const tY=invDet*(-planeY*sx+planeX*sy);
+    if(tY<=0.06) return null;
+    const proj=FPH/tY;
+    return { x:(FPW/2)*(1+tX/tY), y:lastHorizon+(0.5-(z||0))*proj, dist:tY, proj, W:FPW, H:FPH };
+  }
+  const HMAX=12;
+  const hDist=new Float64Array(HMAX), hCx=new Int32Array(HMAX),
+        hCy=new Int32Array(HMAX), hSide=new Uint8Array(HMAX);
 
   function render(A){
     if(!mounted||!fpBuf||!A)return;
@@ -103,6 +120,7 @@ const FPView = (function(){
     const fov=A.fov||0.72;
     const planeX=-dirY*fov, planeY=dirX*fov;
     const horizon=(FPH*0.5+(cam.pitch||0))|0;
+    lastFov=fov; lastHorizon=horizon;
     const posZ=0.5*FPH;
     const d=fpBuf;
     const AT=A.atlas, TS=AT.TS, AW=TS*AT.NTEX, PIX=AT.pix;
@@ -110,11 +128,10 @@ const FPView = (function(){
     const light=A.light||defLight;
     const outdoor=!!A.outdoor;
     const fog=A.fog||null;
-    const applyFog=(r,g,b,dist)=>{
-      if(!fog)return [r,g,b];
-      let f=clamp((dist-(fog.near||0))/(fog.dist||20),0,1); f*=f;
-      return [r+(fog.col[0]-r)*f, g+(fog.col[1]-g)*f, b+(fog.col[2]-b)*f];
-    };
+    const wallH=A.wallHeight||null;
+    const FB=A.floorBuf?A.floorBuf():null;   // {data,w,h,scale} — the real 2D ground
+    const maxGuard=outdoor?(A.drawDist||64):170;
+    const fogNear=fog?(fog.near||0):0, fogDist=fog?(fog.dist||20):20;
 
     for(let x=0;x<FPW;x++){
       const camX=2*x/FPW-1;
@@ -124,77 +141,82 @@ const FPView = (function(){
       let stepX,stepY,sdx,sdy;
       if(rdx<0){stepX=-1;sdx=(px-mapX)*ddx;}else{stepX=1;sdx=(mapX+1-px)*ddx;}
       if(rdy<0){stepY=-1;sdy=(py-mapY)*ddy;}else{stepY=1;sdy=(mapY+1-py)*ddy;}
-      let side=0,hit=0,guard=0,cxi=mapX,cyi=mapY;
-      const maxGuard=outdoor?(A.drawDist||64):170;
-      while(!hit&&guard++<maxGuard){
+      // ---- DDA: collect solid cells near→far until a full-height occluder ----
+      let n=0, side=0, guard=0;
+      while(guard++<maxGuard && n<HMAX){
         if(sdx<sdy){sdx+=ddx;mapX+=stepX;side=0;}else{sdy+=ddy;mapY+=stepY;side=1;}
-        if(mapX<0||mapY<0||mapX>=MW||mapY>=MH){hit=2;break;}
-        if(A.solid(mapX,mapY)){hit=1;cxi=mapX;cyi=mapY;break;}
-      }
-      let dist=side===0?(sdx-ddx):(sdy-ddy);
-      if(dist<0.02)dist=0.02;
-      zbuf[x]=dist;
-      let lh=(FPH/dist)|0;
-      let y0=horizon-(lh>>1), y1=horizon+(lh>>1);
-      if(hit!==1){y0=y1=horizon;}
-      const dy0=clamp(y0,0,FPH), dy1=clamp(y1,0,FPH);
-
-      // ---- wall column ----
-      if(hit===1){
-        const tex=A.wallTex(cxi,cyi,side);
-        let wallX=side===0?py+dist*rdy:px+dist*rdx; wallX-=Math.floor(wallX);
-        let tx=(wallX*TS)|0;
-        if((side===0&&rdx>0)||(side===1&&rdy<0))tx=TS-tx-1;
-        let lit=light(dist)*(side===1?0.74:1);
-        const stepT=TS/lh, base=tex*TS+tx;
-        let texPos=(dy0-horizon+(lh>>1))*stepT;
-        for(let y=dy0;y<dy1;y++){
-          let ty=texPos|0; if(ty<0)ty=0; else if(ty>=TS)ty=TS-1; texPos+=stepT;
-          const s=(ty*AW+base)*4, o=(y*FPW+x)*4;
-          let r=PIX[s]*lit, gg=PIX[s+1]*lit, b=PIX[s+2]*lit;
-          if(fog){const c2=applyFog(r,gg,b,dist);r=c2[0];gg=c2[1];b=c2[2];}
-          d[o]=r>255?255:r; d[o+1]=gg>255?255:gg; d[o+2]=b>255?255:b; d[o+3]=255;
+        if(mapX<0||mapY<0||mapX>=MW||mapY>=MH)break;
+        if(A.solid(mapX,mapY)){
+          let dist=side===0?(sdx-ddx):(sdy-ddy); if(dist<0.02)dist=0.02;
+          hDist[n]=dist; hCx[n]=mapX; hCy[n]=mapY; hSide[n]=side; n++;
+          const h=wallH?wallH(mapX,mapY,side):1;
+          // if this wall already reaches the top of the screen nothing behind shows
+          if(horizon+(0.5-h)*(FPH/dist)<=0) break;
         }
       }
+      zbuf[x]=n>0?hDist[0]:1e9;
 
-      // ---- floor (below the wall) ----
-      for(let y=Math.max(dy1,horizon+1);y<FPH;y++){
+      // ---- background: full-column floor then ceiling/sky (walls draw over) ----
+      for(let y=horizon+1;y<FPH;y++){
         const p=y-horizon, rowD=posZ/p;
         const fxw=px+rowD*rdx, fyw=py+rowD*rdy;
         const fcx=fxw|0, fcy=fyw|0;
-        let ftex=A.floorFallback||0, glow=null;
-        if(fcx>=0&&fcy>=0&&fcx<MW&&fcy<MH){
-          ftex=A.floorTex(fcx,fcy);
-          if(A.glowAt)glow=A.glowAt(fcx,fcy);
+        const o=(y*FPW+x)*4; const lit=light(rowD);
+        let r,gg,b;
+        if(FB && fcx>=0&&fcy>=0&&fcx<MW&&fcy<MH){
+          const bx=(fxw*FB.scale)|0, by=(fyw*FB.scale)|0;
+          const bi=((by<0?0:by>=FB.h?FB.h-1:by)*FB.w+(bx<0?0:bx>=FB.w?FB.w-1:bx))*4;
+          r=FB.data[bi]*lit; gg=FB.data[bi+1]*lit; b=FB.data[bi+2]*lit;
+        }else{
+          let ftex=A.floorFallback||0;
+          if(fcx>=0&&fcy>=0&&fcx<MW&&fcy<MH) ftex=A.floorTex(fcx,fcy);
+          const tx=((fxw-fcx)*TS)|0, ty=((fyw-fcy)*TS)|0;
+          const s=(ty*AW+ftex*TS+tx)*4;
+          r=PIX[s]*lit; gg=PIX[s+1]*lit; b=PIX[s+2]*lit;
         }
-        const tx=((fxw-fcx)*TS)|0, ty=((fyw-fcy)*TS)|0;
-        const s=(ty*AW+ftex*TS+tx)*4, o=(y*FPW+x)*4;
-        const lit=light(rowD);
-        let r=PIX[s]*lit, gg=PIX[s+1]*lit, b=PIX[s+2]*lit;
-        if(glow&&glow.amt){const em=glow.amt*70;r+=em*glow.col[0];gg+=em*glow.col[1];b+=em*glow.col[2];}
-        if(fog){const c2=applyFog(r,gg,b,rowD);r=c2[0];gg=c2[1];b=c2[2];}
+        if(A.glowAt && fcx>=0&&fcy>=0&&fcx<MW&&fcy<MH){ const glow=A.glowAt(fcx,fcy);
+          if(glow&&glow.amt){const em=glow.amt*70;r+=em*glow.col[0];gg+=em*glow.col[1];b+=em*glow.col[2];} }
+        if(fog){ let f=(rowD-fogNear)/fogDist; f=f<0?0:f>1?1:f; f*=f;
+          r+=(fog.col[0]-r)*f; gg+=(fog.col[1]-gg)*f; b+=(fog.col[2]-b)*f; }
         d[o]=r>255?255:r; d[o+1]=gg>255?255:gg; d[o+2]=b>255?255:b; d[o+3]=255;
       }
-
-      // ---- ceiling / sky (above the wall) ----
-      const topEnd=Math.min(dy0,horizon)-1;
       if(outdoor){
-        for(let y=topEnd;y>=0;y--){
-          const t=y/Math.max(1,horizon);
-          const sc=A.sky?A.sky(clamp(t,0,1)):[20,24,40];
-          const o=(y*FPW+x)*4;
-          d[o]=sc[0]; d[o+1]=sc[1]; d[o+2]=sc[2]; d[o+3]=255;
-        }
+        for(let y=horizon;y>=0;y--){ const t=y/Math.max(1,horizon);
+          const sc=A.sky?A.sky(t<0?0:t>1?1:t):[20,24,40];
+          const o=(y*FPW+x)*4; d[o]=sc[0]; d[o+1]=sc[1]; d[o+2]=sc[2]; d[o+3]=255; }
       }else{
-        for(let y=topEnd;y>=0;y--){
-          const p=horizon-y, rowD=posZ/p;
-          const fxw=px+rowD*rdx, fyw=py+rowD*rdy;
-          const fcx=fxw|0, fcy=fyw|0;
-          let ctex=A.ceilTex?(fcx>=0&&fcy>=0&&fcx<MW&&fcy<MH?A.ceilTex(fcx,fcy):A.ceilFallback||0):A.ceilFallback||0;
+        for(let y=horizon;y>=0;y--){
+          const p=horizon-y||1, rowD=posZ/p;
+          const fxw=px+rowD*rdx, fyw=py+rowD*rdy; const fcx=fxw|0, fcy=fyw|0;
+          let ctex=A.ceilTex?(fcx>=0&&fcy>=0&&fcx<MW&&fcy<MH?A.ceilTex(fcx,fcy):(A.ceilFallback||0)):(A.ceilFallback||0);
           const tx=((fxw-fcx)*TS)|0, ty=((fyw-fcy)*TS)|0;
-          const s=(ty*AW+ctex*TS+tx)*4, o=(y*FPW+x)*4;
-          const lit=light(rowD)*0.55;
+          const s=(ty*AW+ctex*TS+tx)*4, o=(y*FPW+x)*4; const lit=light(rowD)*0.55;
           d[o]=PIX[s]*lit; d[o+1]=PIX[s+1]*lit; d[o+2]=PIX[s+2]*lit; d[o+3]=255;
+        }
+      }
+
+      // ---- walls: far→near, each at its own height ----
+      for(let k=n-1;k>=0;k--){
+        const dist=hDist[k], cxi=hCx[k], cyi=hCy[k], sd=hSide[k];
+        const proj=FPH/dist, base=horizon+0.5*proj;
+        const h=wallH?wallH(cxi,cyi,sd):1;
+        const top=horizon+(0.5-h)*proj;
+        let dy0=top<0?0:top|0, dy1=base>FPH?FPH:base|0;
+        if(dy1<=dy0)continue;
+        const tex=A.wallTex(cxi,cyi,sd);
+        let wallX=sd===0?py+dist*rdy:px+dist*rdx; wallX-=Math.floor(wallX);
+        let tx=(wallX*TS)|0;
+        if((sd===0&&rdx>0)||(sd===1&&rdy<0))tx=TS-tx-1;
+        const lit=light(dist)*(sd===1?0.72:1);
+        const texBase=tex*TS+tx, invProj=1/proj;
+        let fFog=0; if(fog){ let f=(dist-fogNear)/fogDist; f=f<0?0:f>1?1:f; fFog=f*f; }
+        for(let y=dy0;y<dy1;y++){
+          let wh=(base-y)*invProj;             // world height above ground, 0..h
+          let fr=wh-(wh|0); let ty=((1-fr)*TS)|0; if(ty<0)ty=0; else if(ty>=TS)ty=TS-1;
+          const s=(ty*AW+texBase)*4, o=(y*FPW+x)*4;
+          let r=PIX[s]*lit, gg=PIX[s+1]*lit, b=PIX[s+2]*lit;
+          if(fFog){ r+=(fog.col[0]-r)*fFog; gg+=(fog.col[1]-gg)*fFog; b+=(fog.col[2]-b)*fFog; }
+          d[o]=r>255?255:r; d[o+1]=gg>255?255:gg; d[o+2]=b>255?255:b; d[o+3]=255;
         }
       }
     }
@@ -239,7 +261,7 @@ const FPView = (function(){
     if(A.overlay)A.overlay(cx2,FPW,FPH,cam);
   }
 
-  return { mount, resize, render, bakeAtlas,
+  return { mount, resize, render, bakeAtlas, projectPoint,
            get W(){return FPW}, get H(){return FPH}, get canvas(){return cv} };
 })();
 if(typeof window!=='undefined')window.FPView=FPView;

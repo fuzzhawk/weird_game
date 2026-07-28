@@ -6784,9 +6784,14 @@ const interiorFPAdapter={
  get MW(){return interior?interior.gw:1}, get MH(){return interior?interior.gh:1},
  get atlas(){return sfpAtlasI},
  solid:intFPSolid, wallTex:intFPWallTex, floorTex:()=>1, ceilTex:()=>2,
+ wallHeight:(cx,cy)=>{ const intr=interior; return (intr&&intr.breakable&&intr.breakable[intr.si(cx,cy)])?0.85:1.15; },
+ floorBuf:()=>{ const intr=interior; if(!intr||!intr.bg)return null;
+   if(!intr._fpFloor){ try{ const g=intr.bg.getContext('2d'); const im=g.getImageData(0,0,intr.bg.width,intr.bg.height);
+     intr._fpFloor={data:im.data,w:intr.bg.width,h:intr.bg.height,scale:TILE}; }catch(e){ intr._fpFloor=null; } }
+   return intr._fpFloor; },
  light:d=>0.10+1.35/(1+0.11*d*d),
  cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),
- sprites:intFPSprites
+ sprites:intFPSprites, overlay:sfpOverlay
 };
 function renderInteriorFP(){
  const mat=interior.mat||'rustic';
@@ -6830,6 +6835,27 @@ function buildOverworldFPAtlas(){
 function owSolid(cx,cy){ if(cx<0||cy<0||cx>=W||cy>=H) return true; const i=idx(cx,cy); return map[i]!==0 || bld[i]>=0; }
 function owWallTex(cx,cy){ return bld[idx(cx,cy)]>=0?4:3; }
 function owFloorTex(cx,cy){ const i=idx(cx,cy); return (water&&water[i])?2:0; }
+function owWallHeight(cx,cy){
+  const i=idx(cx,cy), bi=bld[i];
+  if(bi>=0){ const b=buildings[bi];
+    if(b&&BMETA[b.tp]){ const st=BMETA[b.tp].stories||1; return 0.9+st*0.55; } // towers rise
+    return 1.6; }
+  if(struct[i]===S_WALL) return 1.3;                 // village ramparts
+  if(struct[i]===S_RUIN) return 1.1;
+  return 1.0;                                        // bramble-rock
+}
+// the real 2D ground, sampled straight from the top-down terrain canvas
+let owFloorCache=null, owFloorAt=0;
+function owFloorBuf(){
+  if(typeof tcv==='undefined'||!tcv) return null;
+  const now=performance.now();
+  if(!owFloorCache || now-owFloorAt>900 || terrainDirty){
+    try{ const g=tcv.getContext('2d'); const im=g.getImageData(0,0,tcv.width,tcv.height);
+      owFloorCache={data:im.data,w:tcv.width,h:tcv.height,scale:tcv.width/W}; owFloorAt=now;
+    }catch(e){ owFloorCache=null; }
+  }
+  return owFloorCache;
+}
 function owNodeCv(n){
   if(n.t==='rock') return sfpShape('owrock',(g,s)=>{ g.fillStyle='#8b8fa3';
     g.beginPath(); g.moveTo(s*0.22,s*0.8); g.lineTo(s*0.34,s*0.42); g.lineTo(s*0.6,s*0.36);
@@ -6886,11 +6912,11 @@ const overworldFPAdapter={
   outdoor:true, fov:0.72, drawDist:60,
   get MW(){return W}, get MH(){return H},
   get atlas(){return sfpAtlasO},
-  solid:owSolid, wallTex:owWallTex, floorTex:owFloorTex, sky:owSky,
+  solid:owSolid, wallTex:owWallTex, floorTex:owFloorTex, wallHeight:owWallHeight, floorBuf:owFloorBuf, sky:owSky,
   get fog(){ const s=OW_SKY[worldTheme]||OW_SKY.fantasy; return {near:9,dist:34,col:s.lo}; },
   light:d=>Math.min(1.18, 0.4+2.0/(1+0.05*d*d)),
   cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),
-  sprites:owSprites
+  sprites:owSprites, overlay:sfpOverlay
 };
 function renderOverworldFP(){
   if(!sfpAtlasO||sfpOTheme!==worldTheme) buildOverworldFPAtlas();
@@ -6900,6 +6926,48 @@ function renderOverworldFP(){
   const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
 }
 function sfpRender(){ if(interior)renderInteriorFP(); else renderOverworldFP(); }
+
+/* ---- first-person particles (mining chips, harvest leaves, hit sparks) ---- */
+let sfpFx=[], sfpFxT=0;
+function sfpBurst(wx,wy,col,n,rise){ for(let i=0;i<(n||10);i++){ const a=Math.random()*6.283, sp=18+Math.random()*46;
+  sfpFx.push({x:wx,y:wy,z:0.35+Math.random()*0.4,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,vz:(rise||26)+Math.random()*34,life:0.45+Math.random()*0.4,t:0,col:col||'#fff'}); }
+  if(sfpFx.length>240)sfpFx=sfpFx.slice(-240); }
+function sfpFrontAction(){
+  if(interior){ if(Math.hypot(hero.x/TILE-(interior.door[0]+0.5),hero.y/TILE-(interior.gh-0.5))<2.6) return {kind:'exit',label:'LEAVE'}; return null; }
+  const c=Math.cos(sfpYaw), s=Math.sin(sfpYaw);
+  for(const reach of [1.0,1.7,2.4]){          // scan a short way ahead so door gaps still register
+    const tx=((hero.x+c*TILE*reach)/TILE)|0, ty=((hero.y+s*TILE*reach)/TILE)|0;
+    if(tx<0||ty<0||tx>=W||ty>=H) continue;
+    const i=idx(tx,ty);
+    if(bld[i]>=0){ const b=buildings[bld[i]]; if(b&&!b.gone&&b.done&&!(b.ruined&&!(b.decay===1||b.decay===2))&&BMETA[b.tp]&&BMETA[b.tp].cat!=='park'&&BMETA[b.tp].cat!=='grave') return {kind:'enter',label:'ENTER',b}; }
+    const dg=dungeonAt(tx,ty); if(dg) return {kind:'descend',label:'DESCEND',dg};
+    const nd=nodeAt.get(i); if(nd&&nd.amt>0) return {kind:nd.t==='rock'?'mine':'gather',label:nd.t==='rock'?'MINE':'GATHER',nd};
+  }
+  return null;
+}
+function sfpOverlay(g,FPW,FPH,cam){
+  const now=performance.now(); const dt=Math.min(0.05,(now-(sfpFxT||now))/1000); sfpFxT=now;
+  for(const p of sfpFx){ p.t+=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt*0.02; p.vz-=140*dt; p.vx*=0.92; p.vy*=0.92; }
+  sfpFx=sfpFx.filter(p=>p.t<p.life&&p.z>-0.1);
+  for(const p of sfpFx){ const pr=FPView.projectPoint(cam,p.x/TILE,p.y/TILE,p.z); if(!pr||pr.dist>26)continue;
+    const a=Math.max(0,1-p.t/p.life), r=Math.max(1,pr.proj*0.05);
+    g.globalAlpha=a; g.fillStyle=p.col; g.fillRect(pr.x-r/2,pr.y-r/2,r,r); }
+  g.globalAlpha=1;
+  const act=sfpFrontAction();
+  const el=$('fpUse'); if(el){ if(act){ el.textContent='▸ '+act.label; el.style.display='block'; } else el.style.display='none'; }
+}
+function surfaceFPInteract(){
+  const act=sfpFrontAction(); if(!act)return null;
+  if(act.kind==='exit'){ exitInterior(); return 'exit'; }
+  if(act.kind==='enter'){ enterInterior(act.b); return 'enter'; }
+  if(act.kind==='descend'){ if(onEnterDungeon){ if(typeof campaignNoteDescend==='function')campaignNoteDescend(act.dg); onEnterDungeon(act.dg); } return 'descend'; }
+  const nd=act.nd, wx=nd.x*TILE+TILE/2, wy=nd.y*TILE+TILE/2;
+  nd.amt=Math.max(0,(nd.amt||1)-1);
+  if(act.kind==='mine'){ depositResource('stone',1+((Math.random()*2)|0),wx,wy); sfpBurst(wx,wy,'#c2c6d6',14,18); toast('You chip stone from the rock.'); }
+  else { const y=nd.yield; if(y==='food'||y==='wood')depositResource(y,1,wx,wy); sfpBurst(wx,wy,'#8fe0a0',12,26); }
+  if(nd.amt<=0){ const k=nodes.indexOf(nd); if(k>=0)nodes.splice(k,1); nodeAt.delete(idx(nd.x,nd.y)); markMod(idx(nd.x,nd.y)); }
+  return act.kind;
+}
 const surfaceFPControl={
   get active(){ return sfpActive; },
   set(on){ setSurfaceFP(on); },
@@ -6912,13 +6980,15 @@ const surfaceFPControl={
     const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
     moveHero(vx,vy); hero.face=sfpYaw;
     if(fwd||strafe){ hero.dir=CFHelp.angToDir(sfpYaw); hero.moving=true; hero.anim='walk'; hero.animClock+=dt; } else hero.moving=false; },
-  strike(){ if(sfpActive) heroSlash(sfpYaw); } };
+  strike(){ if(!sfpActive)return; heroSlash(sfpYaw);
+    const wx=hero.x+Math.cos(sfpYaw)*TILE*0.9, wy=hero.y+Math.sin(sfpYaw)*TILE*0.9; sfpBurst(wx,wy,'#ffe6a0',6,20); },
+  interact(){ if(sfpActive) return surfaceFPInteract(); } };
 
 function setSurfaceFP(on){
  sfpActive=!!on;
  const ui=$('fpui'), btn=$('fpToggle');
  if(sfpActive){ sfpYaw=hero.face||0; FPView.mount($('cvFP')); FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch;
-   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); sfpRender(); }
+   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); {const ub=$('fpUseBtn');if(ub)ub.classList.remove('hidden');} if(window.fpHintPoke)window.fpHintPoke(); sfpRender(); }
  else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
 }
 function toggleSurfaceFP(){ setSurfaceFP(!sfpActive); }
@@ -9206,6 +9276,19 @@ return {
   fpToggle:()=>{toggleSurfaceFP();return sfpActive;},
   fpSet:(on)=>{setSurfaceFP(on);return sfpActive;},
   fpLook:(dy)=>{sfpYaw+=dy;},
+  fpFront:()=>{ const a=sfpFrontAction(); return a?a.kind:null; },
+  fpProbe:()=>{ const c=Math.cos(sfpYaw), s=Math.sin(sfpYaw); const out=[];
+    for(const reach of [1.0,1.7,2.4]){ const tx=((hero.x+c*TILE*reach)/TILE)|0, ty=((hero.y+s*TILE*reach)/TILE)|0;
+      const i=idx(tx,ty); out.push({reach,tx,ty,bld:bld[i],node:nodeAt.has(i),dg:!!dungeonAt(tx,ty),map:map[i]}); }
+    return {yaw:+sfpYaw.toFixed(2),hero:[(hero.x/TILE)|0,(hero.y/TILE)|0],scan:out}; },
+  fpInteract:()=>surfaceFPInteract(),
+  fpFxCount:()=>sfpFx.length,
+  fpStandNearRock:()=>{ for(const n of nodes){ if(n.t!=='rock')continue;
+      for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ const x=n.x+dx,y=n.y+dy,i=idx(x,y);
+        if(x<1||y<1||x>=W-1||y>=H-1)continue; if(map[i]!==0||bld[i]>=0||nodeAt.has(i)||(water&&water[i]))continue;
+        hero.x=x*TILE+TILE/2; hero.y=y*TILE+TILE/2; hero.face=Math.atan2(-dy,-dx); sfpYaw=hero.face;
+        return {rock:[n.x,n.y],amt:n.amt}; } }
+    return null; },
   fpStandNearFlora:()=>{ // an open cell ringed by trees/bushes with clear sightlines
     let best=null,bs=-1;
     for(const n of nodes){ if(n.t==='rock')continue;
