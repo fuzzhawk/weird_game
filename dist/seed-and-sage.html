@@ -28,6 +28,10 @@ button:active{transform:translateY(1px)}
 #fpStrike:active{transform:translateY(1px);box-shadow:none}
 #fpHint{position:absolute;left:0;right:0;bottom:calc(46px + env(safe-area-inset-bottom));text-align:center;font-size:10px;letter-spacing:.06em;color:rgba(220,230,220,.5);transition:opacity .6s;pointer-events:none}
 #fpHint.gone{opacity:0}
+#fpUse{position:absolute;left:50%;top:56%;transform:translateX(-50%);display:none;font-size:12px;letter-spacing:.12em;color:#ffe6a0;text-shadow:0 1px 3px #000;pointer-events:none}
+#fpUseBtn{position:absolute;left:16px;bottom:calc(84px + env(safe-area-inset-bottom));pointer-events:auto;z-index:42;
+  font-size:13px;letter-spacing:.1em;padding:14px 16px;border-radius:44px;background:linear-gradient(#1f5a4a,#0f3a30);border:1px solid #0a2620;color:#bfeede;box-shadow:0 2px 0 #0a2620}
+#fpUseBtn:active{transform:translateY(1px);box-shadow:none}
 
 /* ================= SURFACE (the garden) ================= */
 #cvS{position:fixed;inset:0;touch-action:none}
@@ -589,8 +593,10 @@ button:active{transform:translateY(1px)}
     <div id="fpCross">+</div>
     <div id="fpWho">&nbsp;</div>
     <div id="fpHp"></div>
-    <div id="fpHint">drag to look · WASD / left-thumb to move · tap to strike</div>
+    <div id="fpHint">drag to look · WASD / left-thumb to move · tap to strike · E to use</div>
+    <div id="fpUse"></div>
     <button id="fpStrike">STRIKE</button>
+    <button id="fpUseBtn">USE</button>
   </div>
 </div>
 <button id="fpToggle" class="hidden" title="First person">FP</button>
@@ -2424,6 +2430,20 @@ const FPView = (function(){
   }
 
   const defLight=d=>0.05+1.25/(1+0.13*d*d);
+  let lastFov=0.72, lastHorizon=80;
+  // project a world point (x,y in TILE units, z = height in tiles) to screen space
+  function projectPoint(cam, x, y, z){
+    const yaw=cam.yaw, fov=lastFov;
+    const dirX=Math.cos(yaw), dirY=Math.sin(yaw);
+    const planeX=-dirY*fov, planeY=dirX*fov;
+    const sx=x-cam.x, sy=y-cam.y;
+    const invDet=1/(planeX*dirY-dirX*planeY);
+    const tX=invDet*(dirY*sx-dirX*sy);
+    const tY=invDet*(-planeY*sx+planeX*sy);
+    if(tY<=0.06) return null;
+    const proj=FPH/tY;
+    return { x:(FPW/2)*(1+tX/tY), y:lastHorizon+(0.5-(z||0))*proj, dist:tY, proj, W:FPW, H:FPH };
+  }
   const HMAX=12;
   const hDist=new Float64Array(HMAX), hCx=new Int32Array(HMAX),
         hCy=new Int32Array(HMAX), hSide=new Uint8Array(HMAX);
@@ -2435,6 +2455,7 @@ const FPView = (function(){
     const fov=A.fov||0.72;
     const planeX=-dirY*fov, planeY=dirX*fov;
     const horizon=(FPH*0.5+(cam.pitch||0))|0;
+    lastFov=fov; lastHorizon=horizon;
     const posZ=0.5*FPH;
     const d=fpBuf;
     const AT=A.atlas, TS=AT.TS, AW=TS*AT.NTEX, PIX=AT.pix;
@@ -2575,7 +2596,7 @@ const FPView = (function(){
     if(A.overlay)A.overlay(cx2,FPW,FPH,cam);
   }
 
-  return { mount, resize, render, bakeAtlas,
+  return { mount, resize, render, bakeAtlas, projectPoint,
            get W(){return FPW}, get H(){return FPH}, get canvas(){return cv} };
 })();
 if(typeof window!=='undefined')window.FPView=FPView;
@@ -10526,7 +10547,7 @@ const interiorFPAdapter={
    return intr._fpFloor; },
  light:d=>0.10+1.35/(1+0.11*d*d),
  cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),
- sprites:intFPSprites
+ sprites:intFPSprites, overlay:sfpOverlay
 };
 function renderInteriorFP(){
  const mat=interior.mat||'rustic';
@@ -10651,7 +10672,7 @@ const overworldFPAdapter={
   get fog(){ const s=OW_SKY[worldTheme]||OW_SKY.fantasy; return {near:9,dist:34,col:s.lo}; },
   light:d=>Math.min(1.18, 0.4+2.0/(1+0.05*d*d)),
   cam:()=>({x:hero.x/TILE,y:hero.y/TILE,yaw:sfpYaw,pitch:sfpPitch}),
-  sprites:owSprites
+  sprites:owSprites, overlay:sfpOverlay
 };
 function renderOverworldFP(){
   if(!sfpAtlasO||sfpOTheme!==worldTheme) buildOverworldFPAtlas();
@@ -10661,6 +10682,48 @@ function renderOverworldFP(){
   const hp=$('fpHp'); if(hp) hp.textContent='♥'.repeat(Math.max(0,Math.round(Hero.hp||0)));
 }
 function sfpRender(){ if(interior)renderInteriorFP(); else renderOverworldFP(); }
+
+/* ---- first-person particles (mining chips, harvest leaves, hit sparks) ---- */
+let sfpFx=[], sfpFxT=0;
+function sfpBurst(wx,wy,col,n,rise){ for(let i=0;i<(n||10);i++){ const a=Math.random()*6.283, sp=18+Math.random()*46;
+  sfpFx.push({x:wx,y:wy,z:0.35+Math.random()*0.4,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,vz:(rise||26)+Math.random()*34,life:0.45+Math.random()*0.4,t:0,col:col||'#fff'}); }
+  if(sfpFx.length>240)sfpFx=sfpFx.slice(-240); }
+function sfpFrontAction(){
+  if(interior){ if(Math.hypot(hero.x/TILE-(interior.door[0]+0.5),hero.y/TILE-(interior.gh-0.5))<2.6) return {kind:'exit',label:'LEAVE'}; return null; }
+  const c=Math.cos(sfpYaw), s=Math.sin(sfpYaw);
+  for(const reach of [1.0,1.7,2.4]){          // scan a short way ahead so door gaps still register
+    const tx=((hero.x+c*TILE*reach)/TILE)|0, ty=((hero.y+s*TILE*reach)/TILE)|0;
+    if(tx<0||ty<0||tx>=W||ty>=H) continue;
+    const i=idx(tx,ty);
+    if(bld[i]>=0){ const b=buildings[bld[i]]; if(b&&!b.gone&&b.done&&!(b.ruined&&!(b.decay===1||b.decay===2))&&BMETA[b.tp]&&BMETA[b.tp].cat!=='park'&&BMETA[b.tp].cat!=='grave') return {kind:'enter',label:'ENTER',b}; }
+    const dg=dungeonAt(tx,ty); if(dg) return {kind:'descend',label:'DESCEND',dg};
+    const nd=nodeAt.get(i); if(nd&&nd.amt>0) return {kind:nd.t==='rock'?'mine':'gather',label:nd.t==='rock'?'MINE':'GATHER',nd};
+  }
+  return null;
+}
+function sfpOverlay(g,FPW,FPH,cam){
+  const now=performance.now(); const dt=Math.min(0.05,(now-(sfpFxT||now))/1000); sfpFxT=now;
+  for(const p of sfpFx){ p.t+=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt*0.02; p.vz-=140*dt; p.vx*=0.92; p.vy*=0.92; }
+  sfpFx=sfpFx.filter(p=>p.t<p.life&&p.z>-0.1);
+  for(const p of sfpFx){ const pr=FPView.projectPoint(cam,p.x/TILE,p.y/TILE,p.z); if(!pr||pr.dist>26)continue;
+    const a=Math.max(0,1-p.t/p.life), r=Math.max(1,pr.proj*0.05);
+    g.globalAlpha=a; g.fillStyle=p.col; g.fillRect(pr.x-r/2,pr.y-r/2,r,r); }
+  g.globalAlpha=1;
+  const act=sfpFrontAction();
+  const el=$('fpUse'); if(el){ if(act){ el.textContent='▸ '+act.label; el.style.display='block'; } else el.style.display='none'; }
+}
+function surfaceFPInteract(){
+  const act=sfpFrontAction(); if(!act)return null;
+  if(act.kind==='exit'){ exitInterior(); return 'exit'; }
+  if(act.kind==='enter'){ enterInterior(act.b); return 'enter'; }
+  if(act.kind==='descend'){ if(onEnterDungeon){ if(typeof campaignNoteDescend==='function')campaignNoteDescend(act.dg); onEnterDungeon(act.dg); } return 'descend'; }
+  const nd=act.nd, wx=nd.x*TILE+TILE/2, wy=nd.y*TILE+TILE/2;
+  nd.amt=Math.max(0,(nd.amt||1)-1);
+  if(act.kind==='mine'){ depositResource('stone',1+((Math.random()*2)|0),wx,wy); sfpBurst(wx,wy,'#c2c6d6',14,18); toast('You chip stone from the rock.'); }
+  else { const y=nd.yield; if(y==='food'||y==='wood')depositResource(y,1,wx,wy); sfpBurst(wx,wy,'#8fe0a0',12,26); }
+  if(nd.amt<=0){ const k=nodes.indexOf(nd); if(k>=0)nodes.splice(k,1); nodeAt.delete(idx(nd.x,nd.y)); markMod(idx(nd.x,nd.y)); }
+  return act.kind;
+}
 const surfaceFPControl={
   get active(){ return sfpActive; },
   set(on){ setSurfaceFP(on); },
@@ -10673,13 +10736,15 @@ const surfaceFPControl={
     const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
     moveHero(vx,vy); hero.face=sfpYaw;
     if(fwd||strafe){ hero.dir=CFHelp.angToDir(sfpYaw); hero.moving=true; hero.anim='walk'; hero.animClock+=dt; } else hero.moving=false; },
-  strike(){ if(sfpActive) heroSlash(sfpYaw); } };
+  strike(){ if(!sfpActive)return; heroSlash(sfpYaw);
+    const wx=hero.x+Math.cos(sfpYaw)*TILE*0.9, wy=hero.y+Math.sin(sfpYaw)*TILE*0.9; sfpBurst(wx,wy,'#ffe6a0',6,20); },
+  interact(){ if(sfpActive) return surfaceFPInteract(); } };
 
 function setSurfaceFP(on){
  sfpActive=!!on;
  const ui=$('fpui'), btn=$('fpToggle');
  if(sfpActive){ sfpYaw=hero.face||0; FPView.mount($('cvFP')); FPView.resize(cw,ch); sfpLW=cw; sfpLH=ch;
-   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); if(window.fpHintPoke)window.fpHintPoke(); sfpRender(); }
+   if(ui)ui.classList.remove('hidden'); if(btn)btn.classList.add('on'); {const ub=$('fpUseBtn');if(ub)ub.classList.remove('hidden');} if(window.fpHintPoke)window.fpHintPoke(); sfpRender(); }
  else { if(ui)ui.classList.add('hidden'); if(btn)btn.classList.remove('on'); }
 }
 function toggleSurfaceFP(){ setSurfaceFP(!sfpActive); }
@@ -12967,6 +13032,19 @@ return {
   fpToggle:()=>{toggleSurfaceFP();return sfpActive;},
   fpSet:(on)=>{setSurfaceFP(on);return sfpActive;},
   fpLook:(dy)=>{sfpYaw+=dy;},
+  fpFront:()=>{ const a=sfpFrontAction(); return a?a.kind:null; },
+  fpProbe:()=>{ const c=Math.cos(sfpYaw), s=Math.sin(sfpYaw); const out=[];
+    for(const reach of [1.0,1.7,2.4]){ const tx=((hero.x+c*TILE*reach)/TILE)|0, ty=((hero.y+s*TILE*reach)/TILE)|0;
+      const i=idx(tx,ty); out.push({reach,tx,ty,bld:bld[i],node:nodeAt.has(i),dg:!!dungeonAt(tx,ty),map:map[i]}); }
+    return {yaw:+sfpYaw.toFixed(2),hero:[(hero.x/TILE)|0,(hero.y/TILE)|0],scan:out}; },
+  fpInteract:()=>surfaceFPInteract(),
+  fpFxCount:()=>sfpFx.length,
+  fpStandNearRock:()=>{ for(const n of nodes){ if(n.t!=='rock')continue;
+      for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ const x=n.x+dx,y=n.y+dy,i=idx(x,y);
+        if(x<1||y<1||x>=W-1||y>=H-1)continue; if(map[i]!==0||bld[i]>=0||nodeAt.has(i)||(water&&water[i]))continue;
+        hero.x=x*TILE+TILE/2; hero.y=y*TILE+TILE/2; hero.face=Math.atan2(-dy,-dx); sfpYaw=hero.face;
+        return {rock:[n.x,n.y],amt:n.amt}; } }
+    return null; },
   fpStandNearFlora:()=>{ // an open cell ringed by trees/bushes with clear sightlines
     let best=null,bs=-1;
     for(const n of nodes){ if(n.t==='rock')continue;
@@ -15243,6 +15321,21 @@ function dungeonFPSprites(){
     out.push({x:p.x/R,y:p.y/R,cv,w:cv.width,h:cv.height,scale:1.5}); }
   return out;
 }
+let fpFx=[], fpFxT=0;
+function fpBurstD(wx,wy,col,n){ for(let i=0;i<(n||10);i++){ const a=Math.random()*6.283, sp=20+Math.random()*50;
+  fpFx.push({x:wx,y:wy,z:0.35+Math.random()*0.4,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,vz:26+Math.random()*36,life:0.45+Math.random()*0.4,t:0,col:col||'#fff'}); }
+  if(fpFx.length>200)fpFx=fpFx.slice(-200); }
+function fpOverlayD(g,FPW,FPH,cam){
+  const now=performance.now(); const dt=Math.min(0.05,(now-(fpFxT||now))/1000); fpFxT=now;
+  for(const p of fpFx){ p.t+=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt*0.02; p.vz-=140*dt; p.vx*=0.92; p.vy*=0.92; }
+  fpFx=fpFx.filter(p=>p.t<p.life&&p.z>-0.1);
+  for(const p of fpFx){ const pr=FPView.projectPoint(cam,p.x/RES,p.y/RES,p.z); if(!pr||pr.dist>24)continue;
+    const a=Math.max(0,1-p.t/p.life), r=Math.max(1,pr.proj*0.05);
+    g.globalAlpha=a; g.fillStyle=p.col; g.fillRect(pr.x-r/2,pr.y-r/2,r,r); }
+  g.globalAlpha=1;
+  const el=$('fpUse'); if(el&&el.style.display!=='none')el.style.display='none';
+  const ub=$('fpUseBtn'); if(ub&&!ub.classList.contains('hidden'))ub.classList.add('hidden');
+}
 const dungeonFPAdapter={
   outdoor:false, fov:0.72, ceilFallback:2, floorFallback:1,
   get MW(){return COLS}, get MH(){return ROWS},
@@ -15250,7 +15343,7 @@ const dungeonFPAdapter={
   solid:fpSolid, wallTex:fpWallTex, floorTex:fpFloorTex, ceilTex:fpCeilTex, glowAt:fpGlow, wallHeight:fpWallHeight,
   light:d=>0.06+1.3/(1+0.14*d*d),
   cam:()=>({x:player.x/RES,y:player.y/RES,yaw:fpYaw,pitch:fpPitch}),
-  sprites:dungeonFPSprites
+  sprites:dungeonFPSprites, overlay:fpOverlayD
 };
 function renderDungeonFP(){
   if(!fpAtlas||fpAtlasTheme!==(T.worldTheme||'default')) buildDungeonFPAtlas();
@@ -15279,7 +15372,10 @@ const dungeonFPControl={
     const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
     moveWithCollision(player, vx, vy); player.face=fpYaw;
     if(fwd||strafe){ player.dir=CFHelp.angToDir(fpYaw); player.anim='walk'; player.animClock+=dt; } },
-  strike(){ if(fpActive) doSlash(fpYaw); } };
+  strike(){ if(!fpActive)return; doSlash(fpYaw);
+    const wx=player.x+Math.cos(fpYaw)*RES*0.9, wy=player.y+Math.sin(fpYaw)*RES*0.9; fpBurstD(wx,wy,'#ffd27a',7); },
+  interact(){ return null; },   // portals & treasure trigger on contact as you walk
+  burst(wx,wy,col,n){ fpBurstD(wx,wy,col,n); } };
 function fpBindOnce(){
   if(fpBound) return; fpBound=true;
   const btn=$('fpToggle'); if(btn) btn.addEventListener('click',()=>{ if(active) toggleDungeonFP(); });
@@ -15785,6 +15881,7 @@ addEventListener('keydown',e=>{
   const k=(e.key||'').toLowerCase();
   if(MOVEK.includes(k)){ if(activeFP()){ fpKeys.add(k); e.preventDefault(); } }
   else if((k===' '||k==='enter')){ const fp=activeFP(); if(fp){ fp.strike(); e.preventDefault(); } }
+  else if(k==='e'||k==='f'){ const fp=activeFP(); if(fp&&fp.interact){ fp.interact(); e.preventDefault(); } }
 });
 addEventListener('keyup',e=>fpKeys.delete((e.key||'').toLowerCase()));
 (function bindFPPointer(){
@@ -15811,6 +15908,8 @@ addEventListener('keyup',e=>fpKeys.delete((e.key||'').toLowerCase()));
   cvFP.addEventListener('pointercancel',end);
   const sb=document.getElementById('fpStrike');
   if(sb)sb.addEventListener('pointerdown',e=>{ const fp=activeFP(); if(fp){fp.strike(); e.preventDefault(); e.stopPropagation();} });
+  const ub=document.getElementById('fpUseBtn');
+  if(ub)ub.addEventListener('pointerdown',e=>{ const fp=activeFP(); if(fp&&fp.interact){fp.interact(); e.preventDefault(); e.stopPropagation();} });
 })();
 // fade the control hint a few seconds after first entering first person
 let fpHintTimer=null;

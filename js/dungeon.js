@@ -2174,6 +2174,21 @@ function dungeonFPSprites(){
     out.push({x:p.x/R,y:p.y/R,cv,w:cv.width,h:cv.height,scale:1.5}); }
   return out;
 }
+let fpFx=[], fpFxT=0;
+function fpBurstD(wx,wy,col,n){ for(let i=0;i<(n||10);i++){ const a=Math.random()*6.283, sp=20+Math.random()*50;
+  fpFx.push({x:wx,y:wy,z:0.35+Math.random()*0.4,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,vz:26+Math.random()*36,life:0.45+Math.random()*0.4,t:0,col:col||'#fff'}); }
+  if(fpFx.length>200)fpFx=fpFx.slice(-200); }
+function fpOverlayD(g,FPW,FPH,cam){
+  const now=performance.now(); const dt=Math.min(0.05,(now-(fpFxT||now))/1000); fpFxT=now;
+  for(const p of fpFx){ p.t+=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt*0.02; p.vz-=140*dt; p.vx*=0.92; p.vy*=0.92; }
+  fpFx=fpFx.filter(p=>p.t<p.life&&p.z>-0.1);
+  for(const p of fpFx){ const pr=FPView.projectPoint(cam,p.x/RES,p.y/RES,p.z); if(!pr||pr.dist>24)continue;
+    const a=Math.max(0,1-p.t/p.life), r=Math.max(1,pr.proj*0.05);
+    g.globalAlpha=a; g.fillStyle=p.col; g.fillRect(pr.x-r/2,pr.y-r/2,r,r); }
+  g.globalAlpha=1;
+  const el=$('fpUse'); if(el&&el.style.display!=='none')el.style.display='none';
+  const ub=$('fpUseBtn'); if(ub&&!ub.classList.contains('hidden'))ub.classList.add('hidden');
+}
 const dungeonFPAdapter={
   outdoor:false, fov:0.72, ceilFallback:2, floorFallback:1,
   get MW(){return COLS}, get MH(){return ROWS},
@@ -2181,7 +2196,7 @@ const dungeonFPAdapter={
   solid:fpSolid, wallTex:fpWallTex, floorTex:fpFloorTex, ceilTex:fpCeilTex, glowAt:fpGlow, wallHeight:fpWallHeight,
   light:d=>0.06+1.3/(1+0.14*d*d),
   cam:()=>({x:player.x/RES,y:player.y/RES,yaw:fpYaw,pitch:fpPitch}),
-  sprites:dungeonFPSprites
+  sprites:dungeonFPSprites, overlay:fpOverlayD
 };
 function renderDungeonFP(){
   if(!fpAtlas||fpAtlasTheme!==(T.worldTheme||'default')) buildDungeonFPAtlas();
@@ -2210,7 +2225,10 @@ const dungeonFPControl={
     const vx=(c*fwd - s*strafe)*spd*dt, vy=(s*fwd + c*strafe)*spd*dt;
     moveWithCollision(player, vx, vy); player.face=fpYaw;
     if(fwd||strafe){ player.dir=CFHelp.angToDir(fpYaw); player.anim='walk'; player.animClock+=dt; } },
-  strike(){ if(fpActive) doSlash(fpYaw); } };
+  strike(){ if(!fpActive)return; doSlash(fpYaw);
+    const wx=player.x+Math.cos(fpYaw)*RES*0.9, wy=player.y+Math.sin(fpYaw)*RES*0.9; fpBurstD(wx,wy,'#ffd27a',7); },
+  interact(){ return null; },   // portals & treasure trigger on contact as you walk
+  burst(wx,wy,col,n){ fpBurstD(wx,wy,col,n); } };
 function fpBindOnce(){
   if(fpBound) return; fpBound=true;
   const btn=$('fpToggle'); if(btn) btn.addEventListener('click',()=>{ if(active) toggleDungeonFP(); });

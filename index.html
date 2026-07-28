@@ -28,6 +28,10 @@ button:active{transform:translateY(1px)}
 #fpStrike:active{transform:translateY(1px);box-shadow:none}
 #fpHint{position:absolute;left:0;right:0;bottom:calc(46px + env(safe-area-inset-bottom));text-align:center;font-size:10px;letter-spacing:.06em;color:rgba(220,230,220,.5);transition:opacity .6s;pointer-events:none}
 #fpHint.gone{opacity:0}
+#fpUse{position:absolute;left:50%;top:56%;transform:translateX(-50%);display:none;font-size:12px;letter-spacing:.12em;color:#ffe6a0;text-shadow:0 1px 3px #000;pointer-events:none}
+#fpUseBtn{position:absolute;left:16px;bottom:calc(84px + env(safe-area-inset-bottom));pointer-events:auto;z-index:42;
+  font-size:13px;letter-spacing:.1em;padding:14px 16px;border-radius:44px;background:linear-gradient(#1f5a4a,#0f3a30);border:1px solid #0a2620;color:#bfeede;box-shadow:0 2px 0 #0a2620}
+#fpUseBtn:active{transform:translateY(1px);box-shadow:none}
 
 /* ================= SURFACE (the garden) ================= */
 #cvS{position:fixed;inset:0;touch-action:none}
@@ -589,8 +593,10 @@ button:active{transform:translateY(1px)}
     <div id="fpCross">+</div>
     <div id="fpWho">&nbsp;</div>
     <div id="fpHp"></div>
-    <div id="fpHint">drag to look · WASD / left-thumb to move · tap to strike</div>
+    <div id="fpHint">drag to look · WASD / left-thumb to move · tap to strike · E to use</div>
+    <div id="fpUse"></div>
     <button id="fpStrike">STRIKE</button>
+    <button id="fpUseBtn">USE</button>
   </div>
 </div>
 <button id="fpToggle" class="hidden" title="First person">FP</button>

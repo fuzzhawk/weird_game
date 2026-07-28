@@ -95,6 +95,20 @@ const FPView = (function(){
   }
 
   const defLight=d=>0.05+1.25/(1+0.13*d*d);
+  let lastFov=0.72, lastHorizon=80;
+  // project a world point (x,y in TILE units, z = height in tiles) to screen space
+  function projectPoint(cam, x, y, z){
+    const yaw=cam.yaw, fov=lastFov;
+    const dirX=Math.cos(yaw), dirY=Math.sin(yaw);
+    const planeX=-dirY*fov, planeY=dirX*fov;
+    const sx=x-cam.x, sy=y-cam.y;
+    const invDet=1/(planeX*dirY-dirX*planeY);
+    const tX=invDet*(dirY*sx-dirX*sy);
+    const tY=invDet*(-planeY*sx+planeX*sy);
+    if(tY<=0.06) return null;
+    const proj=FPH/tY;
+    return { x:(FPW/2)*(1+tX/tY), y:lastHorizon+(0.5-(z||0))*proj, dist:tY, proj, W:FPW, H:FPH };
+  }
   const HMAX=12;
   const hDist=new Float64Array(HMAX), hCx=new Int32Array(HMAX),
         hCy=new Int32Array(HMAX), hSide=new Uint8Array(HMAX);
@@ -106,6 +120,7 @@ const FPView = (function(){
     const fov=A.fov||0.72;
     const planeX=-dirY*fov, planeY=dirX*fov;
     const horizon=(FPH*0.5+(cam.pitch||0))|0;
+    lastFov=fov; lastHorizon=horizon;
     const posZ=0.5*FPH;
     const d=fpBuf;
     const AT=A.atlas, TS=AT.TS, AW=TS*AT.NTEX, PIX=AT.pix;
@@ -246,7 +261,7 @@ const FPView = (function(){
     if(A.overlay)A.overlay(cx2,FPW,FPH,cam);
   }
 
-  return { mount, resize, render, bakeAtlas,
+  return { mount, resize, render, bakeAtlas, projectPoint,
            get W(){return FPW}, get H(){return FPH}, get canvas(){return cv} };
 })();
 if(typeof window!=='undefined')window.FPView=FPView;
