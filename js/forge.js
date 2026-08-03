@@ -97,12 +97,12 @@ const SCHEMA=[
   {k:'headRound',g:'Head',l:'Roundness',t:'r',min:.6,max:1,st:.01,d:.8},
   {k:'headTurn',g:'Head',l:'Turn shift',t:'r',min:0,max:4,st:.5,d:2},
   {k:'snout',g:'Head',l:'Snout length',t:'r',min:0,max:4,st:.5,d:0},
-  {k:'earType',g:'Head',l:'Ears',t:'sel',opts:['none','round','pointed','long','fin'],d:'none'},
+  {k:'earType',g:'Head',l:'Ears',t:'sel',opts:['none','round','pointed','long','fin','tufted','droopy','bat','antenna','frill','feather','ram','split','gill','stalk'],d:'none'},
   {k:'earSize',g:'Head',l:'Ear size',t:'r',min:1,max:4.5,st:.5,d:3},
-  {k:'hornType',g:'Head',l:'Horns',t:'sel',opts:['none','straight','curved','antler','single'],d:'none'},
+  {k:'hornType',g:'Head',l:'Horns',t:'sel',opts:['none','straight','curved','antler','single','ram','bull','unicorn','sweptback','trident','nub','jagged','crown','crescent','tusk'],d:'none'},
   {k:'hornSize',g:'Head',l:'Horn size',t:'r',min:1.5,max:6,st:.5,d:4},
   {k:'crest',g:'Head',l:'Crest / mohawk',t:'c',d:false},
-  {k:'hairType',g:'Head',l:'Hair',t:'sel',opts:['none','tuft','spiky','wild','swept','mohawk','curly','topknot','ponytail','bowl','long'],d:'bowl'},
+  {k:'hairType',g:'Head',l:'Hair',t:'sel',opts:['none','tuft','spiky','wild','swept','mohawk','curly','topknot','ponytail','bowl','long','braids','dreads','afro','fauxhawk','bun','pixie','fringe','horns','flame','tendrils'],d:'bowl'},
   {k:'hairHue',g:'Head',l:'Hair hue',t:'r',min:0,max:360,st:1,d:25},
   {k:'bodyW',g:'Body',l:'Width',t:'r',min:2,max:5.25,st:.25,d:4},
   {k:'bodyH',g:'Body',l:'Height',t:'r',min:4.5,max:9.5,st:.5,d:8},
@@ -118,7 +118,7 @@ const SCHEMA=[
   {k:'stance',g:'Legs',l:'Stance width',t:'r',min:1.5,max:2.5,st:.25,d:2.25},
   {k:'footSize',g:'Legs',l:'Foot size',t:'r',min:1.8,max:2.4,st:.1,d:2.1},
   {k:'shoes',g:'Legs',l:'Shoes',t:'c',d:true},
-  {k:'tailType',g:'Tail',l:'Type',t:'sel',opts:['none','stub','long','spike','fluff'],d:'none'},
+  {k:'tailType',g:'Tail',l:'Type',t:'sel',opts:['none','stub','long','spike','fluff','cat','devil','plume','scorpion','paddle','ring','bushy','fishfin','lash','hook'],d:'none'},
   {k:'tailSize',g:'Tail',l:'Size',t:'r',min:4,max:7,st:.5,d:6},
   {k:'helmet',g:'Armor',l:'Helmet',t:'sel',opts:['none','cap','full'],d:'none'},
   {k:'chest',g:'Armor',l:'Chestplate',t:'sel',opts:['none','half','full'],d:'none'},
@@ -303,15 +303,28 @@ function renderFrame(P,C,dirIdx,anim,fi){
   const drawTail=()=>{if(!tailPts)return;const t=tailPts,ty=P.tailType;
     const px=t.vy,py=-t.vx;
     if(ty==='stub'){g.fillEllipse(t.ax+t.vx*2*u,t.ay+t.vy*2*u,t.ts*.35+.5,t.ts*.35+.5,skin,T.TAIL);return}
-    const segs=3,pts=[[t.ax,t.ay]];
-    for(let i=1;i<=segs;i++){const q=i/segs,curl=q*q*t.wag;
+    const bushy=(ty==='fluff'||ty==='bushy');
+    const upCurl=(ty==='scorpion'||ty==='hook')?1:0;      // curl the tip upward
+    const segs=(ty==='scorpion'||ty==='ring'||ty==='lash')?4:3;
+    const pts=[[t.ax,t.ay]];
+    for(let i=1;i<=segs;i++){const q=i/segs,curl=q*q*t.wag - upCurl*q*q*t.ts*.5;
       pts.push([t.ax+t.vx*t.ts*q+px*curl,t.ay+t.vy*t.ts*q*.9+py*curl])}
-    for(let i=0;i<segs;i++){const r=(ty==='fluff'?1.6:1.1)*u*(1-.18*i)+.3;
-      g.capsule(pts[i][0],pts[i][1],pts[i+1][0],pts[i+1][1],r,skin,T.TAIL)}
-    const tip=pts[segs];
-    if(ty==='spike')g.fillTri(tip[0]-1.4*u,tip[1]+1,tip[0]+1.4*u,tip[1]+1,tip[0]+t.vx*3*u,tip[1]+t.vy*3*u,K.accentD,T.TAIL);
-    else if(ty==='fluff')g.fillEllipse(tip[0],tip[1],2.2*u,2.2*u,skin2,T.TAIL);
-    else g.fillEllipse(tip[0],tip[1],1.1*u,1.1*u,skin2,T.TAIL);
+    for(let i=0;i<segs;i++){let r=(bushy?1.7:ty==='lash'?.9:ty==='paddle'?1.3:1.15)*u*(1-.18*i)+.3;
+      const col=(ty==='ring'&&i%2)?skin2:skin;
+      g.capsule(pts[i][0],pts[i][1],pts[i+1][0],pts[i+1][1],r,col,T.TAIL)}
+    const tip=pts[segs], tx=tip[0], tyy=tip[1], dvx=t.vx, dvy=t.vy;
+    if(ty==='spike')g.fillTri(tx-1.4*u,tyy+1,tx+1.4*u,tyy+1,tx+dvx*3*u,tyy+dvy*3*u,K.accentD,T.TAIL);
+    else if(ty==='devil'){g.fillTri(tx-1.6*u,tyy,tx+.2*u,tyy,tx-.6*u,tyy+dvy*2.4*u+2*u,K.accentD,T.TAIL);
+      g.fillTri(tx-.2*u,tyy,tx+1.6*u,tyy,tx+.6*u,tyy+dvy*2.4*u+2*u,K.accentD,T.TAIL)}
+    else if(bushy)g.fillEllipse(tx,tyy,2.3*u,2.3*u,skin2,T.TAIL);
+    else if(ty==='plume'){for(let k=-1;k<=1;k++)g.capsule(tx,tyy,tx+k*2.2*u,tyy-2.6*u,Math.max(.6,.8*u),k?skin2:K.accent,T.TAIL)}
+    else if(ty==='scorpion'){g.fillEllipse(tx,tyy,1.6*u,1.6*u,skin,T.TAIL);
+      g.fillTri(tx-1*u,tyy,tx+1*u,tyy,tx,tyy-3*u,K.accent,T.TAIL)}
+    else if(ty==='paddle')g.fillEllipse(tx+dvx*u,tyy+dvy*u,2.6*u,1.6*u,skin2,T.TAIL);
+    else if(ty==='fishfin'){g.fillTri(tx,tyy,tx-2.4*u,tyy-1.6*u,tx-2.4*u,tyy+1.6*u,K.accent,T.TAIL);
+      g.fillTri(tx,tyy,tx+2.4*u,tyy-1.6*u,tx+2.4*u,tyy+1.6*u,skin2,T.TAIL)}
+    else if(ty==='hook')g.capsule(tx,tyy,tx-dvx*2*u,tyy-2*u,Math.max(.6,.8*u),K.bone,T.TAIL);
+    else g.fillEllipse(tx,tyy,ty==='ring'?1.4*u:1.1*u,ty==='ring'?1.4*u:1.1*u,skin2,T.TAIL);
   };
   const drawLeg=(L,i)=>{
     const footX=L.x+L.dx,footY=groundY+L.dy;
@@ -383,16 +396,58 @@ function renderFrame(P,C,dirIdx,anim,fi){
       else if(P.earType==='long'){g.capsule(ex,ey+1,ex+i*es*.35,ey-es*1.5,Math.max(.8,.9*u),col,T.EAR);
         g.fillEllipse(ex+i*es*.35,ey-es*1.5,1*u,1.2*u,col,T.EAR)}
       else if(P.earType==='fin')g.fillTri(ex,ey+2*u,ex,ey-1.2*u,ex+i*es,ey+.6*u,col,T.EAR);
+      else if(P.earType==='tufted'){g.fillEllipse(ex,ey-es*.2,es*.5+.5,es*.5+.5,col,T.EAR);
+        g.fillTri(ex-.8*u,ey-es*.4,ex+.8*u,ey-es*.4,ex+i*.4*u,ey-es*1.15,K.hairD,T.EAR)}
+      else if(P.earType==='droopy'){g.capsule(ex,ey,ex+i*es*.4,ey+es*1.3,Math.max(.8,.95*u),col,T.EAR);
+        g.fillEllipse(ex+i*es*.4,ey+es*1.3,1.1*u,1.4*u,farTint(col),T.EAR)}
+      else if(P.earType==='bat'){g.fillTri(ex-es*.55,ey+1.4*u,ex+es*.55,ey+1.4*u,ex+i*es*.5,ey-es*1.2,col,T.EAR);
+        g.fillTri(ex-es*.22,ey+.9*u,ex+es*.22,ey+.9*u,ex+i*es*.3,ey-es*.7,K.accentD,T.EAR)}
+      else if(P.earType==='antenna'){g.capsule(ex,ey,ex+i*es*.5,ey-es*1.7,Math.max(.6,.6*u),K.accentD,T.EAR);
+        g.fillEllipse(ex+i*es*.5,ey-es*1.7,1*u,1*u,K.accent,T.DECOR)}
+      else if(P.earType==='frill'){for(let k=-1;k<=1;k++){const a=i*(.5+k*.35);
+        g.fillTri(ex-.9*u,ey+1.4*u,ex+.9*u,ey+1.4*u,ex+a*es,ey-es*.9,k===0?col:farTint(col),T.EAR)}}
+      else if(P.earType==='feather'){for(let k=0;k<3;k++){const t=k/2;
+        g.capsule(ex,ey+1*u,ex+i*es*(.3+t*.5),ey-es*(.7+t*.5),Math.max(.6,.7*u),k%2?farTint(col):col,T.EAR)}}
+      else if(P.earType==='ram'){g.capsule(ex,ey,ex+i*es*.6,ey-es*.3,Math.max(.7,.85*u),K.bone,T.EAR);
+        g.capsule(ex+i*es*.6,ey-es*.3,ex+i*es*.35,ey-es*.95,Math.max(.6,.7*u),K.bone,T.EAR);
+        g.capsule(ex+i*es*.35,ey-es*.95,ex+i*es*.75,ey-es*1.1,Math.max(.5,.6*u),K.bone,T.EAR)}
+      else if(P.earType==='split'){g.fillTri(ex-es*.4,ey+1.4*u,ex+es*.1,ey+1.4*u,ex+i*es*.1,ey-es,col,T.EAR);
+        g.fillTri(ex+es*.1,ey+1.4*u,ex+es*.55,ey+1.4*u,ex+i*es*.55,ey-es*.8,col,T.EAR)}
+      else if(P.earType==='gill'){for(let k=0;k<3;k++){const gy=ey-es*.1+k*1.2*u;
+        g.capsule(ex,gy,ex+i*es*.7,gy+.4*u,Math.max(.6,.65*u),k%2?K.accentD:farTint(col),T.EAR)}}
+      else if(P.earType==='stalk'){g.capsule(ex,ey+1*u,ex+i*es*.35,ey-es*1.6,Math.max(.7,.8*u),col,T.EAR);
+        g.fillEllipse(ex+i*es*.35,ey-es*1.6,1.4*u,1.4*u,skin2,T.EAR);
+        g.fillEllipse(ex+i*es*.35,ey-es*1.6,.7*u,.7*u,K.eye||K.accentD,T.EYE)}
     }};
-  const drawHorns=()=>{if(P.hornType==='none')return;const hs=P.hornSize*u;
-    const one=P.hornType==='single';
+  const drawHorns=()=>{if(P.hornType==='none')return;const hs=P.hornSize*u;const ht=P.hornType;
+    const one=(ht==='single'||ht==='unicorn');
     for(const i of(one?[0]:[-1,1])){
       const hx=headCx+i*hrX*.45+fx*1*u,hy=headTopY+1.2*u;
-      if(P.hornType==='straight'||one)g.capsule(hx,hy,hx+i*hs*.3,hy-hs,Math.max(.7,.85*u),K.bone,T.HORN);
-      else if(P.hornType==='curved'){g.capsule(hx,hy,hx+i*hs*.55,hy-hs*.6,Math.max(.7,.9*u),K.bone,T.HORN);
+      if(ht==='straight'||ht==='single')g.capsule(hx,hy,hx+i*hs*.3,hy-hs,Math.max(.7,.85*u),K.bone,T.HORN);
+      else if(ht==='curved'){g.capsule(hx,hy,hx+i*hs*.55,hy-hs*.6,Math.max(.7,.9*u),K.bone,T.HORN);
         g.capsule(hx+i*hs*.55,hy-hs*.6,hx+i*hs*.2,hy-hs*1.15,Math.max(.6,.6*u),K.bone,T.HORN)}
-      else if(P.hornType==='antler'){g.capsule(hx,hy,hx+i*hs*.25,hy-hs,Math.max(.6,.7*u),K.bone,T.HORN);
+      else if(ht==='antler'){g.capsule(hx,hy,hx+i*hs*.25,hy-hs,Math.max(.6,.7*u),K.bone,T.HORN);
         g.capsule(hx+i*hs*.12,hy-hs*.5,hx+i*hs*.65,hy-hs*.75,Math.max(.5,.55*u),K.bone,T.HORN)}
+      else if(ht==='unicorn'){g.capsule(hx,hy-hrY*.4,hx,hy-hs*1.4,Math.max(.7,.85*u),K.bone,T.HORN);
+        g.fillTri(hx-.9*u,hy-hs*1.1,hx+.9*u,hy-hs*1.1,hx,hy-hs*1.55,K.accent,T.HORN)}
+      else if(ht==='ram'){g.capsule(hx,hy,hx+i*hs*.6,hy+hs*.1,Math.max(.75,.95*u),K.bone,T.HORN);
+        g.capsule(hx+i*hs*.6,hy+hs*.1,hx+i*hs*.75,hy-hs*.5,Math.max(.65,.8*u),K.bone,T.HORN);
+        g.capsule(hx+i*hs*.75,hy-hs*.5,hx+i*hs*.35,hy-hs*.75,Math.max(.55,.65*u),K.bone,T.HORN)}
+      else if(ht==='bull'){g.capsule(hx,hy,hx+i*hs*.85,hy-hs*.1,Math.max(.7,.85*u),K.bone,T.HORN);
+        g.capsule(hx+i*hs*.85,hy-hs*.1,hx+i*hs*.95,hy-hs*.75,Math.max(.55,.65*u),K.bone,T.HORN)}
+      else if(ht==='sweptback'){g.capsule(hx,hy,hx-fx*hs*.5+i*hs*.2,hy-hs*.8,Math.max(.65,.8*u),K.bone,T.HORN);
+        g.capsule(hx-fx*hs*.5+i*hs*.2,hy-hs*.8,hx-fx*hs*.9+i*hs*.15,hy-hs*1.0,Math.max(.5,.6*u),K.bone,T.HORN)}
+      else if(ht==='trident'){g.capsule(hx,hy,hx,hy-hs,Math.max(.7,.8*u),K.bone,T.HORN);
+        for(const k of[-1,1])g.capsule(hx,hy-hs*.55,hx+k*hs*.35,hy-hs*.95,Math.max(.5,.6*u),K.bone,T.HORN)}
+      else if(ht==='nub')g.fillEllipse(hx+i*hs*.15,hy-hs*.25,hs*.32+.5,hs*.4+.5,K.bone,T.HORN);
+      else if(ht==='jagged'){let px2=hx,py2=hy;for(let k=0;k<3;k++){const nx=hx+i*hs*(.15+k*.12)*(k%2?1.6:.4),ny=hy-hs*(k+1)/3;
+        g.capsule(px2,py2,nx,ny,Math.max(.5,(.8-k*.12)*u),K.bone,T.HORN);px2=nx;py2=ny}}
+      else if(ht==='crown'){for(let k=-1;k<=1;k++){const cx3=hx+i*.3*u+k*1.4*u;
+        g.fillTri(cx3-.9*u,hy,cx3+.9*u,hy,cx3,hy-hs*(.6+.3*(1-Math.abs(k))),K.accent,T.HORN)}}
+      else if(ht==='crescent'){g.capsule(hx,hy,hx+i*hs*.5,hy-hs*.7,Math.max(.7,.85*u),K.bone,T.HORN);
+        g.capsule(hx+i*hs*.5,hy-hs*.7,hx-i*hs*.05,hy-hs*1.1,Math.max(.55,.7*u),K.bone,T.HORN)}
+      else if(ht==='tusk'){g.capsule(hx,hy+hs*.2,hx+i*hs*.25,hy-hs*.7,Math.max(.8,1*u),K.bone,T.HORN);
+        g.fillEllipse(hx+i*hs*.25,hy-hs*.7,.9*u,1.1*u,shade(K.bone,.2),T.HORN)}
     }};
   const drawCrest=()=>{if(!P.crest)return;const col=K.accent;
     if(fx!==0){for(let i=0;i<3;i++){const sx=headCx-fx*(i*2.2*u-2*u),sy=headTopY+1*u;
@@ -448,6 +503,32 @@ function renderFrame(P,C,dirIdx,anim,fi){
     }else if(ht==='long'){for(const i of[-1,1])
       g.blobV(headCx+i*hrX*1.05,headTopY+hrY*.4,hrY*1.7+2*u,1.4*u,1*u,.3,hcD,T.HAIR);
       if(fy<0)g.blobV(headCx,headTopY+hrY,hrY*1.5,hrX*.85,hrX*.55,.3,hcD,T.HAIR)}
+    else if(ht==='braids'){for(const i of[-1,1]){const px=headCx+i*hrX*.9+fx*.5*u,py=headTopY+hrY*.4;
+      for(let k=0;k<3;k++)g.fillEllipse(px,py+k*1.7*u,1.3*u,1.1*u,k%2?hc:hcD,T.HAIR);
+      g.fillTri(px-1*u,py+5*u,px+1*u,py+5*u,px,py+6.5*u,K.accent,T.HAIR)}}
+    else if(ht==='dreads'){for(let i=-2;i<=2;i++){const px=headCx+hoff+i*hrX*.5,py=headTopY+hrY*.3+Math.abs(i)*.4*u;
+      g.capsule(px,py,px+i*.4*u,py+hrY*1.6,Math.max(.7,.85*u),i%2?hc:hcD,T.HAIR);
+      g.fillEllipse(px+i*.4*u,py+hrY*1.6,.9*u,.9*u,K.accentD,T.HAIR)}}
+    else if(ht==='afro'){for(let a=0;a<8;a++){const an=a/8*TWO,rr=hrX*1.15;
+      g.fillEllipse(headCx+hoff+Math.cos(an)*rr,headTopY-1*u+Math.sin(an)*hrY*.8,1.7*u,1.7*u,a%2?hc:hcD,T.HAIR)}
+      g.fillEllipse(headCx+hoff,headTopY-1*u,hrX*1.1,hrY*.9,hc,T.HAIR)}
+    else if(ht==='fauxhawk'){for(let i=-2;i<=2;i++){const sx=headCx+hoff+i*.95*u,lift=(3.2-Math.abs(i)*.9)*u;
+      g.fillTri(sx-.9*u,headTopY-.5*u,sx+.9*u,headTopY-.5*u,sx-fx*.4*u,headTopY-lift,i===0?hc:hcD,T.HAIR)}}
+    else if(ht==='bun'){g.fillEllipse(headCx+hoff-fx*hrX*.2,headTopY-3.2*u,2.2*u,2.1*u,hc,T.HAIR);
+      g.fillEllipse(headCx+hoff-fx*hrX*.2,headTopY-3.2*u,1*u,1*u,hcD,T.HAIR)}
+    else if(ht==='pixie'){if(fy>=0)for(const i of[-1,1])g.fillTri(headCx+i*hrX*.7,headTopY+.5*u,headCx+i*hrX*.95,headTopY+.5*u,headCx+i*hrX*.6,headTopY+hrY*.7,hcD,T.HAIR);
+      g.fillEllipse(headCx+hoff+fx*hrX*.3,headTopY-.4*u,hrX*.6,1.4*u,hcD,T.HAIR)}
+    else if(ht==='fringe'){if(fy>=0)for(let i=-2;i<=2;i++){const sx=headCx+fx*.6*u+i*hrX*.42;
+      g.fillTri(sx-1*u,headTopY+.4*u,sx+1*u,headTopY+.4*u,sx,headTopY+2.4*u,i%2?hc:hcD,T.HAIR)}}
+    else if(ht==='horns'){for(const i of[-1,1]){g.capsule(headCx+i*hrX*.5+hoff,headTopY-.5*u,headCx+i*hrX*.9,headTopY-hrY*1.4,Math.max(.9,1.1*u),hc,T.HAIR);
+      g.fillEllipse(headCx+i*hrX*.9,headTopY-hrY*1.4,1.1*u,1.1*u,hcD,T.HAIR)}}
+    else if(ht==='flame'){const n=5;for(let i=0;i<n;i++){const t2=(i/(n-1))*2-1;
+      const sx=headCx+hoff+t2*hrX*.7,lift=(4.5-Math.abs(t2)*1.2)*u;
+      g.fillTri(sx-1.3*u,headTopY-.5*u,sx+1.3*u,headTopY-.5*u,sx-fx*t2*1.4*u,headTopY-lift,i%2?K.accent:hc,T.HAIR)}}
+    else if(ht==='tendrils'){for(let i=-2;i<=2;i++){const px=headCx+hoff+i*hrX*.55,py=headTopY;
+      const wob=Math.sin(fi*.9+i)*1.4*u;
+      g.capsule(px,py,px+wob,py+hrY*1.3,Math.max(.6,.75*u),i%2?hc:hcD,T.HAIR);
+      g.capsule(px+wob,py+hrY*1.3,px-wob*.6,py+hrY*2.2,Math.max(.5,.6*u),i%2?hc:hcD,T.HAIR)}}
   };
   const drawHead=()=>{
     g.blobV(headCx,headTopY,hrY*2,hrX,hrX*.78,P.headRound,skin,T.HEAD);
@@ -574,6 +655,41 @@ const PRESETS={
     spikes:'back',cloth:'none',chest:'none',helmet:'none',pauldrons:false,boots:false,gauntlets:false,
     belt:false,spots:false,stripes:true,tex:'dither',texAmt:.5,attackStyle:'cast',hue:280,hue2:250,accent:130,
     lit:44,bodyW:3.75,taper:-.2,legLen:6,armLen:4.5,crest:false,snout:1.5,hairType:'none',cloth:'none',shoes:false},
+  Sprite:{earType:'antenna',earSize:4,hornType:'none',tailType:'lash',tailSize:5,hairType:'flame',hairHue:200,
+    cloth:'none',belt:false,chest:'none',helmet:'none',boots:false,shoes:false,spikes:'none',tex:'smooth',
+    attackStyle:'cast',bodyW:3.25,bodyH:6.5,taper:-.2,legLen:6,armLen:4,headSize:.7,hue:190,sat:60,lit:66,accent:50},
+  Golem:{earType:'none',hornType:'nub',hornSize:3,tailType:'none',hairType:'none',snout:0,
+    cloth:'none',belt:false,chest:'none',helmet:'none',boots:false,shoes:false,spikes:'both',tex:'scales',texAmt:.7,
+    spots:true,attackStyle:'claw',bodyW:5,bodyH:9,taper:-.15,bodyRound:.7,legLen:6,legThick:2,armLen:4.5,armThick:1.6,
+    headSize:.2,footSize:2.4,hue:30,sat:18,lit:48},
+  Serpentkin:{earType:'gill',earSize:3.5,hornType:'sweptback',hornSize:4,tailType:'lash',tailSize:7,hairType:'none',
+    snout:2,cloth:'none',belt:false,chest:'none',helmet:'none',boots:false,shoes:false,spikes:'back',tex:'scales',texAmt:.8,
+    stripes:true,attackStyle:'stab',bodyW:3.5,taper:-.2,legLen:6,armLen:4.5,hue:120,sat:52,lit:52,accent:60},
+  Fungalfolk:{earType:'frill',earSize:3,hornType:'none',tailType:'none',hairType:'afro',hairHue:300,
+    cloth:'robe',belt:true,chest:'none',helmet:'none',boots:false,shoes:true,spikes:'none',tex:'dither',texAmt:.5,
+    spots:true,attackStyle:'cast',bodyW:4,bodyH:7,headSize:.7,headRound:.95,hue:20,sat:30,lit:60,accent:300},
+  Insectoid:{earType:'antenna',earSize:4,hornType:'trident',hornSize:4,tailType:'scorpion',tailSize:7,hairType:'none',
+    cloth:'none',belt:false,chest:'half',helmet:'cap',pauldrons:true,boots:true,gauntlets:true,shoes:false,
+    spikes:'both',tex:'scales',texAmt:.7,attackStyle:'claw',bodyW:3.75,taper:-.25,legLen:6.5,armLen:5,
+    hue:70,sat:55,lit:44,metalHue:70},
+  Birdfolk:{earType:'feather',earSize:4,hornType:'none',tailType:'plume',tailSize:7,hairType:'none',crest:true,
+    snout:3,cloth:'tunic',belt:true,chest:'none',helmet:'none',boots:false,shoes:true,spikes:'none',tex:'fur',texAmt:.6,
+    attackStyle:'stab',bodyW:3.75,legLen:7,armLen:4.5,hue:210,sat:50,lit:58,accent:35},
+  Wraith:{earType:'none',hornType:'crown',hornSize:4,tailType:'lash',tailSize:6,
+    hairType:'tendrils',hairHue:270,cloth:'robe',belt:false,chest:'none',helmet:'none',boots:false,shoes:false,
+    spikes:'none',tex:'dither',texAmt:.6,attackStyle:'cast',bodyW:3.5,bodyH:9,taper:-.2,headSize:.6,
+    hue:260,sat:35,lit:40,accent:280,clothHue:265},
+  Ogre:{earType:'droopy',earSize:4,hornType:'tusk',hornSize:5,tailType:'none',hairType:'fauxhawk',hairHue:20,
+    snout:2,cloth:'none',belt:true,chest:'none',helmet:'none',boots:false,shoes:false,spikes:'shoulders',
+    tex:'fur',texAmt:.6,attackStyle:'claw',bodyW:5,bodyH:9.5,taper:-.15,legLen:6,legThick:2,armLen:5,armThick:1.6,
+    headSize:.3,hue:95,sat:28,lit:52},
+  Fae:{earType:'split',earSize:4,hornType:'unicorn',hornSize:5,tailType:'ring',tailSize:5,hairType:'braids',hairHue:320,
+    cloth:'tunic',belt:true,chest:'none',helmet:'none',boots:false,shoes:true,spikes:'none',tex:'smooth',
+    attackStyle:'cast',bodyW:3.25,bodyH:6.5,legLen:7,armLen:4,headSize:.6,hue:330,sat:48,lit:68,accent:150},
+  Automaton:{earType:'stalk',earSize:3,hornType:'nub',hornSize:2,tailType:'none',hairType:'none',snout:0,
+    cloth:'none',belt:false,chest:'full',helmet:'full',pauldrons:true,boots:true,gauntlets:true,shoes:false,
+    spikes:'none',tex:'smooth',attackStyle:'slash',bodyW:4.25,bodyH:8,taper:-.3,bodyRound:.4,legLen:6.5,
+    headSize:.3,headRound:.65,hue:210,sat:12,lit:56,metalHue:210,metalLit:60},
 };
 
 function rasterToImageData(r){
