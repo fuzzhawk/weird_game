@@ -908,22 +908,57 @@ function surfMonsterParams(type){
   hue2:Math.round(hueBase+30),accent:Math.round((hueBase+180)%360),metalHue,
   seed:seed+'-'+type+'-'+floraSeed};
 }
+// the player's forged kind (from the creator) drives the hero + the village folk
+function applyPlayerKind(){
+ const K=(typeof window!=='undefined')&&window.PLAYER_KIND;
+ if(!K){ Hero.kindParams=null; Hero.kindTraits=null; Hero.kindAbil=null; return; }
+ Hero.kindParams=K.params||null; Hero.kindTraits=(K.traits||[]).slice(); Hero.kindAbil=(K.abilities||[]).slice();
+ for(const a of Hero.kindAbil){
+  if(a==='swift')Hero.speedMul*=1.18;
+  else if(a==='tough'){Hero.maxHp+=2;Hero.hp=Hero.maxHp;}
+  else if(a==='fierce')Hero.dmg+=1;
+  else if(a==='reach')Hero.rangeMul*=1.25;
+  else if(a==='lucky')Hero.luck=(Hero.luck||0)+0.3;
+  else if(a==='hardy')Hero.hardy=true;
+ }
+}
+// a color/size-varied individual of the player's kind, keeping its silhouette
+function kindVariant(base, lookSeed, elder){
+ const r=CF.mulberry32(U.hashStr(lookSeed||'x')^0x5A9E3);
+ const p={...base};
+ p.hue=Math.round(((base.hue||25)+(r()*54-27))+720)%360;
+ p.sat=clamp(Math.round((base.sat||40)+(r()*24-12)),12,90);
+ p.lit=clamp(Math.round((base.lit||60)+(r()*16-8)),24,78);
+ p.hairHue=Math.round(r()*360); p.clothHue=Math.round(r()*360);
+ p.bodyH=clamp((base.bodyH||8)+(r()*1.4-0.7),5,9.5);
+ p.bodyW=clamp((base.bodyW||4)+(r()*0.8-0.4),2.5,5.25);
+ if(elder){ p.lit=clamp(p.lit+10,24,80); p.sat=clamp(p.sat-10,10,90); }
+ if(r()<0.22 && base.hairType!=='none'){ const o=CF.SCHEMA.find(s=>s.k==='hairType').opts; p.hairType=o[(r()*o.length)|0]; }
+ p.size=48; p.seed=lookSeed;
+ return p;
+}
 function processBakeQueue(){
  if(!bakeQueue.length)return;
  const job=bakeQueue.shift();
  try{
   if(job.kind==='person'){
    if(job.p.dead)return;
-   const params=CFHelp.villagerParams(job.p.lookSeed,{elder:job.p.age>=56});
+   const params=(Hero.kindParams&&!job.p.notKin)
+     ? kindVariant(Hero.kindParams, job.p.lookSeed, job.p.age>=56)
+     : CFHelp.villagerParams(job.p.lookSeed,{elder:job.p.age>=56});
    job.p.sprite=CFHelp.bakeCreature(params,48,['walk','talk','work']);
   }else if(job.kind==='hero'){
-   const hrng=CF.mulberry32(U.hashStr(Hero.lookSeed)^0xC0DE);
-   const arch=CFHelp.ARCHETYPES.player(hrng);
-   const params={...arch,
-    hue:Math.round(hrng()*360),sat:45+Math.round(hrng()*25),lit:52+Math.round(hrng()*14),
-    hue2:Math.round(hrng()*360),accent:Math.round(hrng()*360),
-    hairHue:Math.round(hrng()*360),clothHue:Math.round(hrng()*360),metalHue:210,
-    seed:Hero.lookSeed};
+   let params;
+   if(Hero.kindParams){ params={...Hero.kindParams, size:48, seed:Hero.lookSeed}; }
+   else {
+    const hrng=CF.mulberry32(U.hashStr(Hero.lookSeed)^0xC0DE);
+    const arch=CFHelp.ARCHETYPES.player(hrng);
+    params={...arch,
+     hue:Math.round(hrng()*360),sat:45+Math.round(hrng()*25),lit:52+Math.round(hrng()*14),
+     hue2:Math.round(hrng()*360),accent:Math.round(hrng()*360),
+     hairHue:Math.round(hrng()*360),clothHue:Math.round(hrng()*360),metalHue:210,
+     seed:Hero.lookSeed};
+   }
    hero.sprite=CFHelp.bakeCreature(params,48);
   }else if(job.kind==='mon'){
    surfMon[job.type]=CFHelp.bakeCreature(surfMonsterParams(job.type),monsterBakeSize(job.type),['walk','attack']);
@@ -1265,9 +1300,15 @@ function newPerson({x,y,age,traits,parents,mind}){
   lookSeed:'folk-'+(nextId)+'-'+((R()*1e9)|0),sprite:null,animClock:rf(0,4)
  };
  if(!p.traits.length){
-  const t1=pick(TKEYS);let t2=pick(TKEYS);
-  while(t2===t1)t2=pick(TKEYS);
-  p.traits=[t1,t2];
+  const kin=Hero.kindTraits;
+  if(kin&&kin.length&&R()<0.55){        // the founder's nature runs in the kind
+   const t1=pick(kin); let t2=pick(TKEYS); while(t2===t1)t2=pick(TKEYS);
+   p.traits=[t1,t2];
+  }else{
+   const t1=pick(TKEYS);let t2=pick(TKEYS);
+   while(t2===t1)t2=pick(TKEYS);
+   p.traits=[t1,t2];
+  }
  }
  for(const t of p.traits)applyTrait(p,t,1);
  p.lifespan+=Math.round(p.base.luck*6);
@@ -7999,6 +8040,7 @@ function reseed(newSeed,theme,params){
  {const wov=$('warm'); if(wov)wov.classList.add('hidden');}
  {const cs=$('charsel'); if(cs)cs.classList.add('hidden');}
  Hero.name='the Sage'; Hero.pc=null;   // each world lets the player choose a new life
+ applyPlayerKind();
  campaign=null; interiorQuest=null; closeStoryCard(); {const sb=$('story');if(sb)sb.classList.add('hidden');}
  seed=(newSeed===undefined)?((Math.random()*2**31)|0):newSeed;
  if(theme)worldTheme=theme;
