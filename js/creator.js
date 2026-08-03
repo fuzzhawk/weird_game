@@ -22,6 +22,13 @@ const Creator = (function(){
     hardy:{n:'Hardy',d:'faster stamina'},
   };
   const PARTS=[['earType','Ears'],['hornType','Horns'],['hairType','Hair'],['tailType','Tail'],['cloth','Garment'],['tex','Skin']];
+  // body-part size sliders (brought back from the Creature Forge)
+  const PROPS=[['bodyH','Height'],['bodyW','Width'],['taper','Torso'],['bodyRound','Round'],
+    ['headSize','Head'],['headRound','Head round'],['snout','Snout'],
+    ['earSize','Ear size'],['hornSize','Horn size'],
+    ['armLen','Arm len'],['armThick','Arm thick'],['handSize','Hands'],
+    ['legLen','Leg len'],['legThick','Leg thick'],['stance','Stance'],['footSize','Feet'],
+    ['tailSize','Tail size']];
   const TRAIT_KEYS=['brave','kind','creative','curious','ambitious','hardworking','charming','cheerful','loyal','lucky','commanding','dreamer','passionate','grumpy','stubborn','rebellious'];
   const MAXTRAITS=3, MAXABIL=2;
 
@@ -65,9 +72,10 @@ const Creator = (function(){
       <div class="frow"><button class="btn" id="fRand">🎲 Surprise me</button><button class="btn" id="fSpin">↻ Turn</button></div>
       <div class="fsec">Kind</div><div class="chips" id="fPresets"></div>
       <div class="fsec">Form</div><div id="fParts"></div>
+      <div class="fsec">Proportions <span id="fPropReset" style="float:right;color:#9a8fb0;cursor:pointer;letter-spacing:0;text-transform:none">reset ↺</span></div><div id="fProps"></div>
+      <div class="fsec">Colour</div>
       <div class="prow"><label>Hue</label><input type="range" id="fHue" min="0" max="360" step="1"></div>
       <div class="prow"><label>Vividness</label><input type="range" id="fSat" min="0" max="100" step="1"></div>
-      <div class="prow"><label>Build</label><input type="range" id="fSize" min="5.5" max="9.5" step="0.5"></div>
       <div class="fsec">Nature — pick up to ${MAXTRAITS}</div><div class="chips" id="fTraits"></div>
       <div class="fsec">Gift — pick up to ${MAXABIL}</div><div class="chips" id="fAbil"></div>
       <button id="fEnter">Shape your world →</button>
@@ -97,10 +105,19 @@ const Creator = (function(){
     for(const k in ABIL){ const b=document.createElement('button'); b.className='chip';
       b.innerHTML=ABIL[k].n+'<small>'+ABIL[k].d+'</small>'; b.dataset.abil=k;
       b.onclick=()=>toggleAbil(k,b); ac.appendChild(b); }
+    // proportion sliders (min/max/step read from the forge schema)
+    const props=$('fProps');
+    for(const [k,label] of PROPS){ const s=CF.SCHEMA.find(x=>x.k===k); if(!s)continue;
+      const row=document.createElement('div'); row.className='prow';
+      const l=document.createElement('label'); l.textContent=label;
+      const inp=document.createElement('input'); inp.type='range'; inp.id='fprop_'+k;
+      inp.min=s.min; inp.max=s.max; inp.step=s.st;
+      inp.oninput=()=>{ params[k]=+inp.value; rebuild(); };
+      row.appendChild(l); row.appendChild(inp); props.appendChild(row); }
+    $('fPropReset').onclick=()=>{ const d=CF.defaultParams(); for(const[k] of PROPS)params[k]=d[k]; rebuild(); syncControls(); };
     // sliders
     $('fHue').oninput=()=>{ params.hue=+$('fHue').value; rebuild(); };
     $('fSat').oninput=()=>{ params.sat=+$('fSat').value; rebuild(); };
-    $('fSize').oninput=()=>{ params.bodyH=+$('fSize').value; rebuild(); };
     $('fRand').onclick=randomize;
     $('fSpin').onclick=()=>{ pvDir=(pvDir+1)%8; };
     $('fEnter').onclick=enter;
@@ -108,7 +125,8 @@ const Creator = (function(){
 
   function syncControls(){
     for(const [k] of PARTS){ const sel=$('fpart_'+k); if(sel)sel.value=params[k]; }
-    $('fHue').value=params.hue; $('fSat').value=params.sat; $('fSize').value=params.bodyH;
+    for(const [k] of PROPS){ const inp=$('fprop_'+k); if(inp&&params[k]!=null)inp.value=params[k]; }
+    $('fHue').value=params.hue; $('fSat').value=params.sat;
     for(const b of $('fPresets').children) b.classList.toggle('on', b.dataset.preset===params._preset);
   }
   function setPreset(name){ params=baseParams(name); params._preset=name; rebuild(); syncControls(); }
