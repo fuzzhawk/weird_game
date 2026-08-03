@@ -123,7 +123,9 @@ function enterWorld(cfg){
 }
 
 Editor.init();
-Worlds.boot(enterWorld);
+// forge your kind first, then shape the world
+if(window.Creator) Creator.boot(()=>Worlds.boot(enterWorld));
+else Worlds.boot(enterWorld);
 
 // hooks for tinkering & automated smoke tests
 window.GameDebug={
