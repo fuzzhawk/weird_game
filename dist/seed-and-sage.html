@@ -1400,8 +1400,8 @@ const SCHEMA=[
   {k:'crest',g:'Head',l:'Crest / mohawk',t:'c',d:false},
   {k:'hairType',g:'Head',l:'Hair',t:'sel',opts:['none','tuft','spiky','wild','swept','mohawk','curly','topknot','ponytail','bowl','long','braids','dreads','afro','fauxhawk','bun','pixie','fringe','horns','flame','tendrils'],d:'bowl'},
   {k:'hairHue',g:'Head',l:'Hair hue',t:'r',min:0,max:360,st:1,d:25},
-  {k:'bodyW',g:'Body',l:'Width',t:'r',min:2,max:5.25,st:.25,d:4},
-  {k:'bodyH',g:'Body',l:'Height',t:'r',min:4.5,max:9.5,st:.5,d:8},
+  {k:'bodyW',g:'Body',l:'Width',t:'r',min:2,max:5.25,st:.25,d:3.5},
+  {k:'bodyH',g:'Body',l:'Height',t:'r',min:4,max:9.5,st:.5,d:6},
   {k:'taper',g:'Body',l:'Taper (pear ↔ buff)',t:'r',min:-.35,max:-.15,st:.05,d:-.25},
   {k:'bodyRound',g:'Body',l:'Roundness',t:'r',min:.35,max:.75,st:.01,d:.5},
   {k:'belly',g:'Body',l:'Belly patch',t:'c',d:true},
@@ -1409,7 +1409,7 @@ const SCHEMA=[
   {k:'armThick',g:'Arms',l:'Thickness',t:'r',min:1.2,max:1.6,st:.1,d:1.4},
   {k:'handSize',g:'Arms',l:'Hand size',t:'r',min:1.3,max:1.8,st:.1,d:1.5},
   {k:'armSpread',g:'Arms',l:'Shoulder spread',t:'r',min:0,max:1,st:.25,d:.5},
-  {k:'legLen',g:'Legs',l:'Length',t:'r',min:6,max:7,st:.5,d:6.5},
+  {k:'legLen',g:'Legs',l:'Length',t:'r',min:5,max:7,st:.5,d:6},
   {k:'legThick',g:'Legs',l:'Thickness',t:'r',min:1.4,max:2,st:.1,d:1.7},
   {k:'stance',g:'Legs',l:'Stance width',t:'r',min:1.5,max:2.5,st:.25,d:2.25},
   {k:'footSize',g:'Legs',l:'Foot size',t:'r',min:1.8,max:2.4,st:.1,d:2.1},
@@ -1986,6 +1986,38 @@ const PRESETS={
     cloth:'none',belt:false,chest:'full',helmet:'full',pauldrons:true,boots:true,gauntlets:true,shoes:false,
     spikes:'none',tex:'smooth',attackStyle:'slash',bodyW:4.25,bodyH:8,taper:-.3,bodyRound:.4,legLen:6.5,
     headSize:.3,headRound:.65,hue:210,sat:12,lit:56,metalHue:210,metalLit:60},
+  // ---- humanoid folk (smaller, people-shaped) ----
+  Elf:{earType:'pointed',earSize:3.5,hornType:'none',tailType:'none',hairType:'ponytail',hairHue:40,snout:0,
+    cloth:'tunic',belt:true,chest:'none',helmet:'none',boots:true,shoes:true,spikes:'none',tex:'smooth',
+    attackStyle:'stab',bodyW:3,bodyH:6.5,taper:-.2,legLen:7,armLen:5,headSize:.5,hue:28,sat:26,lit:70,clothHue:150},
+  Dwarf:{earType:'round',earSize:2,hornType:'none',tailType:'none',hairType:'wild',hairHue:20,snout:0,
+    cloth:'tunic',belt:true,chest:'half',helmet:'none',boots:true,shoes:true,spikes:'none',tex:'smooth',
+    attackStyle:'slash',bodyW:4.5,bodyH:4.5,taper:-.2,legLen:5,legThick:2,armLen:4.5,armThick:1.6,headSize:.6,
+    hue:22,sat:34,lit:60,clothHue:20,metalHue:30},
+  Halfling:{earType:'round',earSize:2.5,hornType:'none',tailType:'none',hairType:'curly',hairHue:30,snout:0,
+    cloth:'shirt',belt:true,chest:'none',helmet:'none',boots:false,shoes:false,spikes:'none',tex:'smooth',
+    attackStyle:'stab',bodyW:3.25,bodyH:4,taper:-.2,legLen:5,armLen:4,headSize:.8,headRound:.9,hue:30,sat:36,lit:66},
+  Ranger:{earType:'round',earSize:2,hornType:'none',tailType:'none',hairType:'swept',hairHue:18,snout:0,
+    cloth:'tunic',belt:true,chest:'none',helmet:'none',boots:true,shoes:true,spikes:'none',tex:'smooth',
+    attackStyle:'stab',bodyW:3.5,bodyH:6,legLen:6.5,armLen:5,headSize:.5,hue:110,sat:30,lit:48,clothHue:110},
+  Bard:{earType:'pointed',earSize:2.5,hornType:'none',tailType:'none',hairType:'topknot',hairHue:280,snout:0,
+    cloth:'robe',belt:true,chest:'none',helmet:'none',boots:false,shoes:true,spikes:'none',tex:'smooth',
+    attackStyle:'cast',bodyW:3.25,bodyH:6,legLen:6,armLen:4.5,headSize:.5,hue:300,sat:40,lit:64,clothHue:290},
+  Monk:{earType:'round',earSize:2,hornType:'none',tailType:'none',hairType:'none',snout:0,
+    cloth:'robe',belt:true,chest:'none',helmet:'none',boots:false,shoes:false,spikes:'none',tex:'smooth',
+    attackStyle:'claw',bodyW:3.5,bodyH:6,legLen:6,armLen:5,headSize:.55,headRound:.92,hue:32,sat:24,lit:58,clothHue:32},
+  Barbarian:{earType:'round',earSize:2,hornType:'none',tailType:'none',hairType:'mohawk',hairHue:15,snout:0,
+    cloth:'none',belt:true,chest:'none',helmet:'none',pauldrons:true,boots:true,shoes:false,spikes:'none',tex:'fur',texAmt:.5,
+    attackStyle:'slash',bodyW:4.5,bodyH:6.5,taper:-.3,legLen:6,legThick:2,armLen:5,armThick:1.6,headSize:.45,hue:20,sat:30,lit:56},
+  Noble:{earType:'round',earSize:2,hornType:'none',tailType:'none',hairType:'bun',hairHue:45,snout:0,
+    cloth:'robe',belt:true,chest:'none',helmet:'none',boots:false,shoes:true,gauntlets:false,spikes:'none',tex:'smooth',
+    attackStyle:'cast',bodyW:3.25,bodyH:6.5,legLen:6.5,armLen:4.5,headSize:.5,hue:270,sat:38,lit:62,clothHue:275,metalHue:45},
+  Child:{earType:'round',earSize:2.5,hornType:'none',tailType:'none',hairType:'bowl',hairHue:28,snout:0,
+    cloth:'shirt',belt:false,chest:'none',helmet:'none',boots:false,shoes:true,spikes:'none',tex:'smooth',
+    attackStyle:'stab',bodyW:3,bodyH:4,taper:-.15,legLen:5,armLen:4,headSize:.9,headRound:.92,footSize:1.9,hue:30,sat:40,lit:68},
+  Wanderer:{earType:'pointed',earSize:2.5,hornType:'none',tailType:'none',hairType:'fringe',hairHue:12,snout:0,
+    cloth:'robe',belt:true,chest:'none',helmet:'none',boots:true,shoes:true,spikes:'none',tex:'smooth',
+    attackStyle:'stab',bodyW:3.5,bodyH:6,legLen:6,armLen:4.5,headSize:.5,hue:35,sat:22,lit:52,clothHue:35},
 };
 
 function rasterToImageData(r){
@@ -16024,6 +16056,13 @@ const Creator = (function(){
     hardy:{n:'Hardy',d:'faster stamina'},
   };
   const PARTS=[['earType','Ears'],['hornType','Horns'],['hairType','Hair'],['tailType','Tail'],['cloth','Garment'],['tex','Skin']];
+  // body-part size sliders (brought back from the Creature Forge)
+  const PROPS=[['bodyH','Height'],['bodyW','Width'],['taper','Torso'],['bodyRound','Round'],
+    ['headSize','Head'],['headRound','Head round'],['snout','Snout'],
+    ['earSize','Ear size'],['hornSize','Horn size'],
+    ['armLen','Arm len'],['armThick','Arm thick'],['handSize','Hands'],
+    ['legLen','Leg len'],['legThick','Leg thick'],['stance','Stance'],['footSize','Feet'],
+    ['tailSize','Tail size']];
   const TRAIT_KEYS=['brave','kind','creative','curious','ambitious','hardworking','charming','cheerful','loyal','lucky','commanding','dreamer','passionate','grumpy','stubborn','rebellious'];
   const MAXTRAITS=3, MAXABIL=2;
 
@@ -16067,9 +16106,10 @@ const Creator = (function(){
       <div class="frow"><button class="btn" id="fRand">🎲 Surprise me</button><button class="btn" id="fSpin">↻ Turn</button></div>
       <div class="fsec">Kind</div><div class="chips" id="fPresets"></div>
       <div class="fsec">Form</div><div id="fParts"></div>
+      <div class="fsec">Proportions <span id="fPropReset" style="float:right;color:#9a8fb0;cursor:pointer;letter-spacing:0;text-transform:none">reset ↺</span></div><div id="fProps"></div>
+      <div class="fsec">Colour</div>
       <div class="prow"><label>Hue</label><input type="range" id="fHue" min="0" max="360" step="1"></div>
       <div class="prow"><label>Vividness</label><input type="range" id="fSat" min="0" max="100" step="1"></div>
-      <div class="prow"><label>Build</label><input type="range" id="fSize" min="5.5" max="9.5" step="0.5"></div>
       <div class="fsec">Nature — pick up to ${MAXTRAITS}</div><div class="chips" id="fTraits"></div>
       <div class="fsec">Gift — pick up to ${MAXABIL}</div><div class="chips" id="fAbil"></div>
       <button id="fEnter">Shape your world →</button>
@@ -16099,10 +16139,19 @@ const Creator = (function(){
     for(const k in ABIL){ const b=document.createElement('button'); b.className='chip';
       b.innerHTML=ABIL[k].n+'<small>'+ABIL[k].d+'</small>'; b.dataset.abil=k;
       b.onclick=()=>toggleAbil(k,b); ac.appendChild(b); }
+    // proportion sliders (min/max/step read from the forge schema)
+    const props=$('fProps');
+    for(const [k,label] of PROPS){ const s=CF.SCHEMA.find(x=>x.k===k); if(!s)continue;
+      const row=document.createElement('div'); row.className='prow';
+      const l=document.createElement('label'); l.textContent=label;
+      const inp=document.createElement('input'); inp.type='range'; inp.id='fprop_'+k;
+      inp.min=s.min; inp.max=s.max; inp.step=s.st;
+      inp.oninput=()=>{ params[k]=+inp.value; rebuild(); };
+      row.appendChild(l); row.appendChild(inp); props.appendChild(row); }
+    $('fPropReset').onclick=()=>{ const d=CF.defaultParams(); for(const[k] of PROPS)params[k]=d[k]; rebuild(); syncControls(); };
     // sliders
     $('fHue').oninput=()=>{ params.hue=+$('fHue').value; rebuild(); };
     $('fSat').oninput=()=>{ params.sat=+$('fSat').value; rebuild(); };
-    $('fSize').oninput=()=>{ params.bodyH=+$('fSize').value; rebuild(); };
     $('fRand').onclick=randomize;
     $('fSpin').onclick=()=>{ pvDir=(pvDir+1)%8; };
     $('fEnter').onclick=enter;
@@ -16110,7 +16159,8 @@ const Creator = (function(){
 
   function syncControls(){
     for(const [k] of PARTS){ const sel=$('fpart_'+k); if(sel)sel.value=params[k]; }
-    $('fHue').value=params.hue; $('fSat').value=params.sat; $('fSize').value=params.bodyH;
+    for(const [k] of PROPS){ const inp=$('fprop_'+k); if(inp&&params[k]!=null)inp.value=params[k]; }
+    $('fHue').value=params.hue; $('fSat').value=params.sat;
     for(const b of $('fPresets').children) b.classList.toggle('on', b.dataset.preset===params._preset);
   }
   function setPreset(name){ params=baseParams(name); params._preset=name; rebuild(); syncControls(); }
