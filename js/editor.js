@@ -217,6 +217,89 @@ function init(){
   for(const k of A().AF.KEYS) chips.push(btn((glyphs[k]||'🐾')+' '+k,()=>A().spawnAnimal(k)));
   sp.appendChild(row(...chips));
   drawAnimalPreview();
+  buildSpaceForge();
 }
-return {init,setOpen,get open(){return open}};
+
+/* ================= SPACE FORGE =================
+   Tweak the procedural generation of enclosed spaces — buildings and
+   dungeons alike — and watch the layout redraw live. */
+const SF={mode:'rooms',W:44,H:32,roomCount:7,roomMin:4,roomMax:10,hallWidth:2,
+          caveFill:0.56,caveSteps:4,structMix:0.6,mat:'brick',floorMat:'plank',
+          mat2:'cutstone',natural:false,seed:1234};
+let sfSpace=null;
+function sfSlider(label,key,min,max,step,fmt){
+  const wrap=document.createElement('div');
+  wrap.style.cssText='display:flex;align-items:center;gap:8px;margin:3px 0';
+  const l=document.createElement('span');
+  l.style.cssText='flex:0 0 96px;font-size:10.5px;color:#8fa885';
+  const val=()=>fmt?fmt(SF[key]):SF[key];
+  l.textContent=label+' '+val();
+  const inp=document.createElement('input');
+  inp.type='range';inp.min=min;inp.max=max;inp.step=step;inp.value=SF[key];
+  inp.style.cssText='flex:1;height:5px;border-radius:99px;background:#243021;-webkit-appearance:none;appearance:none;outline:none';
+  inp.oninput=()=>{SF[key]=+inp.value;l.textContent=label+' '+val();sfRender();};
+  wrap.appendChild(l);wrap.appendChild(inp);
+  return wrap;
+}
+function sfSelect(label,key,opts){
+  const wrap=document.createElement('div');
+  wrap.style.cssText='display:flex;align-items:center;gap:8px;margin:3px 0';
+  const l=document.createElement('span');
+  l.style.cssText='flex:0 0 96px;font-size:10.5px;color:#8fa885';l.textContent=label;
+  const sel=document.createElement('select');
+  sel.style.cssText='flex:1;background:#0c150a;border:1.5px solid #2c4a23;color:#a0e08f;border-radius:6px;padding:4px 6px;font-size:11px';
+  for(const o of opts){const op=document.createElement('option');op.value=o;op.textContent=o;sel.appendChild(op);}
+  sel.value=SF[key]; sel.onchange=()=>{SF[key]=sel.value;sfRender();};
+  wrap.appendChild(l);wrap.appendChild(sel);
+  return wrap;
+}
+function sfRender(){
+  const cv=$('edSpaceCv'); if(!cv||typeof Interior==='undefined')return;
+  const g=cv.getContext('2d'); g.imageSmoothingEnabled=false;
+  g.fillStyle='#0c150a'; g.fillRect(0,0,cv.width,cv.height);
+  try{
+    sfSpace=Interior.generate({mode:SF.mode,W:SF.W|0,H:SF.H|0,res:8,seed:SF.seed|0,
+      roomCount:SF.roomCount|0,roomMin:SF.roomMin|0,roomMax:SF.roomMax|0,hallWidth:SF.hallWidth|0,
+      caveFill:SF.caveFill,caveSteps:SF.caveSteps|0,structMix:SF.structMix,
+      mat:SF.mat,mat2:SF.mat2,floorMat:SF.floorMat,natural:SF.mode==='cave',
+      edge:SF.mode==='cave'?'rough':'beveled'});
+    const bg=sfSpace.bake();
+    const s=Math.min(cv.width/bg.width,cv.height/bg.height);
+    g.drawImage(bg,0,0,bg.width,bg.height,
+      ((cv.width-bg.width*s)/2)|0,((cv.height-bg.height*s)/2)|0,(bg.width*s)|0,(bg.height*s)|0);
+    let wall=0; for(let i=0;i<sfSpace.W*sfSpace.H;i++) if(sfSpace.solid[i])wall++;
+    const inf=$('edSpaceInfo');
+    if(inf) inf.innerHTML='<b style="color:#a0e08f">'+SF.mode+'</b><br>'+
+      SF.W+'×'+SF.H+' tiles<br>rooms: '+sfSpace.rooms.length+
+      '<br>open: '+sfSpace.openCells().length+'<br>wall: '+Math.round(wall/(sfSpace.W*sfSpace.H)*100)+'%'+
+      '<br>walls: '+SF.mat+'<br>floors: '+(SF.floorMat||SF.mat);
+  }catch(e){ g.fillStyle='#d66'; g.font='10px monospace'; g.fillText('gen error: '+e.message,6,16); }
+}
+function buildSpaceForge(){
+  const host=$('edSpaceCtl'); if(!host||typeof Interior==='undefined')return;
+  const mats=(typeof StructForge!=='undefined')?StructForge.PRESETS:['cutstone'];
+  host.appendChild(row(
+    btn('🏛 Rooms',()=>{SF.mode='rooms';sfRender()}),
+    btn('🕳 Cave',()=>{SF.mode='cave';sfRender()}),
+    btn('🎲 Reseed',()=>{SF.seed=(Math.random()*1e6)|0;sfRender()})
+  ));
+  host.appendChild(sfSlider('Width','W',18,64,1));
+  host.appendChild(sfSlider('Height','H',14,48,1));
+  host.appendChild(sfSlider('Rooms','roomCount',1,14,1));
+  host.appendChild(sfSlider('Room min','roomMin',3,9,1));
+  host.appendChild(sfSlider('Room max','roomMax',4,16,1));
+  host.appendChild(sfSlider('Hall width','hallWidth',1,4,1));
+  host.appendChild(sfSlider('Cave fill','caveFill',0.40,0.68,0.005,v=>v.toFixed(3)));
+  host.appendChild(sfSlider('Cave smooth','caveSteps',1,6,1));
+  host.appendChild(sfSlider('Built mix','structMix',0,1,0.05,v=>v.toFixed(2)));
+  host.appendChild(sfSelect('Wall stuff','mat',mats));
+  host.appendChild(sfSelect('Floor stuff','floorMat',mats));
+  host.appendChild(sfSelect('Accent stuff','mat2',mats));
+  host.appendChild(row(
+    btn('🏠 Raise a building here',()=>{ if(A().forgeBuildingHere){ const r=A().forgeBuildingHere(SF); setOpen(false);
+        if(r&&r.ok===false)alert(r.why||'no room for it here'); } },'big')
+  ));
+  sfRender();
+}
+return {init,setOpen,get open(){return open},get spaceParams(){return SF},sfRender};
 })();

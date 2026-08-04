@@ -582,6 +582,15 @@ button:active{transform:translateY(1px)}
     <div id="edAnimalBtns"></div>
     <div id="edAnimalSpecies"></div>
   </div>
+  <div class="grp" id="edSpaceGroup">
+    <div class="grpTitle">Space Forge — buildings &amp; dungeons</div>
+    <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <canvas id="edSpaceCv" width="240" height="180"
+        style="background:#0c150a;border:1.5px solid #2c4a23;border-radius:6px;image-rendering:pixelated;width:240px;height:180px"></canvas>
+      <div id="edSpaceInfo" style="font-size:10.5px;color:#8fa885;line-height:1.6;min-width:120px"></div>
+    </div>
+    <div id="edSpaceCtl"></div>
+  </div>
   <div class="grp" id="edSelected"></div>
 </div>
 
@@ -13880,6 +13889,34 @@ return {
   fpToggle:()=>{toggleSurfaceFP();return sfpActive;},
   fpSet:(on)=>{setSurfaceFP(on);return sfpActive;},
   fpLook:(dy)=>{sfpYaw+=dy;},
+  // step into a space built from the Space Forge's tuned settings
+  forgeBuildingHere:(P)=>{
+    if(typeof Interior==='undefined')return {ok:false,why:'engine missing'};
+    const b={id:-999,tp:'biz',x:(hero.x/TILE)|0,y:(hero.y/TILE)|0,w:3,h:3,done:true,gone:false,decay:0,stock:{}};
+    const gw=Math.max(12,P.W|0), gh=Math.max(10,P.H|0);
+    const space=Interior.generate({mode:P.mode,W:gw,H:gh,res:TILE,seed:(P.seed|0)||7,
+      roomCount:P.roomCount|0,roomMin:P.roomMin|0,roomMax:P.roomMax|0,hallWidth:P.hallWidth|0,
+      caveFill:P.caveFill,caveSteps:P.caveSteps|0,structMix:P.structMix,
+      mat:P.mat,mat2:P.mat2,floorMat:P.floorMat,natural:P.mode==='cave',
+      grassHex:surfSkin?surfSkin.grass:'#4a7a3a', dirtHex:surfSkin?surfSkin.dirt:'#6a563a',
+      edge:P.mode==='cave'?'rough':'beveled'});
+    const solid=new Uint8Array(gw*gh); for(let i=0;i<gw*gh;i++)solid[i]=space.solid[i];
+    const si=(x,y)=>y*gw+x, dcx=(gw/2)|0;
+    const sp=space.spawnPoint();
+    const intr={b,gw,gh,solid,si,door:[dcx,gh-1],doorGap:[dcx,dcx-1],furniture:[],occupants:[],
+      traps:[],foes:[],loot:[],decay:0,wallMask:solid,breakable:null,wallHp:null,breakBase:16,
+      rooms:space.rooms.map(r=>({x:r.x,y:r.y,w:r.w,h:r.h,ax:r.cx,ay:r.cy})),space,
+      name:'a forged '+(P.mode==='cave'?'hollow':'hall'),floor:'#5a4230',wall:'#3a2f22'};
+    bakeInteriorBg(intr);
+    hero._sx=hero.x;hero._sy=hero.y;hero._scz=cam.z;
+    interior=intr;
+    hero.x=sp[0];hero.y=sp[1];hero.moving=false;
+    cam.x=hero.x;cam.y=hero.y;cam.z=Math.max(2.2,cam.z);
+    stick=null;inDialog=false;follow=false;
+    sfpBindOnce(); setSurfaceFP(false); fpShowToggle(true);
+    toast('You step into '+intr.name+'.');
+    return {ok:true,rooms:intr.rooms.length,gw,gh};
+  },
   interiorSpace:()=>{ const I=interior; if(!I)return null;
     if(!I.space) return {engine:false};
     const sp=I.space, W=sp.W, H=sp.H;
@@ -13887,7 +13924,8 @@ return {
     let stuck=0, open=0;
     for(let y=0;y<H;y++)for(let x=0;x<W;x++){ if(sp.solid[y*W+x])continue; open++;
       if(sp.blockedAt((x+0.5)*sp.res,(y+0.5)*sp.res)) stuck++; }
-    const d=I.door, sx=d[0], sy=d[1]-1;
+    const d=I.door; let sx=d[0], sy=d[1]-1;
+    if(sp.solid[sy*W+sx]){ const p=sp.spawnPoint(); sx=(p[0]/sp.res)|0; sy=(p[1]/sp.res)|0; }
     const seen=new Set(); const st=[[sx,sy]]; seen.add(sy*W+sx);
     while(st.length){ const[x,y]=st.pop();
       for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ const nx=x+dx,ny=y+dy;
@@ -16569,8 +16607,91 @@ function init(){
   for(const k of A().AF.KEYS) chips.push(btn((glyphs[k]||'🐾')+' '+k,()=>A().spawnAnimal(k)));
   sp.appendChild(row(...chips));
   drawAnimalPreview();
+  buildSpaceForge();
 }
-return {init,setOpen,get open(){return open}};
+
+/* ================= SPACE FORGE =================
+   Tweak the procedural generation of enclosed spaces — buildings and
+   dungeons alike — and watch the layout redraw live. */
+const SF={mode:'rooms',W:44,H:32,roomCount:7,roomMin:4,roomMax:10,hallWidth:2,
+          caveFill:0.56,caveSteps:4,structMix:0.6,mat:'brick',floorMat:'plank',
+          mat2:'cutstone',natural:false,seed:1234};
+let sfSpace=null;
+function sfSlider(label,key,min,max,step,fmt){
+  const wrap=document.createElement('div');
+  wrap.style.cssText='display:flex;align-items:center;gap:8px;margin:3px 0';
+  const l=document.createElement('span');
+  l.style.cssText='flex:0 0 96px;font-size:10.5px;color:#8fa885';
+  const val=()=>fmt?fmt(SF[key]):SF[key];
+  l.textContent=label+' '+val();
+  const inp=document.createElement('input');
+  inp.type='range';inp.min=min;inp.max=max;inp.step=step;inp.value=SF[key];
+  inp.style.cssText='flex:1;height:5px;border-radius:99px;background:#243021;-webkit-appearance:none;appearance:none;outline:none';
+  inp.oninput=()=>{SF[key]=+inp.value;l.textContent=label+' '+val();sfRender();};
+  wrap.appendChild(l);wrap.appendChild(inp);
+  return wrap;
+}
+function sfSelect(label,key,opts){
+  const wrap=document.createElement('div');
+  wrap.style.cssText='display:flex;align-items:center;gap:8px;margin:3px 0';
+  const l=document.createElement('span');
+  l.style.cssText='flex:0 0 96px;font-size:10.5px;color:#8fa885';l.textContent=label;
+  const sel=document.createElement('select');
+  sel.style.cssText='flex:1;background:#0c150a;border:1.5px solid #2c4a23;color:#a0e08f;border-radius:6px;padding:4px 6px;font-size:11px';
+  for(const o of opts){const op=document.createElement('option');op.value=o;op.textContent=o;sel.appendChild(op);}
+  sel.value=SF[key]; sel.onchange=()=>{SF[key]=sel.value;sfRender();};
+  wrap.appendChild(l);wrap.appendChild(sel);
+  return wrap;
+}
+function sfRender(){
+  const cv=$('edSpaceCv'); if(!cv||typeof Interior==='undefined')return;
+  const g=cv.getContext('2d'); g.imageSmoothingEnabled=false;
+  g.fillStyle='#0c150a'; g.fillRect(0,0,cv.width,cv.height);
+  try{
+    sfSpace=Interior.generate({mode:SF.mode,W:SF.W|0,H:SF.H|0,res:8,seed:SF.seed|0,
+      roomCount:SF.roomCount|0,roomMin:SF.roomMin|0,roomMax:SF.roomMax|0,hallWidth:SF.hallWidth|0,
+      caveFill:SF.caveFill,caveSteps:SF.caveSteps|0,structMix:SF.structMix,
+      mat:SF.mat,mat2:SF.mat2,floorMat:SF.floorMat,natural:SF.mode==='cave',
+      edge:SF.mode==='cave'?'rough':'beveled'});
+    const bg=sfSpace.bake();
+    const s=Math.min(cv.width/bg.width,cv.height/bg.height);
+    g.drawImage(bg,0,0,bg.width,bg.height,
+      ((cv.width-bg.width*s)/2)|0,((cv.height-bg.height*s)/2)|0,(bg.width*s)|0,(bg.height*s)|0);
+    let wall=0; for(let i=0;i<sfSpace.W*sfSpace.H;i++) if(sfSpace.solid[i])wall++;
+    const inf=$('edSpaceInfo');
+    if(inf) inf.innerHTML='<b style="color:#a0e08f">'+SF.mode+'</b><br>'+
+      SF.W+'×'+SF.H+' tiles<br>rooms: '+sfSpace.rooms.length+
+      '<br>open: '+sfSpace.openCells().length+'<br>wall: '+Math.round(wall/(sfSpace.W*sfSpace.H)*100)+'%'+
+      '<br>walls: '+SF.mat+'<br>floors: '+(SF.floorMat||SF.mat);
+  }catch(e){ g.fillStyle='#d66'; g.font='10px monospace'; g.fillText('gen error: '+e.message,6,16); }
+}
+function buildSpaceForge(){
+  const host=$('edSpaceCtl'); if(!host||typeof Interior==='undefined')return;
+  const mats=(typeof StructForge!=='undefined')?StructForge.PRESETS:['cutstone'];
+  host.appendChild(row(
+    btn('🏛 Rooms',()=>{SF.mode='rooms';sfRender()}),
+    btn('🕳 Cave',()=>{SF.mode='cave';sfRender()}),
+    btn('🎲 Reseed',()=>{SF.seed=(Math.random()*1e6)|0;sfRender()})
+  ));
+  host.appendChild(sfSlider('Width','W',18,64,1));
+  host.appendChild(sfSlider('Height','H',14,48,1));
+  host.appendChild(sfSlider('Rooms','roomCount',1,14,1));
+  host.appendChild(sfSlider('Room min','roomMin',3,9,1));
+  host.appendChild(sfSlider('Room max','roomMax',4,16,1));
+  host.appendChild(sfSlider('Hall width','hallWidth',1,4,1));
+  host.appendChild(sfSlider('Cave fill','caveFill',0.40,0.68,0.005,v=>v.toFixed(3)));
+  host.appendChild(sfSlider('Cave smooth','caveSteps',1,6,1));
+  host.appendChild(sfSlider('Built mix','structMix',0,1,0.05,v=>v.toFixed(2)));
+  host.appendChild(sfSelect('Wall stuff','mat',mats));
+  host.appendChild(sfSelect('Floor stuff','floorMat',mats));
+  host.appendChild(sfSelect('Accent stuff','mat2',mats));
+  host.appendChild(row(
+    btn('🏠 Raise a building here',()=>{ if(A().forgeBuildingHere){ const r=A().forgeBuildingHere(SF); setOpen(false);
+        if(r&&r.ok===false)alert(r.why||'no room for it here'); } },'big')
+  ));
+  sfRender();
+}
+return {init,setOpen,get open(){return open},get spaceParams(){return SF},sfRender};
 })();
 
 </script>

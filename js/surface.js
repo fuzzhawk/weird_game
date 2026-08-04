@@ -9377,6 +9377,34 @@ return {
   fpToggle:()=>{toggleSurfaceFP();return sfpActive;},
   fpSet:(on)=>{setSurfaceFP(on);return sfpActive;},
   fpLook:(dy)=>{sfpYaw+=dy;},
+  // step into a space built from the Space Forge's tuned settings
+  forgeBuildingHere:(P)=>{
+    if(typeof Interior==='undefined')return {ok:false,why:'engine missing'};
+    const b={id:-999,tp:'biz',x:(hero.x/TILE)|0,y:(hero.y/TILE)|0,w:3,h:3,done:true,gone:false,decay:0,stock:{}};
+    const gw=Math.max(12,P.W|0), gh=Math.max(10,P.H|0);
+    const space=Interior.generate({mode:P.mode,W:gw,H:gh,res:TILE,seed:(P.seed|0)||7,
+      roomCount:P.roomCount|0,roomMin:P.roomMin|0,roomMax:P.roomMax|0,hallWidth:P.hallWidth|0,
+      caveFill:P.caveFill,caveSteps:P.caveSteps|0,structMix:P.structMix,
+      mat:P.mat,mat2:P.mat2,floorMat:P.floorMat,natural:P.mode==='cave',
+      grassHex:surfSkin?surfSkin.grass:'#4a7a3a', dirtHex:surfSkin?surfSkin.dirt:'#6a563a',
+      edge:P.mode==='cave'?'rough':'beveled'});
+    const solid=new Uint8Array(gw*gh); for(let i=0;i<gw*gh;i++)solid[i]=space.solid[i];
+    const si=(x,y)=>y*gw+x, dcx=(gw/2)|0;
+    const sp=space.spawnPoint();
+    const intr={b,gw,gh,solid,si,door:[dcx,gh-1],doorGap:[dcx,dcx-1],furniture:[],occupants:[],
+      traps:[],foes:[],loot:[],decay:0,wallMask:solid,breakable:null,wallHp:null,breakBase:16,
+      rooms:space.rooms.map(r=>({x:r.x,y:r.y,w:r.w,h:r.h,ax:r.cx,ay:r.cy})),space,
+      name:'a forged '+(P.mode==='cave'?'hollow':'hall'),floor:'#5a4230',wall:'#3a2f22'};
+    bakeInteriorBg(intr);
+    hero._sx=hero.x;hero._sy=hero.y;hero._scz=cam.z;
+    interior=intr;
+    hero.x=sp[0];hero.y=sp[1];hero.moving=false;
+    cam.x=hero.x;cam.y=hero.y;cam.z=Math.max(2.2,cam.z);
+    stick=null;inDialog=false;follow=false;
+    sfpBindOnce(); setSurfaceFP(false); fpShowToggle(true);
+    toast('You step into '+intr.name+'.');
+    return {ok:true,rooms:intr.rooms.length,gw,gh};
+  },
   interiorSpace:()=>{ const I=interior; if(!I)return null;
     if(!I.space) return {engine:false};
     const sp=I.space, W=sp.W, H=sp.H;
@@ -9384,7 +9412,8 @@ return {
     let stuck=0, open=0;
     for(let y=0;y<H;y++)for(let x=0;x<W;x++){ if(sp.solid[y*W+x])continue; open++;
       if(sp.blockedAt((x+0.5)*sp.res,(y+0.5)*sp.res)) stuck++; }
-    const d=I.door, sx=d[0], sy=d[1]-1;
+    const d=I.door; let sx=d[0], sy=d[1]-1;
+    if(sp.solid[sy*W+sx]){ const p=sp.spawnPoint(); sx=(p[0]/sp.res)|0; sy=(p[1]/sp.res)|0; }
     const seen=new Set(); const st=[[sx,sy]]; seen.add(sy*W+sx);
     while(st.length){ const[x,y]=st.pop();
       for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ const nx=x+dx,ny=y+dy;
