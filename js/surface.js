@@ -4878,8 +4878,25 @@ function paintCellTexture(c,x,y,solidMask){ paintCellTextureTo(c,x,y,solidMask,s
 // materials — the same texture engine as the overworld, but in indoor materials
 // (planks, tile, concrete, metal, carpet, chrome) chosen per building type, with
 // derelict/overgrown variants for degraded ruins.
+// which structural stuff a building is made of — walls vs the boards underfoot
+const BLD_BUILD={
+ shelter:{wall:'timber', floor:'plank'},   home:{wall:'timber', floor:'plank'},
+ biz:{wall:'brick',      floor:'plank'},   apartment:{wall:'brick', floor:'tile'},
+ warehouse:{wall:'concrete',floor:'concrete'}, factory:{wall:'metal', floor:'concrete'},
+ venue:{wall:'cutstone', floor:'marble'},  highrise:{wall:'concrete',floor:'tile'},
+ arcology:{wall:'metal',  floor:'tile'},   grave:{wall:'cutstone', floor:'cutstone'},
+ park:{wall:'adobe',      floor:'adobe'},
+};
+function interiorBuild(b,decay){
+ if(decay===1) return {wall:'rustplate', floor:'metal'};      // gutted cyber shell
+ if(decay===2) return {wall:'roughstone',floor:'adobe'};      // ancient overgrown ruin
+ return BLD_BUILD[b.tp]||{wall:'cutstone',floor:'plank'};
+}
 function bakeInteriorBg(intr){
  const b=intr.b, decay=intr.decay||0;
+ // the unified engine bakes the whole space — floors, walls and their
+ // corner-smoothed joins — in one pass
+ if(intr.space){ intr.bg=intr.space.bake(); intr.mat=intr.space.opts.mat; return; }
  const mat = decay===1?'cyber' : decay===2?'ancient' : TileGen.interiorMatFor(b.tp);
  const Wpx=intr.gw*TILE, Hpx=intr.gh*TILE;
  const cv=document.createElement('canvas');cv.width=Wpx;cv.height=Hpx;
@@ -6271,15 +6288,53 @@ function makeInterior(b){
  // a ruin sprawls into a mini-dungeon; give the room generator extra breathing room
  const useRooms = decay>=1;
  // ruined interiors sprawl into big multi-room mini-dungeons; lived-in ones stay cosy
- const gw = useRooms ? clamp(b.w*4+14, 20, 46) : clamp(b.w*3+4, 10, mega?26:17);
- const gh = useRooms ? clamp(b.h*4+12, 18, 40) : clamp(b.h*3+3, 9, mega?21:13);
+ // every interior is bigger on the inside — room enough for several chambers
+ // joined by hallways, with ruins sprawling furthest of all
+ const gw = useRooms ? clamp(b.w*4+16, 26, 48) : clamp(b.w*4+12, 22, mega?40:30);
+ const gh = useRooms ? clamp(b.h*4+14, 22, 42) : clamp(b.h*4+10, 20, mega?34:26);
  const solid=new Uint8Array(gw*gh), si=(x,y)=>y*gw+x;
+ const dcx=(gw/2)|0;
+ const rng=U.mulberry32(U.hashStr('interior-'+b.id+'-'+decay));
+ let rooms=null, _intrSpace=null;
+
+ /* ---- the UNIFIED INTERIOR ENGINE builds the space ----
+    Rooms are carved out of a solid canvas and joined by hallways; walls and
+    floors are structural tiles that corner-smooth into one another. */
+ if(typeof Interior!=='undefined'){
+  const bm=interiorBuild(b,decay);
+  const space=Interior.generate({
+   mode:'rooms', W:gw, H:gh, res:TILE,
+   seed:(U.hashStr('int-'+b.id+'-'+decay)>>>0),
+   roomCount:clamp(Math.round(gw*gh/48),4,12),
+   roomMin:3, roomMax:Math.max(5,Math.min(11,(Math.min(gw,gh)/2.4)|0)),
+   hallWidth:2, loops:decay?2:1,
+   mat:bm.wall, mat2:(decay===2?'timber':'cutstone'),
+   floorMat:bm.floor, floorMat2:(decay?'roughstone':'tile'),
+   natural:decay===2, structMix:decay===2?0.55:1,
+   grassHex:surfSkin?surfSkin.grass:'#4a7a3a', dirtHex:surfSkin?surfSkin.dirt:'#6a563a',
+   edge:'beveled', roundRadius:2,
+  });
+  for(let i=0;i<gw*gh;i++) solid[i]=space.solid[i];
+  // carve the doorway back out of the south wall and give it a lobby
+  const dy=gh-1;
+  for(const x of [dcx-1,dcx]){ if(x>0&&x<gw-1){ solid[si(x,dy)]=0; space.solid[si(x,dy)]=0; space.wallIdx[si(x,dy)]=15;
+    for(let k=1;k<=3;k++){ const yy=dy-k; if(yy>0){ solid[si(x,yy)]=0; space.solid[si(x,yy)]=0; space.wallIdx[si(x,yy)]=15; } } } }
+  // join the lobby to the nearest room so the door always leads somewhere
+  if(space.rooms.length){ let best=space.rooms[0],bd=1e9;
+   for(const r of space.rooms){ const d=(r.cx-dcx)*(r.cx-dcx)+(r.cy-dy)*(r.cy-dy); if(d<bd){bd=d;best=r;} }
+   let cy2=dy-3; while(cy2>best.cy){ for(const x of [dcx-1,dcx]) if(x>0&&x<gw-1){ solid[si(x,cy2)]=0; space.solid[si(x,cy2)]=0; space.wallIdx[si(x,cy2)]=15; } cy2--; }
+   const x0=Math.min(dcx,best.cx), x1=Math.max(dcx,best.cx);
+   for(let x=x0;x<=x1;x++) if(x>0&&x<gw-1&&best.cy>0){ solid[si(x,best.cy)]=0; space.solid[si(x,best.cy)]=0; space.wallIdx[si(x,best.cy)]=15; }
+  }
+  rooms=space.rooms.map(r=>({x:r.x,y:r.y,w:r.w,h:r.h,ax:r.cx,ay:r.cy}));
+  _intrSpace=space;
+ }
+
+ if(_intrSpace){ /* the engine already shaped the space */ }
+ else {
  for(let x=0;x<gw;x++){solid[si(x,0)]=1;solid[si(x,gh-1)]=1}
  for(let y=0;y<gh;y++){solid[si(0,y)]=1;solid[si(gw-1,y)]=1}
- const dcx=(gw/2)|0;
  solid[si(dcx,gh-1)]=0;solid[si(dcx-1,gh-1)]=0;      // 2-wide doorway on the south wall
- const rng=U.mulberry32(U.hashStr('interior-'+b.id+'-'+decay));
- let rooms=null;
  if(useRooms){
   // ruined interiors become mini-dungeons: several polygon rooms + shaped halls
   rooms=carveRoomsInterior(gw,gh,solid,si,dcx,rng);
@@ -6291,6 +6346,7 @@ function makeInterior(b){
    if(wy<=1||wy>=gh-1)continue;
    for(let x=1;x<gw-1;x++){ if(x===dcx||x===dcx-1)continue; solid[si(x,wy)]=1; }
   }
+ }
  }
  // snapshot the STRUCTURAL walls before furniture — these become the rock walls
  const wallMask=solid.slice();
@@ -6309,7 +6365,7 @@ function makeInterior(b){
  const floor = cyber?'#161c28' : ancient?'#2a3122' : (FLOORS[b.tp]||'#5a4230');
  const wall  = cyber?'#0d1220' : ancient?'#20291a' : (WALLS[b.tp]||'#3a2f22');
  const intr={b,gw,gh,solid,si,door:[dcx,gh-1],doorGap:[dcx,dcx-1],furniture:[],occupants:[],
-   traps:[],foes:[],loot:[],decay,wallMask,breakable,wallHp,breakBase,rooms,
+   traps:[],foes:[],loot:[],decay,wallMask,breakable,wallHp,breakBase,rooms,space:_intrSpace,
    name:(cyber?'the derelict ':ancient?'the overgrown ':'')+(decay?enterLabel(b).replace(/^the /,''):enterLabel(b)),
    floor, wall};
  const rpick=a=>a[(rng()*a.length)|0];
@@ -6430,6 +6486,9 @@ function makeInterior(b){
 // open-looking floor tile
 function intCanStand(x,y){
  const intr=interior;if(!intr)return false;
+ // the unified engine is authoritative: it samples the very same per-pixel wall
+ // mask that was drawn, so nothing invisible can ever stop you
+ if(intr.space) return !intr.space.blockedAt(x,y);
  const tx=(x/TILE)|0,ty=(y/TILE)|0;
  if(tx<0||ty<0||tx>=intr.gw||ty>=intr.gh)return false;
  const blk=intr.wallMask||intr.solid;
@@ -9318,6 +9377,52 @@ return {
   fpToggle:()=>{toggleSurfaceFP();return sfpActive;},
   fpSet:(on)=>{setSurfaceFP(on);return sfpActive;},
   fpLook:(dy)=>{sfpYaw+=dy;},
+  // step into a space built from the Space Forge's tuned settings
+  forgeBuildingHere:(P)=>{
+    if(typeof Interior==='undefined')return {ok:false,why:'engine missing'};
+    const b={id:-999,tp:'biz',x:(hero.x/TILE)|0,y:(hero.y/TILE)|0,w:3,h:3,done:true,gone:false,decay:0,stock:{}};
+    const gw=Math.max(12,P.W|0), gh=Math.max(10,P.H|0);
+    const space=Interior.generate({mode:P.mode,W:gw,H:gh,res:TILE,seed:(P.seed|0)||7,
+      roomCount:P.roomCount|0,roomMin:P.roomMin|0,roomMax:P.roomMax|0,hallWidth:P.hallWidth|0,
+      caveFill:P.caveFill,caveSteps:P.caveSteps|0,structMix:P.structMix,
+      mat:P.mat,mat2:P.mat2,floorMat:P.floorMat,natural:P.mode==='cave',
+      grassHex:surfSkin?surfSkin.grass:'#4a7a3a', dirtHex:surfSkin?surfSkin.dirt:'#6a563a',
+      edge:P.mode==='cave'?'rough':'beveled'});
+    const solid=new Uint8Array(gw*gh); for(let i=0;i<gw*gh;i++)solid[i]=space.solid[i];
+    const si=(x,y)=>y*gw+x, dcx=(gw/2)|0;
+    const sp=space.spawnPoint();
+    const intr={b,gw,gh,solid,si,door:[dcx,gh-1],doorGap:[dcx,dcx-1],furniture:[],occupants:[],
+      traps:[],foes:[],loot:[],decay:0,wallMask:solid,breakable:null,wallHp:null,breakBase:16,
+      rooms:space.rooms.map(r=>({x:r.x,y:r.y,w:r.w,h:r.h,ax:r.cx,ay:r.cy})),space,
+      name:'a forged '+(P.mode==='cave'?'hollow':'hall'),floor:'#5a4230',wall:'#3a2f22'};
+    bakeInteriorBg(intr);
+    hero._sx=hero.x;hero._sy=hero.y;hero._scz=cam.z;
+    interior=intr;
+    hero.x=sp[0];hero.y=sp[1];hero.moving=false;
+    cam.x=hero.x;cam.y=hero.y;cam.z=Math.max(2.2,cam.z);
+    stick=null;inDialog=false;follow=false;
+    sfpBindOnce(); setSurfaceFP(false); fpShowToggle(true);
+    toast('You step into '+intr.name+'.');
+    return {ok:true,rooms:intr.rooms.length,gw,gh};
+  },
+  interiorSpace:()=>{ const I=interior; if(!I)return null;
+    if(!I.space) return {engine:false};
+    const sp=I.space, W=sp.W, H=sp.H;
+    // every open cell must be standable, and reachable from the door
+    let stuck=0, open=0;
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){ if(sp.solid[y*W+x])continue; open++;
+      if(sp.blockedAt((x+0.5)*sp.res,(y+0.5)*sp.res)) stuck++; }
+    const d=I.door; let sx=d[0], sy=d[1]-1;
+    if(sp.solid[sy*W+sx]){ const p=sp.spawnPoint(); sx=(p[0]/sp.res)|0; sy=(p[1]/sp.res)|0; }
+    const seen=new Set(); const st=[[sx,sy]]; seen.add(sy*W+sx);
+    while(st.length){ const[x,y]=st.pop();
+      for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){ const nx=x+dx,ny=y+dy;
+        if(nx<0||ny<0||nx>=W||ny>=H)continue; const ni=ny*W+nx;
+        if(sp.solid[ni]||seen.has(ni))continue; seen.add(ni); st.push([nx,ny]); } }
+    return {engine:true, gw:W, gh:H, rooms:I.rooms?I.rooms.length:0, open, stuck,
+            reachPct:open?Math.round(seen.size/open*100):0,
+            mat:sp.opts.mat, floorMat:sp.opts.floorMat, hasBg:!!I.bg};
+  },
   fpFront:()=>{ const a=sfpFrontAction(); return a?a.kind:null; },
   fpProbe:()=>{ const c=Math.cos(sfpYaw), s=Math.sin(sfpYaw); const out=[];
     for(const reach of [1.0,1.7,2.4]){ const tx=((hero.x+c*TILE*reach)/TILE)|0, ty=((hero.y+s*TILE*reach)/TILE)|0;

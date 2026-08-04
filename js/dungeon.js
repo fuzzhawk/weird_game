@@ -386,6 +386,7 @@ function populateRubble(rng){
 let dungTechCache={};
 function dungTechSprite(kind,variant){ const key=kind+'/'+variant; let s=dungTechCache[key];
   if(s===undefined){ try{ s=(typeof SceneryForge!=='undefined')?SceneryForge.bake(kind,'d'+variant,'cyber'):null; }catch(e){ s=null; } dungTechCache[key]=s; } return s; }
+let dungSpace=null, dungBg=null;    // the unified interior engine's floor
 let blockGrid=new Uint8Array(ROWS*COLS);
 const FACE_ROWS=2;
 let highCellArr=new Uint8Array(ROWS*COLS);
@@ -595,6 +596,35 @@ function genWorld(seedStr){
   // no dwellings in the Understory — nobody lives down here, only the dark
   // and what it hoards. (structures stay empty; terraces still shape the maze.)
   blockGrid=new Uint8Array(ROWS*COLS); structures=[];
+
+  /* ---- the UNIFIED INTERIOR ENGINE carves this floor ----
+     A cellular cavern of living rock, with a few built rooms of structural
+     stone stamped into the deep. The legacy tile arrays are derived from it
+     so everything downstream (regions, pathing, spawns) keeps working. */
+  if(typeof Interior!=='undefined'){
+    const cyber=(T.worldTheme==='cyberpunk');
+    dungSpace=Interior.generate({
+      mode:'cave', W:COLS, H:ROWS, res:RES,
+      seed:(hashSeed(seedStr)>>>0)||7,
+      caveFill:0.555+Math.min(0.03,floorIdx*0.008), caveSteps:4,
+      structMix:Math.min(0.85,0.35+floorIdx*0.12),
+      roomMin:4, hallWidth:2,
+      mat: cyber?'rustplate':(floorIdx>=3?'bone':'cutstone'),
+      mat2: cyber?'metal':'roughstone',
+      floorMat: cyber?'metal':'cutstone', floorMat2:null,
+      natural:true,
+      grassHex:T.grassColor||'#4a7a3a', dirtHex:T.dirtColor||'#6a563a',
+      edge:'rough', roundRadius:2,
+    });
+    for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+      const open=!dungSpace.solid[y*COLS+x];
+      tileMap[y][x]=open?15:0;
+      highCellArr[y*COLS+x]=0; faceCellArr[y*COLS+x]=0;
+      faceTopArr[y*COLS+x]=0; faceBaseArr[y*COLS+x]=0;
+    }
+    dungBg=dungSpace.bake();
+  } else dungSpace=null;
+
   mainRegion = largestInteriorRegion();
   regionSet = new Set(mainRegion.map(([y,x])=>y*COLS+x));
   variantMap = tileMap.map(row=>row.map(()=>Math.floor(rng()*NUM_VARIANTS)));
@@ -613,8 +643,10 @@ function walkable(px,py){
   if(px<0||py<0||px>=WORLD_W||py>=WORLD_H) return false;
   const cx=(px/RES)|0, cy=(py/RES)|0;
   const ci=cy*COLS+cx;
-  if(blockGrid[ci]) return false;
   if(rubbleGrid[ci]) return false;        // destroyable rock blocks until it's smashed
+  // the engine samples the very same per-pixel wall mask it drew
+  if(dungSpace) return !dungSpace.blockedAt(px,py);
+  if(blockGrid[ci]) return false;
   if(faceCellArr[ci]) return false;
   const m=collMasks[tileMap[cy][cx]];
   return m[((py-cy*RES)|0)*RES + ((px-cx*RES)|0)]===1;
@@ -1576,6 +1608,14 @@ setInterval(()=>{if(active)updBuffs()},500);
 function wx(x){ return x; }
 function wy(y){ return y; }
 function drawTerrain(){
+  // the unified engine bakes the whole floor in one canvas — blit the slab in view
+  if(dungBg){
+    const vw=W/camZ, vh=H/camZ;
+    const sx=Math.max(0,camX-RES), sy=Math.max(0,camY-RES);
+    const sw=Math.min(dungBg.width-sx, vw+RES*2), sh=Math.min(dungBg.height-sy, vh+RES*2);
+    if(sw>0&&sh>0) ctx.drawImage(dungBg, sx, sy, sw, sh, sx, sy, sw, sh);
+    return;
+  }
   const vw=W/camZ, vh=H/camZ;
   const startCol=Math.max(0,Math.floor(camX/RES)), endCol=Math.min(COLS,Math.ceil((camX+vw)/RES)+1);
   const startRow=Math.max(0,Math.floor(camY/RES)), endRow=Math.min(ROWS,Math.ceil((camY+vh)/RES)+1);
@@ -2105,6 +2145,7 @@ function buildDungeonFPAtlas(){
 }
 function fpSolid(cx,cy){
   if(cx<0||cy<0||cx>=COLS||cy>=ROWS) return true;
+  if(dungSpace) return !!dungSpace.solid[cy*COLS+cx];
   const i=cy*COLS+cx;
   // a wall is anything that isn't fully-open cave floor: the surrounding rock
   // (tileMap!==15), raised plateaus, cliff faces and structure blocks.
