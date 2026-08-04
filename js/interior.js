@@ -25,7 +25,7 @@ const Interior = (function(){
   const DEF={
     mode:'rooms', W:48, H:36, res:16, seed:1,
     roomCount:7, roomMin:5, roomMax:12, hallWidth:2, loops:2,
-    caveFill:0.50, caveSteps:5, structMix:0.35,
+    caveFill:0.56, caveSteps:4, structMix:0.35,
     mat:'cutstone', mat2:'plank', natural:false,
     floorMat:null, floorMat2:null,      // floors may be a different stuff than walls
     grassHex:'#4a7a3a', dirtHex:'#6a563a',
